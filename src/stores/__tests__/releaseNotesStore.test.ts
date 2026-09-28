@@ -367,6 +367,7 @@ describe('the notes table', () => {
       'issue 143', 'model storage folder', 'comfyui path not set',
       // Der Agent und sein Arbeitsordner (Discord 28.09.2026).
       'the button next to agent', 'pick a folder', 'no longer says filesystem reaches files anywhere',
+      'plain chat has no tool that reads your files', 'says to turn on agent',
     ]) {
       expect(prose, `${shipping}: nothing about "${anchor}"`).toContain(anchor)
     }

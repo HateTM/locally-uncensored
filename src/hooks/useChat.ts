@@ -33,6 +33,8 @@ import { useGenerationStore } from "../stores/generationStore"
 import { runInLane } from "../lib/run-slot"
 import { laneOf, currentLaneFacts } from "../lib/run-lane-of-model"
 import { resolveChatToolRoute, CHAT_TOOLS, type ChatToolRouteMsg } from "../lib/chat-tool-intent"
+import { asksForLocalFiles, LOCAL_FILES_NOTICE } from "../lib/local-file-intent"
+import { useChatNoticeStore } from "../stores/chatNoticeStore"
 import { getProviderForModel, getProviderIdFromModel } from "../api/providers"
 import { modelOutOfMode } from "../lib/modeGate"
 import { syncOllamaHealthFromError } from "../lib/sync-ollama-health"
@@ -644,6 +646,8 @@ export function useChat() {
     // like it does in Code. In PLAIN chat (no agent mode) a "/cmd" is still just
     // text: there is no tool catalog there for the templates to drive.
     if (store.activeConversationId && useAgentModeStore.getState().isActive(store.activeConversationId)) {
+      // Der Rat aus der Zeile unten ist befolgt, sobald im Agent gefragt wird.
+      useChatNoticeStore.getState().dismiss('agent-for-local-files')
       const slash = parseAgentCommand(content)
       if (slash?.command.handledLocally && slash.command.name === 'goal') {
         // Bookkeeping, not a prompt — never spend a round-trip on it.
@@ -669,6 +673,15 @@ export function useChat() {
         })
       }
       return sendAgentMessage(content, images)
+    }
+
+    // Discord 28.09.2026 (xambran): im normalen Chat liest kein Werkzeug die
+    // Dateien dieses Rechners, auch nicht mit Chat Tools, und das Modell sagt
+    // dann nur "I cannot access files". Die Zeile ueber dem Verlauf nennt den
+    // Weg dorthin (lib/local-file-intent.ts). Gesendet wird trotzdem, die Zeile
+    // ersetzt keine Antwort.
+    if (asksForLocalFiles(content)) {
+      useChatNoticeStore.getState().show('agent-for-local-files', LOCAL_FILES_NOTICE)
     }
 
     // Group chat v1 (Nurse KillJoy): two to four models answer in turn in

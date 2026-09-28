@@ -49,7 +49,10 @@ hold: fourteen video models and seven image models in the cloud catalogue.
   Agent now always shows where the agent works, Sandbox included, and one click
   leads to "Pick a folder…". When a file is refused because it is outside that
   folder, a line above the chat says what to do, and the model gets the same
-  hint. In Settings, Filesystem no longer claims to reach files anywhere.
+  hint. Plain chat has no tool that reads your files, and asking it for one
+  used to end with the model saying it cannot. It now brings up a line that
+  says to turn on Agent. In Settings, Filesystem no longer claims to reach
+  files anywhere.
 - **Typing in the prompt box no longer lags in long chats** (issue 139). Each
   key made the page lay out the whole visible chat twice to size the box, so
   the delay grew with the conversation. The box is now measured on a hidden
