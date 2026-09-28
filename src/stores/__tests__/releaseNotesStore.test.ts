@@ -307,17 +307,17 @@ describe('the notes table', () => {
     }
   })
 
-  it('the 3.0.2 entry names the Code tab hotfix and the new count, now that it is the shipping version', () => {
+  it('the 3.0.2 entry names the Code tab hotfix and the new count', () => {
     // Hotfix fuer Issue 138: package.json, Cargo.toml/.lock and
-    // tauri.conf.json all moved to 3.0.2 in one commit, so THIS is now the
-    // shipping entry the earlier existence guard checks. Same blind spot as
+    // tauri.conf.json all moved to 3.0.2 in one commit, so this was the
+    // shipping entry the earlier existence guard checked. Same blind spot as
     // 2.6.8/2.6.9/3.0.0/3.0.1 above: an anchor per statement, so a later edit
     // that drops one fails here instead of shipping quietly incomplete. The
     // two statements are the only two the CHANGELOG carries for 3.0.2.
-    const shipping = JSON.parse(
-      readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../../../package.json'), 'utf8'),
-    ).version as string
-    expect(shipping).toBe('3.0.2')
+    // 3.0.3 shipped on top of it (package.json), so this pins the 3.0.2 entry
+    // by its own version like the blocks above, and the 3.0.3 entry gets its
+    // own anchors below.
+    const shipping = '3.0.2'
     const prose = proseOf(shipping)
     for (const anchor of [
       // Der Fehler, sein Bericht und die Version, aus der er stammt.
@@ -328,6 +328,43 @@ describe('the notes table', () => {
       // Die neue Zaehlung, beide Gattungen und die Herkunft der Marke.
       'fourteen video models', 'seven image models', 'create studio shelf',
       'reported ten and three', 'never from the name',
+    ]) {
+      expect(prose, `${shipping}: nothing about "${anchor}"`).toContain(anchor)
+    }
+  })
+
+  it('the 3.0.3 entry names every fix of the hotfix, now that it is the shipping version', () => {
+    // Hotfix vom 28.09.2026: package.json, Cargo.toml/.lock and
+    // tauri.conf.json all moved to 3.0.3 in one commit, so THIS is now the
+    // shipping entry the earlier existence guard checks. Nothing but this
+    // sheet announces the release (no Discord post), so an anchor per fix:
+    // a later edit that drops one fails here instead of shipping quietly
+    // incomplete.
+    const shipping = JSON.parse(
+      readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../../../package.json'), 'utf8'),
+    ).version as string
+    expect(shipping).toBe('3.0.3')
+    const prose = proseOf(shipping)
+    for (const anchor of [
+      // Der Chat-Speicher: Ursache, Grenze, Umzug und die Rueckholung.
+      'kept inline in the saved chat history', '127 mib', 'moved over once',
+      'backup file still held',
+      'image previews load only near',
+      // Create: Familie aus dem Dateikopf, die neuen Familien, die Reparatur
+      // nach einer Frage, und was aus dem Picker faellt.
+      'value not in list', 'from the file header', 'chroma', 'hidream i1',
+      'sd 3.5', 'lumina 2', 'qwen-image-edit', 'each after one question',
+      'no longer shows up in the model picker',
+      // Edit, Galerie, Papierkorb, dunkle Kacheln.
+      'strength 1.00', 'stops at 0.95', 'edit drop zone', 'recycle bin',
+      'output folder stops growing', 'staying dark until the next start',
+      // GitHub 139 bis 143, jede Nummer beim Namen.
+      'issue 139', 'measured on a hidden copy',
+      'issue 140', 'the blue /loop bar', 'working folder locked',
+      'exceeds its context size',
+      'issue 141', 'collapsed sidebar',
+      'issue 142', 'names no size', 'upright frame',
+      'issue 143', 'model storage folder', 'comfyui path not set',
     ]) {
       expect(prose, `${shipping}: nothing about "${anchor}"`).toContain(anchor)
     }
