@@ -353,11 +353,11 @@ describe('the notes table', () => {
       // Create: Familie aus dem Dateikopf, die neuen Familien, die Reparatur
       // nach einer Frage, und was aus dem Picker faellt.
       'value not in list', 'from the file header', 'chroma', 'hidream i1',
-      'sd 3.5', 'lumina 2', 'qwen-image-edit', 'each after one question',
+      'sd 3.5', 'lumina 2', 'qwen-image-edit', 'asks once, then downloads',
       'no longer shows up in the model picker',
       // Edit, Galerie, Papierkorb, dunkle Kacheln.
       'strength 1.00', 'stops at 0.95', 'edit drop zone', 'recycle bin',
-      'output folder stops growing', 'staying dark until the next start',
+      'output folder stops growing', 'stay dark until the next start',
       // GitHub 139 bis 143, jede Nummer beim Namen.
       'issue 139', 'measured on a hidden copy',
       'issue 140', 'the blue /loop bar', 'working folder locked',
@@ -365,6 +365,8 @@ describe('the notes table', () => {
       'issue 141', 'collapsed sidebar',
       'issue 142', 'names no size', 'upright frame',
       'issue 143', 'model storage folder', 'comfyui path not set',
+      // Der Agent und sein Arbeitsordner (Discord 28.09.2026).
+      'the button next to agent', 'pick a folder', 'no longer says filesystem reaches files anywhere',
     ]) {
       expect(prose, `${shipping}: nothing about "${anchor}"`).toContain(anchor)
     }

@@ -145,15 +145,15 @@ export const RELEASE_NOTES: ReleaseNote[] = [
     lines: [
       {
         title: 'Chats with many images no longer run the app out of memory.',
-        detail: 'Every image was kept inline in the saved chat history, so a few chats with phone photos made that history big enough to run the app out of memory, and on Windows, past 127 MiB, it could not be saved at all any more. Images are now stored as files of their own, outside the history, and your history is moved over once, on the first start of this version. Chats and messages that only the app\'s backup file still held come back once from there.',
+        detail: 'Every image was kept inline in the saved chat history, and a few chats with phone photos were enough to make that history too big for the app\'s memory. On Windows it could not be saved at all once it passed 127 MiB. Images are now stored as separate files outside the history, and your history is moved over once, on the first start of this version. Chats and messages that only the app\'s backup file still held are restored from it once.',
       },
       {
         title: 'Create reads a model\'s family from the file, not from its name.',
-        detail: 'Renders failed with "Value not in list" for models whose file name did not say what they are, which on CivitAI is most of them. Create now reads the family from the file header and loads the model from the folder it sits in, with pipelines of its own for Chroma, HiDream I1, SD 3.5, Lumina 2, Qwen-Image and Qwen-Image-Edit. A missing text encoder or VAE is downloaded, and a ComfyUI on this machine that is too old is updated, each after one question.',
+        detail: 'Renders failed with "Value not in list" for models whose file name did not say what they are, which on CivitAI is most of them. Create now reads the family from the file header and loads the model from the folder it sits in, with pipelines of its own for Chroma, HiDream I1, SD 3.5, Lumina 2, Qwen-Image and Qwen-Image-Edit. If a text encoder or VAE is missing, or ComfyUI on this machine is too old, Create asks once, then downloads the file or updates ComfyUI.',
       },
       {
         title: 'Stop works in the Code tab again, also in the /loop bar.',
-        detail: 'Both Stop buttons in the Code tab stopped nothing (issue 140): they handed over the click itself where the conversation to stop was expected. The one next to the prompt box and the one in the blue /loop bar both stop the run again.',
+        detail: 'Both Stop buttons in the Code tab stopped nothing (issue 140): they passed the click event where the stop function expected a conversation. The one next to the prompt box and the one in the blue /loop bar both stop the run again.',
       },
       {
         title: 'Typing in the prompt box no longer lags in long chats.',
@@ -161,7 +161,7 @@ export const RELEASE_NOTES: ReleaseNote[] = [
       },
       {
         title: '"Full body" in a chat image now shows the whole figure.',
-        detail: 'The chat\'s image tool rendered every picture in the model\'s square default, and SDXL, Pony and Illustrious models crop a whole person in a square to the face (issue 142). When the prompt asks for a whole figure and names no size, the picture now gets the upright frame those models were trained on.',
+        detail: 'The chat\'s image tool rendered every picture in the model\'s square default, and SDXL, Pony and Illustrious models crop a whole person in a square frame to the face (issue 142). When the prompt asks for a whole figure and names no size, the picture now gets the upright frame those models were trained on.',
       },
     ],
     details: [
@@ -170,11 +170,11 @@ export const RELEASE_NOTES: ReleaseNote[] = [
         items: [
           {
             title: 'Edit keeps your photo at full strength.',
-            detail: 'At strength 1.00 the source image was dropped without a word, and Edit painted a new picture from the prompt alone. Edit always keeps the source now; the slider stops at 0.95, the strongest repaint that still starts from your photo.',
+            detail: 'At strength 1.00, Edit dropped the source image without a word and painted a new picture from the prompt alone. It always keeps the source now, and the slider stops at 0.95, the strongest repaint that still starts from your photo.',
           },
           {
             title: 'A gallery picture can be dragged into Edit.',
-            detail: 'Dragging a picture from the gallery onto the Edit drop zone did nothing. It loads the picture now, as a click already did.',
+            detail: 'Dragging a picture from the gallery onto the Edit drop zone did nothing. It now loads the picture, as a click already did.',
           },
           {
             title: 'Deleting a render in the gallery removes its file too.',
@@ -182,7 +182,7 @@ export const RELEASE_NOTES: ReleaseNote[] = [
           },
           {
             title: 'Gallery tiles come back when ComfyUI does.',
-            detail: 'Tiles that went dark while ComfyUI was not answering load again as soon as it answers, instead of staying dark until the next start.',
+            detail: 'Tiles that went dark while ComfyUI was not answering come back as soon as it answers. They used to stay dark until the next start.',
           },
           {
             title: 'A bare VAE or text encoder is no longer offered as a model.',
@@ -190,7 +190,7 @@ export const RELEASE_NOTES: ReleaseNote[] = [
           },
           {
             title: 'Downloads work with a ComfyUI on another machine.',
-            detail: 'With ComfyUI running on another computer, model downloads failed with "permission denied" or "ComfyUI path not set" (issue 143). They now land in the Model Storage folder in ComfyUI\'s own folder layout, and the Model Manager and Create say what is left to do on that machine: copy the folders over or share them, and install the node packs a bundle names there.',
+            detail: 'With ComfyUI running on another computer, model downloads failed with "permission denied" or "ComfyUI path not set" (issue 143). They now go to the Model Storage folder, in ComfyUI\'s own folder layout, and the Model Manager and Create say what is left to do on that machine: copy the folders over or share them, and install any node packs a bundle needs there.',
           },
         ],
       },
@@ -198,16 +198,20 @@ export const RELEASE_NOTES: ReleaseNote[] = [
         title: 'Chat and Code',
         items: [
           {
+            title: 'The agent shows which folder it works in, and how to reach your files.',
+            detail: 'Setting every agent permission to Auto never let the agent open files outside the chat\'s working folder, and a dismissed folder dialog left it in its own sandbox without a sign. The button next to Agent now always shows where the agent works, Sandbox included, and one click leads to "Pick a folder…". A file refused for being outside that folder brings up a line above the chat that says what to do, and Settings no longer says Filesystem reaches files anywhere.',
+          },
+          {
             title: 'A /loop pass that ends early no longer leaves the loop running.',
-            detail: 'A loop pass that ended before it could arm the next one left the bar on "running" and the working folder locked. The loop ends with it now.',
+            detail: 'A loop pass that ended before it could arm the next one left the bar on "running" and the working folder locked. The loop now ends with it.',
           },
           {
             title: 'A step too large for the server\'s context is shortened and sent again.',
-            detail: 'When a server refuses a step because the request exceeds its context size, the step goes out again with the history shortened to fit, instead of ending the pass, and the next steps start inside that size.',
+            detail: 'When a server refuses a step because the request exceeds its context size, the step is sent again with the history shortened to fit, and the pass goes on. Later steps start at that size.',
           },
           {
             title: 'The recent list in the collapsed sidebar follows the mode.',
-            detail: 'With Code or Remote picked in the collapsed sidebar, the recent list showed the plain chats (issue 141). It lists the chats of that mode now, and opening one stays in that mode.',
+            detail: 'With Code or Remote picked in the collapsed sidebar, the recent list showed the plain chats (issue 141). It now lists that mode\'s chats, and opening one stays in that mode.',
           },
           {
             title: 'Image previews in a long chat load only near where you are reading.',
