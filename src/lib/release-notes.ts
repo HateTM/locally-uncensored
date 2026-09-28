@@ -199,7 +199,7 @@ export const RELEASE_NOTES: ReleaseNote[] = [
         items: [
           {
             title: 'The agent shows which folder it works in, and how to reach your files.',
-            detail: 'Setting every agent permission to Auto never let the agent open files outside the chat\'s working folder, and a dismissed folder dialog left it in its own sandbox without a sign. The button next to Agent now always shows where the agent works, Sandbox included, and one click leads to "Pick a folder…". A file refused for being outside that folder brings up a line above the chat that says what to do, and Settings no longer says Filesystem reaches files anywhere.',
+            detail: 'Setting every agent permission to Auto never let the agent open files outside the chat\'s working folder, and a dismissed folder dialog left it in its own sandbox without a sign. The button next to Agent now always shows where the agent works, Sandbox included, and one click leads to "Pick a folder…". A file refused for being outside that folder brings up a line above the chat that says what to do, and Settings no longer says Filesystem reaches files anywhere. Plain chat has no tool that reads your files, so asking it for one now brings up a line that says to turn on Agent.',
           },
           {
             title: 'A /loop pass that ends early no longer leaves the loop running.',

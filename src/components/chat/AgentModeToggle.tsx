@@ -6,6 +6,7 @@ import { useAgentModeStore } from '../../stores/agentModeStore'
 import { useChatStore } from '../../stores/chatStore'
 import { useModelStore } from '../../stores/modelStore'
 import { useSettingsStore } from '../../stores/settingsStore'
+import { useChatNoticeStore } from '../../stores/chatNoticeStore'
 import { canUseTools } from '../../lib/tool-support'
 import { FEATURE_FLAGS } from '../../lib/constants'
 import { AgentWorkspaceDialog } from './AgentWorkspaceDialog'
@@ -112,6 +113,8 @@ export function AgentModeToggle() {
     const persona = useSettingsStore.getState().getActivePersona()
     const newId = createConversation(activeModel, persona?.systemPrompt || '')
     useAgentModeStore.getState().toggleAgentMode(newId)
+    // Die Zeile "Plain chat cannot open files" hat ihren Rat gegeben.
+    useChatNoticeStore.getState().dismiss('agent-for-local-files')
     void maybeOpenWorkspaceDialog(newId)
   }
 
@@ -134,7 +137,10 @@ export function AgentModeToggle() {
     toggleAgentMode(activeConversationId)
     // If the user just turned agent ON (was inactive, now active) and
     // hasn't picked a workspace for this conversation, prompt for one.
-    if (!isActive) void maybeOpenWorkspaceDialog(activeConversationId)
+    if (!isActive) {
+      useChatNoticeStore.getState().dismiss('agent-for-local-files')
+      void maybeOpenWorkspaceDialog(activeConversationId)
+    }
   }
 
   const handleNewAgentChat = () => {
