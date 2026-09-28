@@ -24,7 +24,11 @@ const CATEGORIES: {
 }[] = [
   { key: 'web', label: 'Web Access', description: 'Search & fetch web pages', icon: Globe, risk: 'low' },
   { key: 'system', label: 'System Info', description: 'OS info, process list', icon: Cpu, risk: 'low' },
-  { key: 'filesystem', label: 'Filesystem', description: 'Read, write, search files anywhere', icon: FolderOpen, risk: 'medium' },
+  // "anywhere" stimmte nie: die Dateiwerkzeuge bleiben im Arbeitsordner des
+  // Chats, der Sandbox oder dem Ordner aus dem Dialog (resolve_path in
+  // commands/filesystem.rs). Discord 28.09.2026, xambran: alles auf Auto und
+  // trotzdem kein Zugriff auf die eigenen Dateien.
+  { key: 'filesystem', label: 'Filesystem', description: "Read, write, search files in the chat's working folder", icon: FolderOpen, risk: 'medium' },
   { key: 'image', label: 'Image Generation', description: 'Generate images', icon: Image, risk: 'medium' },
   { key: 'video', label: 'Video Generation', description: 'Generate video', icon: Film, risk: 'medium' },
   { key: 'workflow', label: 'Workflows', description: 'Execute saved agent workflows', icon: GitBranch, risk: 'medium' },

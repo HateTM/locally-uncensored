@@ -91,6 +91,8 @@ import { executeParallel, applyResultToToolCall, type ExecutionRequest } from '.
 import { useToolAuditStore } from '../stores/toolAuditStore'
 import { makeInTurnCacheLookup } from '../api/agents/in-turn-cache'
 import { explainError as explainToolError } from '../api/agents/error-hints'
+import { isOutsideWorkspaceRefusal, OUTSIDE_WORKSPACE_NOTICE } from '../lib/workspace-refusal'
+import { useChatNoticeStore } from '../stores/chatNoticeStore'
 import { settleThinking } from '../lib/thinking-stripper'
 import { openPlanGap, planReconcileSteer, PLAN_RECONCILE_BUDGET } from '../lib/plan-reconcile'
 import { PlanStaleness, planStalenessSteer } from '../lib/plan-staleness'
@@ -2493,6 +2495,15 @@ export function useAgentChat() {
           const result = results.find((r) => r.id === entry.ac.id)
           if (!result) continue
           applyResultToToolCall(entry.ac, result)
+          // Discord 2026-09-28 (xambran): a file outside the chat's folder was
+          // refused in a collapsed tool block, and the model alone was left to
+          // explain it. The user gets the way out above the chat, whatever the
+          // model makes of the refusal (lib/workspace-refusal.ts).
+          // Read off the applied call: file_edit returns its refusal as text,
+          // and only applyResultToToolCall turns that into a failure.
+          if (entry.ac.status === 'failed' && isOutsideWorkspaceRefusal(entry.ac.toolName, entry.ac.error)) {
+            useChatNoticeStore.getState().show('agent-outside-workspace', OUTSIDE_WORKSPACE_NOTICE)
+          }
           // Over-loop accounting (David 2026-06-04): remember every executed call
           // (so an identical repeat is skipped) and count successful media gens
           // against the per-turn cap that stops "13× the same cat".
