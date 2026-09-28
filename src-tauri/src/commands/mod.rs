@@ -22,6 +22,7 @@ pub mod logging;
 pub mod media_cmds;
 pub mod mlx;
 pub mod mlx_snapshot;
+pub mod model_sniff;
 pub mod oauth;
 pub mod process;
 pub mod proxy;
@@ -36,6 +37,7 @@ pub mod tts;
 pub mod video;
 pub mod waitlist;
 pub mod funnel;
+pub mod gallery_files;
 pub mod whisper;
 
 // ── uselu-compat error helpers ────────────────────────────────────────

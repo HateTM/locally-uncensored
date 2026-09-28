@@ -27,6 +27,7 @@ import { MONOGRAM, MONOGRAM_INVERT } from '../layout/brand'
 import { AVATAR_SLOT } from './avatar-slot'
 import { MOTION_S } from '../ui/motion'
 import { Hinweis } from '../ui/Hinweis'
+import { fitTextarea } from '../../lib/fit-textarea'
 
 interface Props {
   message: Message
@@ -143,8 +144,7 @@ function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, o
   useEffect(() => {
     if (isEditing && editRef.current) {
       editRef.current.focus()
-      editRef.current.style.height = 'auto'
-      editRef.current.style.height = editRef.current.scrollHeight + 'px'
+      fitTextarea(editRef.current)
     }
   }, [isEditing])
 
@@ -430,8 +430,10 @@ function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, o
                 value={editContent}
                 onChange={(e) => {
                   setEditContent(e.target.value)
-                  e.target.style.height = 'auto'
-                  e.target.style.height = e.target.scrollHeight + 'px'
+                  // Measured off-page (GH #139): this field sits INSIDE the
+                  // transcript, so the old auto/scrollHeight toggle laid out
+                  // the whole list on every key.
+                  fitTextarea(e.target)
                 }}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); confirmEdit() }

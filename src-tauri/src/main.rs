@@ -540,6 +540,8 @@ fn main() {
             commands::chat_attachments::save_chat_attachment_dialog,
             commands::chat_attachments::export_chats_dialog,
             commands::chat_attachments::import_chats_dialog,
+            commands::model_sniff::sniff_model_files,
+            commands::gallery_files::trash_comfy_output,
             commands::system::restore_stores,
             commands::system::backup_rag_chunks,
             commands::system::restore_rag_chunks,
@@ -550,6 +552,7 @@ fn main() {
             commands::self_migrate_cmd::self_migrate_finish,
             // Downloads
             commands::download::download_model,
+            commands::download::comfy_model_target,
             commands::download::download_model_to_path,
             commands::download::download_progress,
             commands::download::pause_download,

@@ -50,7 +50,8 @@ export function LoopBar({ onStop }: Props) {
           {secs > 0 ? `next in ${secs}s` : 'running'}
         </span>
         <button
-          onClick={onStop}
+          // Called bare: the click event is not an argument of Stop (GH #140).
+          onClick={() => onStop()}
           title="Stop the loop"
           className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[0.55rem] text-gray-600 dark:text-gray-300 hover:bg-gray-200/60 dark:hover:bg-white/10 transition-colors shrink-0"
         >

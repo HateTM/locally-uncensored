@@ -34,6 +34,8 @@ vi.mock('../../api/discover', () => ({
   lookupFileMeta: (...a: unknown[]) => lookupFileMeta(...(a as [string])),
   modelsNotVisibleInComfy: (...a: unknown[]) => modelsNotVisibleInComfy(...(a as [string[]])),
   ENUM_SUBFOLDERS: new Set(['checkpoints', 'diffusion_models', 'vae', 'text_encoders']),
+  // The ComfyUI here is on this machine; a remote one skips the wait (GH #143).
+  comfyModelTarget: vi.fn(async () => ({ remote: false })),
 }))
 
 vi.mock('../../api/comfyui', () => ({

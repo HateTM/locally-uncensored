@@ -59,9 +59,12 @@ describe.each([
     // The catalog is its own field on the wire, so the message estimate above
     // cannot see it. It is picked after the build, which is why it arrives as
     // a second call instead of riding in the report.
-    expect(source).toMatch(
-      /reportTools\(convId, estimateTokens\(JSON\.stringify\(tools\)\)\)/,
-    )
+    // useCodex measures it once into a variable since GH #140: its
+    // context-overflow retry reads the same number to size the cut.
+    const direct = /reportTools\(convId, estimateTokens\(JSON\.stringify\(tools\)\)\)/.test(source)
+    const viaVariable = /stepToolsEstimate = estimateTokens\(JSON\.stringify\(tools\)\)/.test(source)
+      && /reportTools\(convId, stepToolsEstimate\)/.test(source)
+    expect(direct || viaVariable).toBe(true)
   })
 
   it('leaves a decay row in the tool audit so support can see it', () => {

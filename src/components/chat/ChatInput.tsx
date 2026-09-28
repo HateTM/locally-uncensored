@@ -17,6 +17,7 @@ import { COMPOSER_MAX_W } from './composer-width'
 import { consumeComposerFocusPending } from '../../hooks/useKeyboardShortcuts'
 import { useChatNoticeStore, CHAT_NOTICE_MS } from '../../stores/chatNoticeStore'
 import { MONOGRAM, MONOGRAM_INVERT } from '../layout/brand'
+import { fitTextarea } from '../../lib/fit-textarea'
 
 interface Props {
   onSend: (content: string, images?: ImageAttachment[]) => void
@@ -64,6 +65,9 @@ interface Props {
 
 /** How long the synchronous double-fire guard below stays shut. */
 const SEND_LOCK_MS = 700
+
+/** The field grows with its text up to this height, then scrolls (matches `max-h-[200px]`). */
+const COMPOSER_MAX_PX = 200
 
 /**
  * The double-fire guard's clock read, deliberately OUTSIDE the component.
@@ -233,11 +237,12 @@ export function ChatInput({ onSend, onStop, isGenerating, waitingForLocalLane, p
     }
   }, [conversationId])
 
-  useEffect(() => {
-    if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto'
-      textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 200) + 'px'
-    }
+  // GH #139: measured on a copy outside the page, and written only when the
+  // height really changes, so a key within a line lays out nothing but the
+  // field (lib/fit-textarea.ts). Before paint, so a new line and its height
+  // show up in the same frame.
+  useLayoutEffect(() => {
+    if (textareaRef.current) fitTextarea(textareaRef.current, COMPOSER_MAX_PX)
     // conversationId mit in der Abhaengigkeit: `key={conversationId}` unten
     // montiert das Textfeld beim Wechsel neu, der frische Knoten startet aber
     // auf `rows={1}`. Ist der uebernommene Entwurf identisch mit dem der
@@ -327,18 +332,12 @@ export function ChatInput({ onSend, onStop, isGenerating, waitingForLocalLane, p
   }
 
   // Write a dictation transcript (interim or final) into the input as
-  // base + transcript, then resize the textarea. NEVER sends, because the user
-  // reviews and presses Send (David 2026-06-06).
+  // base + transcript; the layout effect above sizes the field. NEVER sends,
+  // because the user reviews and presses Send (David 2026-06-06).
   const applyDictation = (text: string) => {
     const base = dictationBaseRef.current
     const sep = base && !/\s$/.test(base) ? ' ' : ''
     setInput(base + sep + text)
-    requestAnimationFrame(() => {
-      if (textareaRef.current) {
-        textareaRef.current.style.height = 'auto'
-        textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 200) + 'px'
-      }
-    })
   }
 
   // Synchronous double-fire guard (David 2026-06-20: "ok generiere jetzt" landed
@@ -355,7 +354,6 @@ export function ChatInput({ onSend, onStop, isGenerating, waitingForLocalLane, p
     setInput('')
     setImages([])
     setCmdMenu([])
-    if (textareaRef.current) textareaRef.current.style.height = 'auto'
   }
 
   // Update the input + the slash-command typeahead together. The menu shows
@@ -741,7 +739,8 @@ export function ChatInput({ onSend, onStop, isGenerating, waitingForLocalLane, p
           <div className="shrink-0 w-[var(--control-h-sm)] h-[var(--control-h-sm)]" data-testid="composer-send-slot">
             {isGenerating ? (
               <button
-                onClick={onStop}
+                // Called bare: the click event is not an argument of Stop (GH #140).
+                onClick={() => onStop()}
                 // Neutral, nicht rot: Stop ist der Normalabschluss und die
                 // haeufigste Aktion waehrend eines Streams. `data-active`
                 // gibt ihm den Behaelter des neutralen Rezepts, damit er

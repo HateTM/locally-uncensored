@@ -73,7 +73,7 @@ import { setExplicitFanout, buildSubAgentGates } from '../api/agents/sub-agent'
 import { appendTaskReport } from '../lib/agent-task-report'
 import { useAgentTaskStore } from '../stores/agentTaskStore'
 import { useAgentGoalStore, renderGoalSection } from '../stores/agentGoalStore'
-import { useAgentLoopStore } from '../stores/agentLoopStore'
+import { endLoopUnlessRearmed, useAgentLoopStore } from '../stores/agentLoopStore'
 import { beginRun, isRunStopped, stopRun } from '../lib/run-stop'
 import { buildLoopRecheck, loopPassSaysDone } from '../lib/agent-commands'
 import { applyStoredCompaction } from '../lib/compact-summary'
@@ -3082,10 +3082,16 @@ export function useAgentChat() {
               useAgentLoopStore.getState().clear(convForLoop)
               return
             }
-            void sendRef.current?.(buildLoopRecheck(loopState.task, nextPass), undefined, {
-              displayContent: cap > 0 ? `pass ${nextPass} of ${cap}` : `pass ${nextPass}`,
-              loop: { ...loopState, pass: nextPass },
-            })
+            // A pass that ends before it reaches this driver must not leave
+            // the bar "running" (GH #140, same gap as the Code view's).
+            void endLoopUnlessRearmed(
+              convForLoop,
+              sendRef.current?.(buildLoopRecheck(loopState.task, nextPass), undefined, {
+                displayContent: cap > 0 ? `pass ${nextPass} of ${cap}` : `pass ${nextPass}`,
+                loop: { ...loopState, pass: nextPass },
+              }),
+              () => agentLoopTimers.has(convForLoop),
+            )
           }, loopState.intervalMs))
         }
       }
@@ -3124,7 +3130,9 @@ export function useAgentChat() {
     // caller (useChat.ts's stopGeneration) already resolved it that way. A
     // future caller that stops a run the user is NOT looking at (a per-item
     // Stop in a task list, say) would otherwise silently stop the wrong one.
-    const stoppedConvId = conversationId !== undefined
+    // Only a real id counts: handed to an onClick as is, this got the click
+    // event as the id and stopped nothing (GH #140, the Code view's copy).
+    const stoppedConvId = typeof conversationId === 'string' || conversationId === null
       ? conversationId
       : useChatStore.getState().activeConversationId
     stopRun(stoppedConvId)

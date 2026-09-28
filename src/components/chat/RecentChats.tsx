@@ -16,28 +16,44 @@ import { useCodexStore } from '../../stores/codexStore'
 import { timeAgo } from '../../lib/time-ago'
 import { conversationMode } from '../../lib/conversation-mode'
 
-/** Same cut as the web list: plain chats only, newest first, eight rows. */
+/** Same cut as the web list: newest first, eight rows. */
 const MAX_ROWS = 8
+
+/** GH #141 (Wruktarr): the list follows the mode picked in the rail, exactly
+ *  like the expanded panel does (Sidebar.tsx filters its rows by chatMode).
+ *  It used to show plain chats under Code and Remote too. */
+const HEADING: Record<string, string> = {
+  lu: 'Recent chats',
+  codex: 'Recent code chats',
+  remote: 'Recent remote chats',
+  openclaw: 'Recent agent chats',
+}
+const EMPTY: Record<string, string> = {
+  lu: 'No chats yet.',
+  codex: 'No code chats yet.',
+  remote: 'No remote chats yet.',
+  openclaw: 'No agent chats yet.',
+}
 
 export function RecentChats() {
   const conversations = useChatStore((s) => s.conversations)
   const activeConversationId = useChatStore((s) => s.activeConversationId)
   const setActiveConversation = useChatStore((s) => s.setActiveConversation)
   const setView = useUIStore((s) => s.setView)
-  const setChatMode = useCodexStore((s) => s.setChatMode)
+  const chatMode = useCodexStore((s) => s.chatMode)
 
   const recents = conversations
     // The chat you are already looking at is not a place to go back to. On the
     // no-chat screen nothing is active, so nothing is dropped there.
     .filter((c) => c.id !== activeConversationId)
-    .filter((c) => conversationMode(c) === 'lu')
+    .filter((c) => conversationMode(c) === chatMode)
     .sort((a, b) => b.updatedAt - a.updatedAt)
     .slice(0, MAX_ROWS)
 
-  // Opening a row is the same three steps as in the web launcher: back to
-  // plain chat mode, select the conversation, land on the chat view.
+  // Opening a row is what a click on the same row in the panel does: the
+  // mode is already the right one (the list is filtered by it), so select the
+  // conversation and land on the chat view.
   const openChat = (id: string) => {
-    setChatMode('lu')
     setActiveConversation(id)
     setView('chat')
   }
@@ -45,7 +61,7 @@ export function RecentChats() {
   if (recents.length === 0) {
     return (
       <p data-testid="home-recent-chats" className="t-micro text-gray-400 dark:text-gray-500">
-        No chats yet.
+        {EMPTY[chatMode] ?? EMPTY.lu}
       </p>
     )
   }
@@ -59,7 +75,7 @@ export function RecentChats() {
       transition={{ duration: MOTION_S.base, ease: 'easeOut' }}
     >
       <div className="mb-1 px-1 t-label font-medium text-gray-400 dark:text-gray-600">
-        Recent chats
+        {HEADING[chatMode] ?? HEADING.lu}
       </div>
       <ul>
         {recents.map((c, i) => (

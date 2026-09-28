@@ -55,6 +55,15 @@ pub async fn install_custom_node(
     // Snapshot the state the blocking worker needs before spawning it: a Tauri
     // `State` (and the MutexGuard behind it) is not Send, so clone the values
     // out and move owned copies into the worker.
+    // A ComfyUI on another machine loads its node packs from THAT machine's
+    // custom_nodes folder, which nothing here can reach (GH #143). Cloning into
+    // a ComfyUI found on this PC helped nobody; say what to do instead.
+    if let Some(remote) = crate::commands::download::remote_comfy(&state) {
+        return Err(format!(
+            "Your ComfyUI runs on {} and LU cannot install node packs on another machine. Install {} there (ComfyUI-Manager, or git clone {} into its custom_nodes folder), then restart that ComfyUI.",
+            remote.host, nodeName, repoUrl
+        ));
+    }
     let comfy_path = { state.comfy_path.lock().unwrap().clone() };
     let fallback_python = { state.python_bin.lock().unwrap().clone() };
     // Freeze fix (David 2026-07-04): the git clone + pip below are blocking. As

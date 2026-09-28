@@ -193,7 +193,7 @@ fn remember_root(dir: &str) {
     remember_root_in(&crate::os_paths::app_config_json(), dir);
 }
 
-fn remembered_root() -> RememberedRoot {
+pub(crate) fn remembered_root() -> RememberedRoot {
     remembered_root_in(&crate::os_paths::app_config_json())
 }
 

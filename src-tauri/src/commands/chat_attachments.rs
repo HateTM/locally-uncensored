@@ -176,13 +176,13 @@ pub(crate) fn write_export<W: Write>(content: &str, out: &mut W, dir: &Path) -> 
             && content[..start].ends_with('"')
             && content[id_end..].starts_with('"')
             && content[..start - 1].trim_end().strip_suffix(':').map(|k| k.trim_end().ends_with("\"data\"")).unwrap_or(false);
-        out.write_all(content[at..start].as_bytes())?;
+        out.write_all(&content.as_bytes()[at..start])?;
         if is_image_data {
             match read_attachment(dir, id) {
                 Ok(data) => out.write_all(data.as_bytes())?,
                 Err(_) => {
                     missing += 1;
-                    out.write_all(content[start..id_end].as_bytes())?;
+                    out.write_all(&content.as_bytes()[start..id_end])?;
                 }
             }
             at = id_end;
@@ -191,7 +191,7 @@ pub(crate) fn write_export<W: Write>(content: &str, out: &mut W, dir: &Path) -> 
             at = start + PREFIX.len();
         }
     }
-    out.write_all(content[at..].as_bytes())?;
+    out.write_all(&content.as_bytes()[at..])?;
     Ok(missing)
 }
 
@@ -324,7 +324,8 @@ fn referenced_ids(files: &[PathBuf]) -> Result<HashSet<String>, String> {
 }
 
 type ScanStamp = (std::time::SystemTime, u64);
-static SCAN_CACHE: std::sync::LazyLock<Mutex<std::collections::HashMap<PathBuf, (ScanStamp, HashSet<String>)>>> =
+type ScanCache = std::collections::HashMap<PathBuf, (ScanStamp, HashSet<String>)>;
+static SCAN_CACHE: std::sync::LazyLock<Mutex<ScanCache>> =
     std::sync::LazyLock::new(|| Mutex::new(std::collections::HashMap::new()));
 
 fn scan_file(path: &Path) -> Result<HashSet<String>, String> {

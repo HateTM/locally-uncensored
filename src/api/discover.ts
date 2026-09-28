@@ -259,6 +259,42 @@ export async function checkDownloadSpace(
   }
 }
 
+// ─── A ComfyUI on another machine (GH #143) ───
+
+/** Where ComfyUI models land. `remote`: the ComfyUI LU talks to runs on
+ *  another machine, so the files go to `root` on this one, in ComfyUI's own
+ *  folder layout, for the user to copy over (download.rs remote_comfy). */
+export interface ComfyModelTarget {
+  remote: boolean
+  host?: string
+  root?: string
+}
+
+export async function comfyModelTarget(): Promise<ComfyModelTarget> {
+  try {
+    const t = await backendCall<ComfyModelTarget>('comfy_model_target')
+    return t && t.remote && t.host && t.root ? t : { remote: false }
+  } catch {
+    // An older backend, or the dev server: the files go where they always went.
+    return { remote: false }
+  }
+}
+
+/** What a bundle install onto a remote ComfyUI leaves for the user to do. */
+export interface RemoteBundleReport {
+  host: string
+  root: string
+  /** Node packs the bundle needs, to install on that machine. */
+  customNodes: string[]
+}
+
+export function remoteBundleNotice(bundleName: string, r: RemoteBundleReport): string {
+  const nodes = r.customNodes.length > 0
+    ? ` It also needs ${r.customNodes.length === 1 ? 'this node pack' : 'these node packs'} on that machine: ${r.customNodes.join(', ')}. Install ${r.customNodes.length === 1 ? 'it' : 'them'} there and restart ComfyUI.`
+    : ''
+  return `${bundleName}: your ComfyUI runs on ${r.host}, so LU saves the files here, in ${r.root}, in ComfyUI's own folder layout. Once they are done, copy the folders in there into the models folder of ComfyUI on that machine (or share the folder with it), then refresh the models.${nodes}`
+}
+
 // ─── Custom Node Installation ───
 
 /** Check if ALL files in a bundle are completely downloaded (size validated) */
@@ -652,8 +688,12 @@ export function bundleBytesToFetch(
   return { bytes: Math.round(bytes), subfolder: pending[0].subfolder, files: pending.length }
 }
 
-export async function installBundleComplete(bundle: ModelBundle): Promise<void> {
+export async function installBundleComplete(bundle: ModelBundle): Promise<{ remote?: RemoteBundleReport }> {
   const errors: string[] = []
+  // GH #143: a ComfyUI on another machine. The files land here for the user
+  // to copy over, so there is no engine to wait for and no node pack LU could
+  // install; the report says what is left instead.
+  const target = await comfyModelTarget()
 
   // Pre-check: which files already exist on disk (skip re-downloading them)
   const installedFiles = new Set<string>()
@@ -734,6 +774,10 @@ export async function installBundleComplete(bundle: ModelBundle): Promise<void> 
   for (const file of bundle.files) {
     if (!file.downloadUrl || !file.filename || !file.subfolder) continue
     if (installedFiles.has(file.filename)) {
+      if (target.remote) {
+        window.dispatchEvent(new CustomEvent('comfyui-download-exists', { detail: { filename: file.filename } }))
+        continue
+      }
       const visible = (await judgeable).has(file.subfolder) ? await comfyCanSee(file.filename) : null
       // The file is on disk at its full size. That much is certain right now,
       // so it is what the card is told, and an engine that has not caught up
@@ -765,7 +809,7 @@ export async function installBundleComplete(bundle: ModelBundle): Promise<void> 
   // builder went on recommending the pack this very call had just installed
   // (T-67), and its restart was a hand-rolled sleep that could not tell a
   // ComfyUI LU owns from one it does not.
-  if (bundle.customNodes && bundle.customNodes.length > 0) {
+  if (bundle.customNodes && bundle.customNodes.length > 0 && !target.remote) {
     void installCustomNodes([...bundle.customNodes], { keepGoing: true, restart: true })
       .catch((err) => log.warn('[discover] Custom node install/restart failed', { err }))
   }
@@ -788,6 +832,16 @@ export async function installBundleComplete(bundle: ModelBundle): Promise<void> 
   if (errors.length > 0) {
     throw new Error(`Bundle install had ${errors.length} issue(s): ${errors.join('; ')}`)
   }
+  if (target.remote && target.host && target.root) {
+    return {
+      remote: {
+        host: target.host,
+        root: target.root,
+        customNodes: (bundle.customNodes ?? []).map((k) => CUSTOM_NODE_REGISTRY[k]?.name ?? k),
+      },
+    }
+  }
+  return {}
 }
 
 // ─── Component Registry: What each model type needs to work ───

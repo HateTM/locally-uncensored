@@ -25,6 +25,7 @@ import { ChatView } from '../ChatView'
 import { useUIStore } from '../../../stores/uiStore'
 import { useChatStore } from '../../../stores/chatStore'
 import { useCompareStore } from '../../../stores/compareStore'
+import { useCodexStore } from '../../../stores/codexStore'
 import type { Conversation, Message } from '../../../types/chat'
 
 // The composer's dictation button reaches for the microphone and the Tauri
@@ -42,6 +43,7 @@ const said = (text: string): Message => ({
 })
 
 beforeEach(() => {
+  useCodexStore.setState({ chatMode: 'lu' })
   useUIStore.setState({ currentView: 'chat', sidebarOpen: false })
   useCompareStore.setState({ isComparing: false })
   useChatStore.setState({
@@ -73,6 +75,33 @@ describe('the latest chats on the home screen', () => {
     render(createElement(ChatView))
     fireEvent.click(screen.getByText('Yesterdays thread'))
     expect(useChatStore.getState().activeConversationId).toBe('a')
+  })
+
+  // GH #141 (Wruktarr): with Code or Remote picked in the collapsed rail the
+  // list showed the plain chats. It follows the mode now, like the panel.
+  it('Code picked in the rail: the code chats, and opening one stays in Code', () => {
+    useChatStore.setState({
+      conversations: [
+        conv('a', 'Yesterdays thread', NOW - 3600_000),
+        { ...conv('c', 'Refactor the parser', NOW - 7200_000), mode: 'codex' },
+      ],
+    })
+    useCodexStore.setState({ chatMode: 'codex' })
+    render(createElement(ChatView))
+    const list = screen.getByTestId('home-recent-chats')
+    expect(list.textContent).toContain('Recent code chats')
+    expect(list.textContent).toContain('Refactor the parser')
+    expect(list.textContent).not.toContain('Yesterdays thread')
+    fireEvent.click(screen.getByText('Refactor the parser'))
+    expect(useChatStore.getState().activeConversationId).toBe('c')
+    expect(useCodexStore.getState().chatMode).toBe('codex')
+  })
+
+  it('Remote picked in the rail with no remote chats: says so, lists no plain chats', () => {
+    useCodexStore.setState({ chatMode: 'remote' })
+    render(createElement(ChatView))
+    const list = screen.getByTestId('home-recent-chats')
+    expect(list.textContent).toBe('No remote chats yet.')
   })
 
 })

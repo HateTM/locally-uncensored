@@ -107,10 +107,11 @@ describe('Qwen-Image 2.1 classification', () => {
     expect(classifyModel('qwen_image_vae.safetensors')).not.toBe('qwenimage')
   })
 
-  it('leaves the older Qwen-Image generations alone', () => {
-    expect(classifyModel('qwen_image_fp8_e4m3fn.safetensors')).toBe('unknown')
-    expect(classifyModel('qwen_image_edit_2509_fp8.safetensors')).toBe('unknown')
-    expect(classifyModel('qwen_image_2512_bf16.safetensors')).toBe('unknown')
+  it('keeps the older Qwen-Image generations off the 2.1 pipeline (they have their own)', () => {
+    expect(classifyModel('qwen_image_fp8_e4m3fn.safetensors')).toBe('qwenimage1')
+    expect(classifyModel('qwen_image_edit_2509_fp8.safetensors')).toBe('qwenimage1')
+    expect(classifyModel('qwen_image_2512_bf16.safetensors')).toBe('qwenimage1')
+    expect(classifyModel('qwen_image_vae.safetensors')).toBe('unknown')
   })
 
   it('is an image model type, so it shows in Generate AND in Edit', () => {

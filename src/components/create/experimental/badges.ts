@@ -34,6 +34,13 @@ export const TYPE_BADGE: Record<ModelType, { label: string; color: string }> = {
   // yellow are ruled out by the file header, and slate/stone/zinc already
   // carry ernie_image/cogvideo/krea2. neutral is the one remaining row.
   qwenimage: { label: 'Qwen Image 2.1', color: 'bg-neutral-500/15 text-neutral-300' },
+  // Families that arrived with the header sniff. Every free tone is taken, so
+  // they share the neutral row with their nearest relative's label.
+  qwenimage1: { label: 'Qwen Image', color: 'bg-neutral-500/15 text-neutral-300' },
+  chroma: { label: 'Chroma', color: 'bg-purple-500/15 text-purple-300' },
+  hidream: { label: 'HiDream', color: 'bg-zinc-500/15 text-zinc-300' },
+  sd3: { label: 'SD 3.5', color: 'bg-blue-500/15 text-blue-300' },
+  lumina2: { label: 'Lumina 2', color: 'bg-slate-500/15 text-slate-300' },
   sdxl: { label: 'SDXL', color: 'bg-blue-500/15 text-blue-300' },
   sd15: { label: 'SD 1.5', color: 'bg-green-500/15 text-green-300' },
   wan: { label: 'Wan', color: 'bg-orange-500/15 text-orange-300' },

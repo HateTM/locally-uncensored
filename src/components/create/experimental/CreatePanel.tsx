@@ -3,7 +3,7 @@ import { Images, Play, PanelRightClose, Trash2, Download, MonitorOff, AudioLines
 import { downloadMediaUrl } from '../../../lib/download-media'
 import { useCreateStore, type GalleryItem } from '../../../stores/createStore'
 import { galleryLabel } from '../../../lib/render/gallery-label'
-import { galleryItemUrl } from './galleryUrl'
+import { GALLERY_DRAG_TYPE, galleryItemUrl } from './galleryUrl'
 import { useComfyMedia } from './useComfyMedia'
 import { cn } from '../ui/cn'
 
@@ -107,6 +107,11 @@ export function CreatePanel({ open, onOpenChange, activeId, onSelect }: Props) {
                   <div key={g.id} className="relative group">
                     <button
                       onClick={() => onSelect(g.id)}
+                      draggable={g.type === 'image' && !g.unavailable}
+                      onDragStart={(e) => {
+                        e.dataTransfer.setData(GALLERY_DRAG_TYPE, g.id)
+                        e.dataTransfer.effectAllowed = 'copy'
+                      }}
                       className={cn(
                         'w-full aspect-square rounded-lg overflow-hidden border-2 transition-colors relative',
                         (activeId ?? gallery[0]?.id) === g.id ? 'border-white/60' : 'border-transparent hover:border-white/20',
@@ -117,7 +122,7 @@ export function CreatePanel({ open, onOpenChange, activeId, onSelect }: Props) {
                       {g.unavailable && (
                         <span
                           className="absolute inset-0 flex items-center justify-center bg-black/50 text-gray-500"
-                          title="Local render, but the local engine isn't reachable"
+                          title={g.unavailableReason === 'gone' ? 'No longer in the ComfyUI output folder' : "Local render, but the local engine isn't reachable"}
                         >
                           <MonitorOff size={16} />
                         </span>
@@ -126,7 +131,7 @@ export function CreatePanel({ open, onOpenChange, activeId, onSelect }: Props) {
                     <button
                       onClick={() => removeFromGallery(g.id)}
                       className="absolute -top-1.5 -right-1.5 w-6 h-6 rounded-full bg-red-600/90 hover:bg-red-600 text-gray-100 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center shadow-sm"
-                      title="Delete"
+                      title="Delete (moves the file to the Recycle Bin)"
                     >
                       <Trash2 size={12} />
                     </button>

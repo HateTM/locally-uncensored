@@ -140,7 +140,10 @@ describe('Stop never opens a second line', () => {
 
   it('Stop is the running state of the send button, one ternary, one handler', () => {
     expect(INPUT).toMatch(/\{isGenerating \? \(/)
-    expect(INPUT.match(/onClick=\{onStop\}/g)).toHaveLength(1)
+    // Called bare (GH #140): handed to onClick as is, Stop got the click
+    // event as the conversation to stop and stopped nothing in the Code view.
+    expect(INPUT.match(/onClick=\{\(\) => onStop\(\)\}/g)).toHaveLength(1)
+    expect(INPUT).not.toMatch(/onClick=\{onStop\}/)
   })
 })
 

@@ -5,7 +5,9 @@ import {
 import type { ModelType, GenerateParams, VideoParams } from './comfyui'
 import { log } from '../lib/logger'
 import { resolveRunSeed } from '../lib/run-seed'
-import { readComboOptions } from './comfyui-enum'
+import { nodeComboOptions, readComboOptions } from './comfyui-enum'
+import { COMPONENT_REGISTRY, type ComponentSpec } from './component-registry'
+import { MissingComponentsError, resolveFamilyParts, type SniffedFamily } from './family-components'
 import {
   getAllNodeInfo,
   categorizeNodes,
@@ -65,6 +67,15 @@ export type WorkflowStrategy =
   | 'unet_zimage'     // Z-Image: UNETLoader + CLIPLoader(qwen_image) + VAELoader + EmptySD3LatentImage
   | 'unet_ernie_image' // ERNIE-Image: UNETLoader + CLIPLoader(flux2) + VAELoader + EmptyFlux2LatentImage + ConditioningZeroOut
   | 'unet_qwenimage'  // Qwen-Image 2.1: UNETLoader + CLIPLoader(qwen_image) + VAELoader + TextEncodeQwenImage21 (generate and edit)
+  // The families below came in with the header sniff (Discord 2026-09-28).
+  // Graphs follow the official Comfy-Org templates, see family-components.ts.
+  | 'unet_qwenimage1' // Qwen-Image 1 / Edit: CLIPLoader(qwen_image, Qwen2.5-VL) + qwen_image_vae + AuraFlow shift 3.1 (edit: TextEncodeQwenImageEditPlus)
+  | 'unet_chroma'     // Chroma: CLIPLoader(chroma, T5) + ae + AuraFlow shift 1
+  | 'unet_hidream'    // HiDream I1: QuadrupleCLIPLoader + ae + ModelSamplingSD3
+  | 'unet_sd3'        // SD 3.5: TripleCLIPLoader (or the checkpoint's own) + SD3 latent
+  | 'unet_lumina2'    // Lumina 2: CLIPLoader(lumina2, Gemma 2 2B) + ae + AuraFlow shift 6 + system prompt
+  | 'unet_sdxl'       // SDXL transformer in diffusion_models: DualCLIPLoader(sdxl) + sdxl_vae
+  | 'unet_sd15'       // SD 1.5 unet in diffusion_models: CLIPLoader(stable_diffusion) + ft-mse VAE
   | 'unet_video'      // Wan/Hunyuan: UNETLoader + CLIPLoader + VAELoader + EmptyHunyuanLatentVideo
   | 'wan22'           // Wan 2.2 TI2V-5B: UNET + CLIP + Wan 2.2 VAE + Wan22ImageToVideoLatent (unified T2V/I2V)
   | 'unet_ltx'        // LTX Video: UNETLoader + CLIPLoader + EmptyLTXVLatentVideo
@@ -139,6 +150,19 @@ export function determineStrategy(
       return { strategy: 'unet_zimage', reason: 'Z-Image model → UNETLoader + CLIPLoader(qwen_image)' }
     }
     return { strategy: 'unavailable', reason: 'Z-Image requires UNETLoader + CLIPLoader + VAELoader nodes' }
+  }
+
+  // Header-sniffed families (Discord 2026-09-28). Their graphs are built in
+  // one place further down; the loaders are checked there, per graph.
+  const sniffed: Partial<Record<ModelType, WorkflowStrategy>> = {
+    chroma: 'unet_chroma', hidream: 'unet_hidream', sd3: 'unet_sd3', lumina2: 'unet_lumina2', qwenimage1: 'unet_qwenimage1',
+  }
+  const sniffedStrategy = sniffed[modelType]
+  if (sniffedStrategy) {
+    if ((hasUNET || hasCheckpoint) && hasVAELoader) {
+      return { strategy: sniffedStrategy, reason: `${modelType} → its own loader set (official Comfy-Org template)` }
+    }
+    return { strategy: 'unavailable', reason: `${modelType} needs UNETLoader and VAELoader. Update ComfyUI in Settings.` }
   }
 
   // FLUX 2 → UNET + Flux2LatentImage
@@ -330,12 +354,54 @@ export function determineStrategy(
 export class WorkflowUnavailableError extends Error {
   readonly strategy: WorkflowStrategy
   readonly installHint?: { pack: string; url: string }
-  constructor(message: string, strategy: WorkflowStrategy, installHint?: { pack: string; url: string }) {
+  /** Companion files LU can download itself; Create offers them in place. */
+  readonly missing?: ComponentSpec[]
+  /** The local ComfyUI is too old for this graph; Create offers the update. */
+  readonly needsComfyUpdate?: boolean
+  constructor(
+    message: string,
+    strategy: WorkflowStrategy,
+    installHint?: { pack: string; url: string },
+    extra?: { missing?: ComponentSpec[]; needsComfyUpdate?: boolean },
+  ) {
     super(message)
     this.name = 'WorkflowUnavailableError'
     this.strategy = strategy
     this.installHint = installHint
+    this.missing = extra?.missing
+    this.needsComfyUpdate = extra?.needsComfyUpdate
   }
+}
+
+/** The families built from family-components.ts, by strategy. */
+const SNIFFED_FAMILY: Partial<Record<WorkflowStrategy, SniffedFamily>> = {
+  unet_chroma: 'chroma', unet_hidream: 'hidream', unet_sd3: 'sd3', unet_lumina2: 'lumina2',
+  unet_qwenimage1: 'qwenimage1', unet_sdxl: 'sdxl_unet', unet_sd15: 'sd15_unet',
+}
+
+/** Latent spaces that start from EmptySD3LatentImage (16 channels). */
+const SD3_LATENT_STRATEGIES = new Set<WorkflowStrategy>(['unet_chroma', 'unet_hidream', 'unet_sd3', 'unet_lumina2', 'unet_qwenimage1'])
+
+/** Qwen-Image-Edit (2509/2511) and FireRed edit files take the source image
+ *  through TextEncodeQwenImageEditPlus; plain Qwen-Image does latent img2img. */
+export function isQwenImageEditModel(name: string): boolean {
+  const lower = name.toLowerCase()
+  return lower.includes('edit') && (lower.includes('qwen') || lower.includes('firered'))
+}
+
+/** Verbatim from comfy_extras/nodes_lumina2.py (SYSTEM_PROMPT["superior"]) and
+ *  the negative of the NetaYume Lumina template. */
+const LUMINA2_POSITIVE_SYSTEM = 'You are an assistant designed to generate superior images with the superior degree of image-text alignment based on textual prompts or user prompts.'
+const LUMINA2_NEGATIVE_SYSTEM = 'You are an assistant designed to generate low-quality images based on textual prompts'
+
+/** A resolver's "download X" message, turned into the registry spec that can
+ *  fetch X, so Create can offer it instead of pointing at the Model Manager. */
+function registrySpecsNamedIn(type: ModelType, message: string): ComponentSpec[] {
+  const req = COMPONENT_REGISTRY[type]
+  if (!req) return []
+  return [req.vae, req.clip, req.clipSecondary].filter(
+    (s): s is ComponentSpec => !!s?.downloadUrl && message.includes(s.downloadFilename),
+  )
 }
 
 /**
@@ -508,12 +574,36 @@ export async function buildDynamicWorkflow(
     return buildRemoveBgWorkflow(gp, rmbgMeta)
   }
 
-  const { strategy, reason, installHint } = determineStrategy(type, isVideo, nodes, models)
+  const determined = determineStrategy(type, isVideo, nodes, models)
+  const { reason, installHint } = determined
+  let strategy = determined.strategy
   log.info(`[dynamic-workflow] Strategy: ${strategy} (${reason})`)
 
   if (strategy === 'unavailable') {
-    throw new WorkflowUnavailableError(reason, strategy, installHint)
+    // "Update ComfyUI" reasons are fixable in place (lib/render-fixups.ts).
+    throw new WorkflowUnavailableError(reason, strategy, installHint, { needsComfyUpdate: /update comfyui/i.test(reason) })
   }
+
+  // The loader follows the FOLDER the file sits in, not what its family
+  // usually ships as (Discord 2026-09-28). CheckpointLoaderSimple only lists
+  // models/checkpoints, UNETLoader only diffusion_models/unet, and a name in
+  // the wrong one is ComfyUI's "Value not in list".
+  const listedCheckpoints = nodeComboOptions(allNodes, 'CheckpointLoaderSimple', 'ckpt_name')
+  const listedUnets = [
+    ...nodeComboOptions(allNodes, 'UNETLoader', 'unet_name'),
+    ...nodeComboOptions(allNodes, 'UnetLoaderGGUF', 'unet_name'),
+  ]
+  const inCheckpoints = listedCheckpoints.includes(params.model)
+  const inUnets = listedUnets.includes(params.model)
+  if (strategy === 'checkpoint' && !inCheckpoints && inUnets && (type === 'sdxl' || type === 'sd15')) {
+    // A bare SDXL / SD 1.5 unet: its text encoders and VAE come separately.
+    strategy = type === 'sdxl' ? 'unet_sdxl' : 'unet_sd15'
+  }
+  // An all-in-one file of a UNET family in models/checkpoints (the FLUX fp8
+  // and SD 3.5 checkpoints, NetaYume Lumina, CivitAI merges): MODEL comes from
+  // CheckpointLoaderSimple, and its own CLIP/VAE when it carries them.
+  const fromCheckpoint = strategy !== 'checkpoint' && strategy !== 'animatediff'
+    && listedCheckpoints.length > 0 && inCheckpoints && !inUnets
 
   // Local Edit (mask inpaint) runs on the SDXL/SD1.5 checkpoint pipeline only.
   // Reject other strategies explicitly instead of silently dropping the mask —
@@ -527,7 +617,8 @@ export async function buildDynamicWorkflow(
   // check exists to prevent. The model's own route for a local change is a
   // marking drawn into the picture plus a prompt that names it, which is a
   // different surface from the mask editor and is not built in this cut.
-  if (!isVideo && gp.inputImage && gp.maskImage && strategy !== 'checkpoint') {
+  const sdCheckpointFamily = strategy === 'checkpoint' || strategy === 'unet_sdxl' || strategy === 'unet_sd15'
+  if (!isVideo && gp.inputImage && gp.maskImage && !sdCheckpointFamily) {
     throw new WorkflowUnavailableError(
       'Local image editing needs an SD 1.5 / SDXL checkpoint. Pick a checkpoint model for Edit. FLUX and video models are not wired for local inpaint.',
       strategy,
@@ -563,6 +654,7 @@ export async function buildDynamicWorkflow(
   let samplerModelId: string
 
   if (strategy === 'checkpoint') {
+    assertCheckpointListed(params.model, allNodes)
     // Single loader: outputs MODEL (0), CLIP (1), VAE (2)
     modelNodeId = String(n++)
     workflow[modelNodeId] = {
@@ -574,6 +666,76 @@ export async function buildDynamicWorkflow(
     vaeSourceId = modelNodeId
     vaeOutputSlot = 2
     samplerModelId = modelNodeId
+
+  } else if (SNIFFED_FAMILY[strategy]) {
+    // ─── Header-sniffed families (Discord 2026-09-28) ───
+    const family = SNIFFED_FAMILY[strategy]!
+    const modelId = String(n++)
+    const clipId = String(n++)
+    if (fromCheckpoint) {
+      workflow[modelId] = { class_type: 'CheckpointLoaderSimple', inputs: { ckpt_name: params.model } }
+    } else {
+      addUnetLoader(workflow, modelId, params.model, allNodes)
+    }
+    // An all-in-one checkpoint brings its own encoder / VAE. Known from the
+    // header; when the header was not readable, the separate files are tried
+    // first and the checkpoint's own outputs are the fallback.
+    const parts = gp.modelParts
+    const ownClip = fromCheckpoint && !!parts?.textEncoder
+    const ownVae = fromCheckpoint && !!parts?.vae
+    let resolved: { encoders: string[]; vae?: string }
+    try {
+      resolved = resolveFamilyParts(family, models.clips, models.vaes, { encoders: !ownClip, vae: !ownVae })
+    } catch (err) {
+      if (!(err instanceof MissingComponentsError)) throw err
+      if (fromCheckpoint && !parts) {
+        resolved = { encoders: [], vae: undefined }
+      } else {
+        throw new WorkflowUnavailableError(err.message, strategy, undefined, { missing: err.missing })
+      }
+    }
+    const useOwnClip = ownClip || (fromCheckpoint && resolved.encoders.length === 0)
+    const useOwnVae = ownVae || (fromCheckpoint && !resolved.vae)
+
+    if (!useOwnClip) {
+      const [e1, e2, e3, e4] = resolved.encoders
+      const clipNode: { class_type: string; inputs: ComfyNodeInputs } =
+        family === 'hidream' ? { class_type: 'QuadrupleCLIPLoader', inputs: { clip_name1: e1, clip_name2: e2, clip_name3: e3, clip_name4: e4 } }
+        : family === 'sd3' ? { class_type: 'TripleCLIPLoader', inputs: { clip_name1: e1, clip_name2: e2, clip_name3: e3 } }
+        : family === 'sdxl_unet' ? { class_type: 'DualCLIPLoader', inputs: { clip_name1: e1, clip_name2: e2, type: 'sdxl' } }
+        : {
+            class_type: 'CLIPLoader',
+            inputs: {
+              clip_name: e1,
+              type: family === 'chroma' ? 'chroma' : family === 'lumina2' ? 'lumina2' : family === 'qwenimage1' ? 'qwen_image' : 'stable_diffusion',
+              device: 'default',
+            },
+          }
+      if (!allNodes[clipNode.class_type]) {
+        throw new WorkflowUnavailableError(
+          `Your ComfyUI is too old for this model (it has no ${clipNode.class_type} node). Update ComfyUI, then try again.`,
+          strategy, undefined, { needsComfyUpdate: true },
+        )
+      }
+      if (clipNode.class_type === 'CLIPLoader') assertClipTypeKnown(String(clipNode.inputs.type), type, strategy, allNodes)
+      workflow[clipId] = clipNode
+      clipSourceId = clipId
+      clipOutputSlot = 0
+    } else {
+      clipSourceId = modelId
+      clipOutputSlot = 1
+    }
+    if (!useOwnVae) {
+      const vaeId = String(n++)
+      workflow[vaeId] = { class_type: 'VAELoader', inputs: { vae_name: resolved.vae! } }
+      vaeSourceId = vaeId
+      vaeOutputSlot = 0
+    } else {
+      vaeSourceId = modelId
+      vaeOutputSlot = 2
+    }
+    modelNodeId = modelId
+    samplerModelId = modelId
 
   } else if (strategy === 'unet_flux' || strategy === 'unet_flux2' || strategy === 'unet_krea2' || strategy === 'unet_zimage' || strategy === 'unet_ernie_image' || strategy === 'unet_qwenimage' || strategy === 'unet_video' || strategy === 'unet_ltx'
     || strategy === 'unet_mochi' || strategy === 'unet_cosmos') {
@@ -614,25 +776,37 @@ export async function buildDynamicWorkflow(
     // below.
     const useDualFluxClip = type === 'flux' && nodes.loaders.includes('DualCLIPLoader')
 
+    // An all-in-one file in models/checkpoints (see fromCheckpoint): its own
+    // encoder / VAE are used when the header says it carries them, and are the
+    // fallback when the header could not be read.
+    const parts = gp.modelParts
+    const carriesClip = fromCheckpoint && (parts ? parts.textEncoder : true)
+    const carriesVae = fromCheckpoint && (parts ? parts.vae : true)
+    const skipClipLookup = fromCheckpoint && !!parts?.textEncoder
+
     let clip = ''
     let fluxPair: { t5: string; clipL: string } | null = null
-    if (useDualFluxClip) {
+    if (skipClipLookup) {
+      // nothing to look up
+    } else if (useDualFluxClip) {
       try {
         fluxPair = await findFluxCLIPPair()
       } catch (clipErr) {
-        throw new WorkflowUnavailableError(
-          clipErr instanceof Error ? clipErr.message : 'Required text encoder not found in ComfyUI.',
-          strategy,
-        )
+        if (!carriesClip) {
+          const message = clipErr instanceof Error ? clipErr.message : 'Required text encoder not found in ComfyUI.'
+          throw new WorkflowUnavailableError(message, strategy, undefined, { missing: registrySpecsNamedIn(type, message) })
+        }
+        clip = ''
       }
     } else {
       try {
         clip = await findMatchingCLIP(type, params.model)
       } catch (clipErr) {
-        throw new WorkflowUnavailableError(
-          clipErr instanceof Error ? clipErr.message : 'Required text encoder not found in ComfyUI.',
-          strategy,
-        )
+        if (!carriesClip) {
+          const message = clipErr instanceof Error ? clipErr.message : 'Required text encoder not found in ComfyUI.'
+          throw new WorkflowUnavailableError(message, strategy, undefined, { missing: registrySpecsNamedIn(type, message) })
+        }
+        clip = ''
       }
     }
 
@@ -641,19 +815,26 @@ export async function buildDynamicWorkflow(
     // no-silent-fallback rule) only when it will actually be used.
     const needsVAELoader = strategy !== 'unet_ltx'
     let vae = ''
-    if (needsVAELoader) {
+    if (needsVAELoader && !(fromCheckpoint && parts?.vae)) {
       try {
         vae = await findMatchingVAE(type)
       } catch (vaeErr) {
-        throw new WorkflowUnavailableError(
-          vaeErr instanceof Error ? vaeErr.message : 'Required VAE not found in ComfyUI.',
-          strategy,
-        )
+        if (!carriesVae) {
+          const message = vaeErr instanceof Error ? vaeErr.message : 'Required VAE not found in ComfyUI.'
+          throw new WorkflowUnavailableError(message, strategy, undefined, { missing: registrySpecsNamedIn(type, message) })
+        }
       }
     }
+    const clipFromFile = !clip && !fluxPair
+    const vaeFromFile = needsVAELoader && !vae
 
-    addUnetLoader(workflow, unetId, params.model, allNodes)
-    workflow[clipId] = useDualFluxClip && fluxPair
+    if (!useDualFluxClip && !clipFromFile) assertClipTypeKnown(clipType, type, strategy, allNodes)
+    if (fromCheckpoint) {
+      workflow[unetId] = { class_type: 'CheckpointLoaderSimple', inputs: { ckpt_name: params.model } }
+    } else {
+      addUnetLoader(workflow, unetId, params.model, allNodes)
+    }
+    if (!clipFromFile) workflow[clipId] = useDualFluxClip && fluxPair
       ? {
           class_type: 'DualCLIPLoader',
           inputs: { clip_name1: fluxPair.t5, clip_name2: fluxPair.clipL, type: 'flux' },
@@ -664,7 +845,7 @@ export async function buildDynamicWorkflow(
         }
 
     let vaeId: string
-    if (needsVAELoader) {
+    if (needsVAELoader && !vaeFromFile) {
       vaeId = String(n++)
       workflow[vaeId] = {
         class_type: 'VAELoader',
@@ -675,10 +856,10 @@ export async function buildDynamicWorkflow(
     }
 
     modelNodeId = unetId
-    clipSourceId = clipId
-    clipOutputSlot = 0
+    clipSourceId = clipFromFile ? unetId : clipId
+    clipOutputSlot = clipFromFile ? 1 : 0
     vaeSourceId = vaeId
-    vaeOutputSlot = 0
+    vaeOutputSlot = vaeFromFile ? 2 : 0
     samplerModelId = unetId
 
   } else {
@@ -824,6 +1005,17 @@ export async function buildDynamicWorkflow(
   // isI2I test in Phase 3, which would otherwise claim the image and turn an
   // edit instruction into ordinary latent img2img.
   const isQwenEdit = !isVideo && strategy === 'unet_qwenimage' && !!gp.inputImage
+  // Qwen-Image-Edit 2509/2511 (official template image_qwen_image_edit_2509):
+  // the source goes through TextEncodeQwenImageEditPlus on both sides and is
+  // the latent itself, sampled at denoise 1.0 like the template.
+  const isQwen1Edit = !isVideo && strategy === 'unet_qwenimage1' && !!gp.inputImage && isQwenImageEditModel(params.model)
+  if (isQwen1Edit && !allNodes['TextEncodeQwenImageEditPlus']) {
+    throw new WorkflowUnavailableError(
+      'Qwen-Image-Edit needs a newer ComfyUI (TextEncodeQwenImageEditPlus). Update ComfyUI, then try again.',
+      strategy, undefined, { needsComfyUpdate: true },
+    )
+  }
+  let qwen1EditImageRef: [string, number] | null = null
 
   const posId = String(n++)
   const negId = String(n++)
@@ -864,10 +1056,30 @@ export async function buildDynamicWorkflow(
       qwenInputs.vae = [vaeSourceId, vaeOutputSlot]
     }
     workflow[posId] = { class_type: 'TextEncodeQwenImage21', inputs: qwenInputs }
+  } else if (isQwen1Edit) {
+    const loadId = String(n++)
+    workflow[loadId] = { class_type: 'LoadImage', inputs: { image: gp.inputImage } }
+    qwen1EditImageRef = [loadId, 0]
+    if (allNodes['FluxKontextImageScale']) {
+      // The template scales the source to a size the model was trained on.
+      const scaleId = String(n++)
+      workflow[scaleId] = { class_type: 'FluxKontextImageScale', inputs: { image: [loadId, 0] } }
+      qwen1EditImageRef = [scaleId, 0]
+    }
+    const editInputs = (prompt: string): ComfyNodeInputs => ({
+      clip: [clipSourceId, clipOutputSlot], prompt, vae: [vaeSourceId, vaeOutputSlot], image1: qwen1EditImageRef!,
+    })
+    workflow[posId] = { class_type: 'TextEncodeQwenImageEditPlus', inputs: editInputs(params.prompt) }
+    workflow[negId] = { class_type: 'TextEncodeQwenImageEditPlus', inputs: editInputs(params.negativePrompt || '') }
   } else {
     workflow[posId] = {
       class_type: 'CLIPTextEncode',
-      inputs: { text: params.prompt, clip: [clipSourceId, clipOutputSlot] },
+      inputs: {
+        // Lumina 2 is trained on a system prompt ahead of the user's; without
+        // it the output drifts badly (CLIPTextEncodeLumina2 does the same join).
+        text: strategy === 'unet_lumina2' ? `${LUMINA2_POSITIVE_SYSTEM} <Prompt Start> ${params.prompt}` : params.prompt,
+        clip: [clipSourceId, clipOutputSlot],
+      },
     }
 
     if (strategy === 'unet_ernie_image' || (strategy === 'unet_krea2' && params.cfgScale === 1)) {
@@ -882,7 +1094,9 @@ export async function buildDynamicWorkflow(
       workflow[negId] = {
         class_type: 'CLIPTextEncode',
         inputs: {
-          text: params.negativePrompt || '',
+          text: strategy === 'unet_lumina2'
+            ? `${LUMINA2_NEGATIVE_SYSTEM} <Prompt Start> ${params.negativePrompt || ''}`
+            : params.negativePrompt || '',
           clip: [clipSourceId, clipOutputSlot],
         },
       }
@@ -894,12 +1108,12 @@ export async function buildDynamicWorkflow(
   // Takes precedence over plain I2I — a mask means "repaint THIS area", never
   // "repaint everything". Ported 1:1 from the web app's tested builder
   // (create-workflows.ts): same node classes, same defaults.
-  const isInpaint = !isVideo && !!gp.inputImage && !!gp.maskImage && strategy === 'checkpoint'
+  const isInpaint = !isVideo && !!gp.inputImage && !!gp.maskImage && sdCheckpointFamily
   // I2I mode: LoadImage → VAEEncode instead of empty latent. A Qwen-Image 2.1
   // edit is excluded: its reference image is already wired into the text
   // encoder above, and its sampler runs at denoise 1.0 like the official
   // template (instruction editing, not a partial re-noise of the source).
-  const isI2I = !isVideo && !isInpaint && !isQwenEdit && params.inputImage && (params.denoise ?? 1.0) < 1.0
+  const isI2I = !isVideo && !isInpaint && !isQwenEdit && !isQwen1Edit && params.inputImage && (params.denoise ?? 1.0) < 1.0
 
   const latentId = String(n++)
 
@@ -967,6 +1181,13 @@ export async function buildDynamicWorkflow(
       class_type: 'EmptyLatentImage',
       inputs: { width: params.width, height: params.height, batch_size: params.batchSize },
     }
+  } else if (SD3_LATENT_STRATEGIES.has(strategy)) {
+    // Chroma, HiDream, SD 3.5, Lumina 2 and Qwen-Image 1: EmptySD3LatentImage,
+    // as in every one of their official templates.
+    workflow[latentId] = {
+      class_type: nodes.latentInit.includes('EmptySD3LatentImage') ? 'EmptySD3LatentImage' : 'EmptyLatentImage',
+      inputs: { width: params.width, height: params.height, batch_size: params.batchSize },
+    }
   } else if (strategy === 'unet_zimage') {
     // Z-Image uses SD3 latent (same architecture family)
     const latentNode = nodes.latentInit.includes('EmptySD3LatentImage')
@@ -1008,6 +1229,13 @@ export async function buildDynamicWorkflow(
       latentRef = [posId, 2]
       delete workflow[latentId]
     }
+  }
+
+  if (isQwen1Edit && qwen1EditImageRef) {
+    const encId = String(n++)
+    workflow[encId] = { class_type: 'VAEEncode', inputs: { pixels: qwen1EditImageRef, vae: [vaeSourceId, vaeOutputSlot] } }
+    latentRef = [encId, 0]
+    delete workflow[latentId]
   }
 
   // I2I override: replace empty latent with LoadImage → VAEEncode
@@ -1097,6 +1325,8 @@ export async function buildDynamicWorkflow(
       throw new WorkflowUnavailableError(
         `Animating with this model family needs the ${i2vNode} node, which your ComfyUI doesn't have. Update ComfyUI, then try again.`,
         strategy,
+        undefined,
+        { needsComfyUpdate: true },
       )
     }
     const loadId = String(n++)
@@ -1157,6 +1387,30 @@ export async function buildDynamicWorkflow(
   // apart (filename convention, a CivitAI metadata field, ...), gate this
   // node on that signal rather than reintroducing it unconditionally.
 
+  // Sampling patches of the header-sniffed families, straight from their
+  // official templates: AuraFlow shift 1 (Chroma), 6 (Lumina 2), 3.1 / 3
+  // (Qwen-Image / -Edit); ModelSamplingSD3 shift 3 (HiDream fast/full) or 6
+  // (dev). Qwen-Image-Edit also runs CFGNorm at strength 1.
+  const auraShift = strategy === 'unet_chroma' ? 1
+    : strategy === 'unet_lumina2' ? 6
+    : strategy === 'unet_qwenimage1' ? (isQwenImageEditModel(params.model) ? 3 : 3.1)
+    : null
+  if (auraShift !== null && allNodes['ModelSamplingAuraFlow']) {
+    const id = String(n++)
+    workflow[id] = { class_type: 'ModelSamplingAuraFlow', inputs: { model: [samplerModelId, 0], shift: auraShift } }
+    samplerModelId = id
+  }
+  if (strategy === 'unet_hidream' && allNodes['ModelSamplingSD3']) {
+    const id = String(n++)
+    workflow[id] = { class_type: 'ModelSamplingSD3', inputs: { model: [samplerModelId, 0], shift: /dev/i.test(params.model) ? 6 : 3 } }
+    samplerModelId = id
+  }
+  if (isQwen1Edit && allNodes['CFGNorm']) {
+    const id = String(n++)
+    workflow[id] = { class_type: 'CFGNorm', inputs: { model: [samplerModelId, 0], strength: 1 } }
+    samplerModelId = id
+  }
+
   // ─── Phase 4: Sampling ───
 
   const samplerId = String(n++)
@@ -1173,7 +1427,7 @@ export async function buildDynamicWorkflow(
       cfg: params.cfgScale,
       sampler_name: params.sampler,
       scheduler: params.scheduler,
-      denoise: isInpaint ? (params.denoise ?? 0.85) : isI2I ? (params.denoise ?? 0.7) : 1.0,
+      denoise: isInpaint ? (params.denoise ?? 0.85) : isI2I ? (params.denoise ?? 0.7) : 1.0, // Qwen-Image-Edit: 1.0, like its template
     },
   }
 
@@ -1548,6 +1802,41 @@ function requireNodes(allNodes: NodePresence, needed: string[], lane: string): v
 
 /** UNET loader that understands GGUF quants: .gguf files load through the
  *  city96 GGUF pack's UnetLoaderGGUF, everything else through core UNETLoader. */
+/** Discord 2026-09-26/28 (boromirofgeo, haschbar): "Node 1
+ *  (CheckpointLoaderSimple): Value not in list". The strategy comes from the
+ *  file NAME, and a name LU cannot place ('unknown') falls to the checkpoint
+ *  pipeline. For a file that sits in diffusion_models that is a guaranteed
+ *  rejection, because CheckpointLoaderSimple only lists models/checkpoints.
+ *  Say what is wrong instead. An unreadable enum stays silent, as before. */
+function assertCheckpointListed(model: string, allNodes: NodePresence): void {
+  const checkpoints = nodeComboOptions(allNodes, 'CheckpointLoaderSimple', 'ckpt_name')
+  if (checkpoints.length === 0 || checkpoints.includes(model)) return
+  const unets = [
+    ...nodeComboOptions(allNodes, 'UNETLoader', 'unet_name'),
+    ...nodeComboOptions(allNodes, 'UnetLoaderGGUF', 'unet_name'),
+  ]
+  throw new WorkflowUnavailableError(
+    unets.includes(model)
+      ? `LU does not recognize which model family ${model} belongs to, so it has no pipeline for it. It sits in models/diffusion_models, where an SD 1.5 / SDXL checkpoint does not work. Pick another model, or report the file name so LU can learn it.`
+      : `${model} is no longer in ComfyUI's model list. It may have been moved or deleted. Pick another model, or restart ComfyUI after adding files.`,
+    'checkpoint',
+  )
+}
+
+/** Discord 2026-09-26 (tbjdrw): "Node 2 (CLIPLoader): Value not in list".
+ *  Newer model families need a CLIPLoader type an older ComfyUI does not have
+ *  yet (flux2, krea2, qwen_image). Only checked when the enum is readable. */
+function assertClipTypeKnown(clipType: string, type: ModelType, strategy: WorkflowStrategy, allNodes: NodePresence): void {
+  const types = nodeComboOptions(allNodes, 'CLIPLoader', 'type')
+  if (types.length === 0 || types.includes(clipType)) return
+  throw new WorkflowUnavailableError(
+    `Your ComfyUI is too old for ${type} models (its text encoder loader has no "${clipType}" type). Update ComfyUI, then try again.`,
+    strategy,
+    undefined,
+    { needsComfyUpdate: true },
+  )
+}
+
 function addUnetLoader(workflow: ComfyApiGraph, id: string, model: string, allNodes: NodePresence): void {
   if (model.toLowerCase().endsWith('.gguf')) {
     if (!allNodes['UnetLoaderGGUF']) {

@@ -107,8 +107,10 @@ describe('classifyModel', () => {
     expect(classifyModel('qwenimage_2_1.safetensors')).toBe('qwenimage')
     // Older Qwen-Image generations stay unknown rather than being routed onto
     // the 2.1 pipeline, which would build a node graph they cannot run.
-    expect(classifyModel('qwen_image_fp8_e4m3fn.safetensors')).toBe('unknown')
-    expect(classifyModel('qwen_image_edit_2509_fp8.safetensors')).toBe('unknown')
+    // Since 2026-09-28 they have their own pipeline (qwenimage1), see
+    // qwen-image-21-workflow.test.ts and sniffed-families-workflow.test.ts.
+    expect(classifyModel('qwen_image_fp8_e4m3fn.safetensors')).toBe('qwenimage1')
+    expect(classifyModel('qwen_image_edit_2509_fp8.safetensors')).toBe('qwenimage1')
     // Companion files, which this same function also sees.
     expect(classifyModel('qwen3vl_8b_int8_convrot.safetensors')).toBe('unknown')
     expect(classifyModel('qwen_image_vae.safetensors')).toBe('unknown')
