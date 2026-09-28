@@ -139,6 +139,25 @@ describe('endpointMap covers every backendCall/invokeMedia site the frontend can
     // shell_execute_cancel below, same reasoning, same Tauri-only shape
     // (Rust kills the process tree by callId, no HTTP route makes sense).
     'execute_code_cancel',
+    // Chat attachments (OOM fix, 2026-09-26): files beside store_backup.json
+    // and native Save As / Open dialogs. Every call site sits behind isTauri()
+    // (lib/chat-attachments.ts, ChatAttachment.tsx, chat-export.ts,
+    // ChatBackupSettings.tsx); the browser build keeps its images in IndexedDB
+    // and exports through a blob download, so there is no dev route to add.
+    'export_chats_dialog', 'import_chats_dialog', 'read_chat_attachment',
+    'save_binary_file_dialog', 'save_chat_attachment_dialog', 'write_chat_attachment',
+    // Model header sniff (Discord 2026-09-28): reads safetensors headers in
+    // the local ComfyUI model folders. The only call site (applyHeaderSniff in
+    // api/comfyui.ts) sits behind isTauri() and keeps the name-based answer
+    // everywhere else, so there is no dev route to add.
+    'sniff_model_files',
+    // Gallery delete to the Recycle Bin (lib/gallery-trash.ts), behind
+    // isTauri(): the browser build has no filesystem to clean.
+    'trash_comfy_output',
+    // Where ComfyUI models land when ComfyUI runs on another machine (GH
+    // #143, api/discover.ts comfyModelTarget). A missing route answers
+    // "local", which is what the dev server always is.
+    'comfy_model_target',
     'exit_app', 'file_read', 'find_orphan_downloads', 'fix_comfyui_cors', 'funnel_ping',
     'get_comfy_gpu_status', 'get_current_time', 'import_local_model', 'install_character_trainer',
     'install_lmstudio', 'install_lmstudio_status', 'install_method', 'install_python',

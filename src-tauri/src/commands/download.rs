@@ -17,7 +17,7 @@ use crate::state::{AppState, DownloadProgress};
 /// drive letter, no `..` — so a crafted `filename` (e.g. "..\\..\\Start
 /// Menu\\Programs\\Startup\\x.bat") can't escape the target directory and drop
 /// an autostart payload. Falls back to "download" if nothing usable remains.
-fn sanitize_filename(name: &str) -> String {
+pub(crate) fn sanitize_filename(name: &str) -> String {
     let base = name.rsplit(['/', '\\']).next().unwrap_or("");
     let cleaned: String = base.chars().filter(|c| !matches!(c, '/' | '\\' | ':' | '\0')).collect();
     let cleaned = cleaned.trim();
@@ -30,7 +30,7 @@ fn sanitize_filename(name: &str) -> String {
 
 /// Reject a subfolder that tries to escape the base (absolute path, drive
 /// letter, or any `..` segment). Returns the subfolder unchanged when safe.
-fn safe_subfolder(subfolder: &str) -> Result<(), String> {
+pub(crate) fn safe_subfolder(subfolder: &str) -> Result<(), String> {
     let norm = subfolder.replace('\\', "/");
     let p = std::path::Path::new(&norm);
     // `starts_with('/')` also catches Windows drive-relative roots like `/x`,
@@ -192,6 +192,29 @@ mod model_folder_tests {
         .unwrap();
         assert_eq!(dest, root.join("custom_nodes/ComfyUI-AnimateDiff-Evolved/models"));
 
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    /// GH #143: a ComfyUI on another machine. Which hosts are this machine,
+    /// and where its files go instead: the storage folder, ComfyUI's layout.
+    #[test]
+    fn a_remote_comfyui_gets_its_files_in_comfyui_layout_here() {
+        for local in ["", "localhost", "127.0.0.1", "::1", "[::1]", "0.0.0.0", "127.0.0.2", " LOCALHOST "] {
+            assert!(super::host_is_this_machine(local), "{local}");
+        }
+        for remote in ["192.168.1.20", "comfy.lan", "10.0.0.5", "ai-box"] {
+            assert!(!super::host_is_this_machine(remote), "{remote}");
+        }
+
+        let root = scratch("remote-root");
+        let dest = super::remote_models_dir(&root, "loras").unwrap();
+        assert_eq!(dest, root.join("loras"));
+        assert!(dest.is_dir());
+        let pack = super::remote_models_dir(&root, "custom_nodes/ComfyUI-AnimateDiff-Evolved/models").unwrap();
+        assert_eq!(pack, root.join("custom_nodes/ComfyUI-AnimateDiff-Evolved/models"));
+        for bad in ["../../etc", "a/../../b", "/abs/path", "C:/x"] {
+            assert!(super::remote_models_dir(&root, bad).is_err(), "{bad}");
+        }
         std::fs::remove_dir_all(&root).ok();
     }
 
@@ -513,7 +536,7 @@ mod download_security_tests {
 /// Split a ComfyUI enum name ("wan/x.safetensors" or plain "x.safetensors")
 /// into its relative dir + basename so both halves can go through the same
 /// jail checks the downloader uses.
-fn split_model_ref(name: &str) -> (String, String) {
+pub(crate) fn split_model_ref(name: &str) -> (String, String) {
     let norm = name.replace('\\', "/");
     match norm.rsplit_once('/') {
         Some((dir, base)) => (dir.to_string(), base.to_string()),
@@ -576,6 +599,12 @@ pub async fn delete_comfy_model(
     extraDirs: Option<Vec<String>>,
     state: State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
+    if let Some(remote) = remote_comfy(&state) {
+        return Err(format!(
+            "{} is on the ComfyUI machine ({}), and LU cannot delete files there. Remove it from the models folder of ComfyUI on that machine.",
+            filename, remote.host
+        ));
+    }
     let comfy_path = state
         .comfy_path
         .lock()
@@ -676,8 +705,86 @@ fn models_dir_in(
     Ok(dir)
 }
 
+/// A ComfyUI on another machine (GH #143, duindain: Ollama and ComfyUI as
+/// services on a LAN box, LU on a Windows PC). Its model folders are on THAT
+/// machine and nothing here can write into them: the folder names it reports
+/// are paths over there, and a ComfyUI install found on this PC is not the one
+/// rendering. Downloads went to one or the other and ended in "Create models
+/// dir: permission denied (os error 5)" or "ComfyUI path not set". They land
+/// in the Model Storage folder now, in ComfyUI's own layout (`loras/...`,
+/// `checkpoints/...`), so copying its folders into the `models` folder over
+/// there, or sharing the folder with that machine, is all it takes.
+pub(crate) struct RemoteComfy {
+    pub host: String,
+    pub root: PathBuf,
+}
+
+pub(crate) fn remote_comfy(state: &State<'_, AppState>) -> Option<RemoteComfy> {
+    let host = state.comfy_host.lock().map(|h| h.clone()).unwrap_or_default();
+    if host_is_this_machine(&host) {
+        return None;
+    }
+    Some(RemoteComfy { host, root: remote_models_root() })
+}
+
+fn host_is_this_machine(host: &str) -> bool {
+    let h = host.trim().trim_matches(|c| c == '[' || c == ']');
+    crate::commands::process::is_local_host(h)
+        || h.parse::<std::net::IpAddr>()
+            .map(|ip| ip.is_loopback() || ip.is_unspecified())
+            .unwrap_or(false)
+}
+
+/// The Model Storage folder when one is set, else a folder in Downloads.
+fn remote_models_root() -> PathBuf {
+    use crate::commands::custom_models::{remembered_root, RememberedRoot};
+    match remembered_root() {
+        RememberedRoot::Folder(dir) => PathBuf::from(dir),
+        _ => dirs::download_dir()
+            .or_else(dirs::home_dir)
+            .unwrap_or_else(std::env::temp_dir)
+            .join("LU ComfyUI models"),
+    }
+}
+
+fn remote_models_dir(root: &Path, subfolder: &str) -> Result<PathBuf, String> {
+    safe_subfolder(subfolder)?;
+    let dir = root.join(subfolder);
+    fs::create_dir_all(&dir)
+        .map_err(|e| format!("Create models dir {}: {}", dir.display(), os_error::english(&e)))?;
+    Ok(dir)
+}
+
+/// Where a ComfyUI model of `subfolder` goes: `models_dir_in`, plus the one
+/// case its arguments cannot show, a ComfyUI on another machine.
+async fn comfy_models_dir(
+    state: &State<'_, AppState>,
+    comfy_path: &Option<String>,
+    subfolder: &str,
+) -> Result<PathBuf, String> {
+    if let Some(remote) = remote_comfy(state) {
+        return remote_models_dir(&remote.root, subfolder);
+    }
+    models_dir_in(engine_folders(state).await.as_ref(), comfy_path, subfolder)
+}
+
+/// For the frontend: whether ComfyUI models land on this machine only, and
+/// where. The Model Manager and Create say so instead of waiting for a
+/// ComfyUI that can never see the file.
+#[tauri::command]
+pub fn comfy_model_target(state: State<'_, AppState>) -> serde_json::Value {
+    match remote_comfy(&state) {
+        Some(r) => serde_json::json!({
+            "remote": true,
+            "host": r.host,
+            "root": r.root.to_string_lossy(),
+        }),
+        None => serde_json::json!({ "remote": false }),
+    }
+}
+
 /// The engine's answer, asked fresh, for the paths that can await it.
-async fn engine_folders(state: &State<'_, AppState>) -> Option<comfy_folders::ComfyFolders> {
+pub(crate) async fn engine_folders(state: &State<'_, AppState>) -> Option<comfy_folders::ComfyFolders> {
     let host = state.comfy_host.lock().map(|h| h.clone()).unwrap_or_default();
     let port = state.comfy_port.lock().map(|p| *p).unwrap_or(0);
     if port == 0 {
@@ -716,7 +823,7 @@ pub async fn download_model(
         p.clone()
     };
 
-    let dest_dir = models_dir_in(engine_folders(&state).await.as_ref(), &comfy_path, &subfolder)?;
+    let dest_dir = comfy_models_dir(&state, &comfy_path, &subfolder).await?;
     let dest_file = dest_dir.join(sanitize_filename(&filename));
 
     let expected_sha256 = match expectedSha256.as_deref() {
@@ -1700,7 +1807,7 @@ pub async fn check_download_space(
             // reading a cache that can predate it, a cold cache pointed the
             // very first space check of a session at the wrong drive (K5's
             // customer-visible half of the same bug).
-            models_dir_in(engine_folders(&state).await.as_ref(), &comfy_path, &sub)?
+            comfy_models_dir(&state, &comfy_path, &sub).await?
         }
         _ => return Err("check_download_space needs a subfolder or a destDir".to_string()),
     };
@@ -1927,7 +2034,7 @@ pub async fn resume_download(
         p.clone()
     };
 
-    let dest_dir = models_dir_in(engine_folders(&state).await.as_ref(), &comfy_path, &subfolder)?;
+    let dest_dir = comfy_models_dir(&state, &comfy_path, &subfolder).await?;
     let dest_file = dest_dir.join(&id);
     let tmp_path = dest_file.with_extension("download");
 
@@ -2360,11 +2467,18 @@ pub async fn check_model_sizes(
     // The same folders the download wrote into. Asking the old way here would
     // measure a tree nothing was written to and report every file as missing.
     let folders = engine_folders(&state).await;
+    // A ComfyUI on another machine: the files are measured where they were
+    // written, in the Model Storage folder (GH #143).
+    let remote = remote_comfy(&state);
 
     let mut results = Vec::with_capacity(files.len());
 
     for file in &files {
-        let dest_dir = match models_dir_in(folders.as_ref(), &comfy_path, &file.subfolder) {
+        let dest = match &remote {
+            Some(r) => remote_models_dir(&r.root, &file.subfolder),
+            None => models_dir_in(folders.as_ref(), &comfy_path, &file.subfolder),
+        };
+        let dest_dir = match dest {
             Ok(d) => d,
             Err(_) => {
                 results.push(CheckFileResult {
@@ -2480,7 +2594,13 @@ mod tests {
             "check_download_space still reads the stale cache instead of asking the engine"
         );
         assert!(delete_body.contains("engine_folders(&state).await"), "{delete_body}");
-        assert!(space_body.contains("engine_folders(&state).await"), "{space_body}");
+        // The space check goes through comfy_models_dir since GH #143 (a
+        // remote ComfyUI measures the Model Storage folder), and that one asks
+        // the engine fresh for everything else.
+        assert!(space_body.contains("comfy_models_dir(&state"), "{space_body}");
+        let dir_body = fn_body(src, "async fn comfy_models_dir(");
+        assert!(dir_body.contains("engine_folders(state).await"), "{dir_body}");
+        assert!(!dir_body.contains("comfy_folders::cached()"), "{dir_body}");
     }
 
     #[test]

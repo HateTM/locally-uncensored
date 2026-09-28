@@ -1,6 +1,7 @@
 
-import { useEffect, useRef } from 'react'
+import { useLayoutEffect, useRef } from 'react'
 import { cn } from './cn'
+import { fitTextarea } from '../../../lib/fit-textarea'
 
 interface Props {
   value: string
@@ -16,11 +17,10 @@ interface Props {
 export function PromptField({ value, onChange, placeholder, onSubmit, maxHeight = 220, autoFocus, className }: Props) {
   const ref = useRef<HTMLTextAreaElement>(null)
 
-  useEffect(() => {
-    const el = ref.current
-    if (!el) return
-    el.style.height = 'auto'
-    el.style.height = Math.min(el.scrollHeight, maxHeight) + 'px'
+  // Measured off-page and written only on a real change (GH #139), so a key
+  // within a line does not lay out the Create page around the field.
+  useLayoutEffect(() => {
+    if (ref.current) fitTextarea(ref.current, maxHeight)
   }, [value, maxHeight])
 
   return (

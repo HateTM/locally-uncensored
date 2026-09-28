@@ -4,7 +4,7 @@ import type { SamplingOverrides } from '../lib/sampling'
 export type Role = 'user' | 'assistant' | 'system' | 'tool'
 
 export interface ImageAttachment {
-  data: string       // base64 encoded
+  data: string       // base64 while composing; lu-attachment:v1:<sha256> in saved chats
   mimeType: string   // e.g. 'image/png', 'image/jpeg'
   name: string       // filename
 }

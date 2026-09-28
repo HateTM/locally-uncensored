@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Sparkles, X, SlidersHorizontal, Square, Workflow } from 'lucide-react'
-import { useCreateStore, MODEL_TYPE_DEFAULTS } from '../../../stores/createStore'
+import { useCreateStore, MODEL_TYPE_DEFAULTS, EDIT_MAX_DENOISE } from '../../../stores/createStore'
 import { classifyModel } from '../../../api/comfyui'
 import { useCreateExp } from './CreateContext'
 import { intentToJob } from '../../../lib/render/cloud-jobs'
@@ -600,7 +600,7 @@ function LaneControls() {
 
         {meta.id === 'edit' && (
           <div className="w-44">
-            <Slider label="Edit strength" min={0.05} max={1} step={0.05} value={denoise} onChange={setDenoise} format={(v) => v.toFixed(2)} />
+            <Slider label="Edit strength" min={0.05} max={EDIT_MAX_DENOISE} step={0.05} value={Math.min(denoise, EDIT_MAX_DENOISE)} onChange={setDenoise} format={(v) => v.toFixed(2)} />
           </div>
         )}
       </div>

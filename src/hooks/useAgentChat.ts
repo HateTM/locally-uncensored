@@ -73,7 +73,7 @@ import { setExplicitFanout, buildSubAgentGates } from '../api/agents/sub-agent'
 import { appendTaskReport } from '../lib/agent-task-report'
 import { useAgentTaskStore } from '../stores/agentTaskStore'
 import { useAgentGoalStore, renderGoalSection } from '../stores/agentGoalStore'
-import { useAgentLoopStore } from '../stores/agentLoopStore'
+import { endLoopUnlessRearmed, useAgentLoopStore } from '../stores/agentLoopStore'
 import { beginRun, isRunStopped, stopRun } from '../lib/run-stop'
 import { buildLoopRecheck, loopPassSaysDone } from '../lib/agent-commands'
 import { applyStoredCompaction } from '../lib/compact-summary'
@@ -91,6 +91,8 @@ import { executeParallel, applyResultToToolCall, type ExecutionRequest } from '.
 import { useToolAuditStore } from '../stores/toolAuditStore'
 import { makeInTurnCacheLookup } from '../api/agents/in-turn-cache'
 import { explainError as explainToolError } from '../api/agents/error-hints'
+import { isOutsideWorkspaceRefusal, OUTSIDE_WORKSPACE_NOTICE } from '../lib/workspace-refusal'
+import { useChatNoticeStore } from '../stores/chatNoticeStore'
 import { settleThinking } from '../lib/thinking-stripper'
 import { openPlanGap, planReconcileSteer, PLAN_RECONCILE_BUDGET } from '../lib/plan-reconcile'
 import { PlanStaleness, planStalenessSteer } from '../lib/plan-staleness'
@@ -2493,6 +2495,15 @@ export function useAgentChat() {
           const result = results.find((r) => r.id === entry.ac.id)
           if (!result) continue
           applyResultToToolCall(entry.ac, result)
+          // Discord 2026-09-28 (xambran): a file outside the chat's folder was
+          // refused in a collapsed tool block, and the model alone was left to
+          // explain it. The user gets the way out above the chat, whatever the
+          // model makes of the refusal (lib/workspace-refusal.ts).
+          // Read off the applied call: file_edit returns its refusal as text,
+          // and only applyResultToToolCall turns that into a failure.
+          if (entry.ac.status === 'failed' && isOutsideWorkspaceRefusal(entry.ac.toolName, entry.ac.error)) {
+            useChatNoticeStore.getState().show('agent-outside-workspace', OUTSIDE_WORKSPACE_NOTICE)
+          }
           // Over-loop accounting (David 2026-06-04): remember every executed call
           // (so an identical repeat is skipped) and count successful media gens
           // against the per-turn cap that stops "13× the same cat".
@@ -3082,10 +3093,16 @@ export function useAgentChat() {
               useAgentLoopStore.getState().clear(convForLoop)
               return
             }
-            void sendRef.current?.(buildLoopRecheck(loopState.task, nextPass), undefined, {
-              displayContent: cap > 0 ? `pass ${nextPass} of ${cap}` : `pass ${nextPass}`,
-              loop: { ...loopState, pass: nextPass },
-            })
+            // A pass that ends before it reaches this driver must not leave
+            // the bar "running" (GH #140, same gap as the Code view's).
+            void endLoopUnlessRearmed(
+              convForLoop,
+              sendRef.current?.(buildLoopRecheck(loopState.task, nextPass), undefined, {
+                displayContent: cap > 0 ? `pass ${nextPass} of ${cap}` : `pass ${nextPass}`,
+                loop: { ...loopState, pass: nextPass },
+              }),
+              () => agentLoopTimers.has(convForLoop),
+            )
           }, loopState.intervalMs))
         }
       }
@@ -3124,7 +3141,9 @@ export function useAgentChat() {
     // caller (useChat.ts's stopGeneration) already resolved it that way. A
     // future caller that stops a run the user is NOT looking at (a per-item
     // Stop in a task list, say) would otherwise silently stop the wrong one.
-    const stoppedConvId = conversationId !== undefined
+    // Only a real id counts: handed to an onClick as is, this got the click
+    // event as the id and stopped nothing (GH #140, the Code view's copy).
+    const stoppedConvId = typeof conversationId === 'string' || conversationId === null
       ? conversationId
       : useChatStore.getState().activeConversationId
     stopRun(stoppedConvId)

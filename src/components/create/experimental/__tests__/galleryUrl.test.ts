@@ -54,6 +54,7 @@ vi.mock('../../../../api/comfyui', () => ({
     type: string = 'output',
   ) =>
     `http://127.0.0.1:8188/view?filename=${filename}&subfolder=${subfolder ?? ''}&type=${type}`),
+  checkComfyConnection: vi.fn(async () => false),
 }))
 
 vi.mock('../../../../api/cloud/jobs', () => ({
@@ -247,5 +248,18 @@ describe('recoverGalleryUrl — local MLX renders on disk', () => {
     await flush()
     expect(vi.mocked(backendCall)).not.toHaveBeenCalled()
     expect(useCreateStore.getState().gallery[0].unavailable).toBe(true)
+    // The engine did not answer, so the tile says offline (and comes back
+    // with it, see gallery-engine-recovery.test.ts).
+    expect(useCreateStore.getState().gallery[0].unavailableReason).toBe('offline')
+  })
+
+  it('an engine that answers but lacks the file says the file is gone', async () => {
+    const { checkComfyConnection } = await import('../../../../api/comfyui')
+    vi.mocked(checkComfyConnection).mockResolvedValueOnce(true)
+    const item = { ...baseItem, id: 'comfy-gone' }
+    useCreateStore.setState({ gallery: [item] })
+    recoverGalleryUrl(item)
+    await flush()
+    expect(useCreateStore.getState().gallery[0].unavailableReason).toBe('gone')
   })
 })

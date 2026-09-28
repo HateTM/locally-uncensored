@@ -28,6 +28,8 @@ export interface ComponentSpec {
   downloadUrl?: string
   /** ComfyUI\models subfolder this component's download lands in. */
   subfolder?: string
+  /** Size, for the "download N GB now?" question in Create. */
+  sizeGB?: number
 }
 
 export interface ComponentRequirements {

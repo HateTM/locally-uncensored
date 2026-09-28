@@ -49,6 +49,11 @@ const CORE_NODES = new Set([
   // Comfy-Org templates for Qwen-Image 2.1. It arrived in 0.37.0, which is
   // younger than most of this list, so determineStrategy gates the lane on
   // its presence and says which version adds it.
+  // Checked against ComfyUI master on 2026-09-28 for the header-sniffed
+  // families: QuadrupleCLIPLoader (nodes_hidream), TripleCLIPLoader
+  // (nodes_sd3), TextEncodeQwenImageEditPlus (nodes_qwen), CFGNorm
+  // (nodes_cfg), FluxKontextImageScale (nodes_flux).
+  'QuadrupleCLIPLoader', 'TripleCLIPLoader', 'TextEncodeQwenImageEditPlus', 'CFGNorm', 'FluxKontextImageScale',
   'CLIPTextEncode', 'TextEncodeQwenImage21', 'CLIPSetLastLayer', 'CLIPVisionEncode', 'ConditioningZeroOut',
   'InpaintModelConditioning', 'AudioEncoderEncode', 'ModelSamplingSD3', 'ModelSamplingAuraFlow',
   'SVD_img2vid_Conditioning', 'VideoLinearCFGGuidance',

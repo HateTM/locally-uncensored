@@ -10,7 +10,7 @@ import {
   getUncensoredTextModels, getMainstreamTextModels,
   detectProviderModelPath, startModelDownloadToPath, luEngineDownloadDir,
   startModelDownload,
-  installBundleComplete, checkBundlesInstalled, resolveHfGgufFiles, planModelDownload,
+  installBundleComplete, remoteBundleNotice, checkBundlesInstalled, resolveHfGgufFiles, planModelDownload,
   type DiscoverModel, type DownloadProgress, type ModelBundle, type HfGgufFile,
 } from '../../api/discover'
 import { getSystemVRAM } from '../../api/comfyui'
@@ -462,7 +462,10 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
     // Start polling BEFORE install so progress is tracked immediately
     dlStore.getState().startPolling()
     try {
-      await installBundleComplete(bundle)
+      const report = await installBundleComplete(bundle)
+      // GH #143: a ComfyUI on another machine. Not an error, the downloads
+      // run; the notice says where they go and what is left to do over there.
+      if (report.remote) setInstallNotice(remoteBundleNotice(bundle.name, report.remote))
     } catch (err) {
       log.error('[DiscoverModels] Bundle install failed', { err })
       setInstallError(`${bundle.name}: ${err instanceof Error ? err.message : String(err)}`)

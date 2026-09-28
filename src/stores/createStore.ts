@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import type { FixupPrompt } from '../lib/render-fixups'
 import { persist } from 'zustand/middleware'
 import { safeJSONStorage } from '../lib/storage-quota'
 import { TRAIN_STEPS_DEFAULT } from '../lib/trainer-presets'
@@ -21,7 +22,7 @@ const RUNTIME_ONLY_KEYS: readonly string[] = [
   'cloudFrames', 'cloudFps',
 ]
 import type { ModelType, ClassifiedModel } from '../api/comfyui'
-import { classifyModel } from '../api/comfyui'
+import { classifyModel, hidreamSampling } from '../api/comfyui'
 import type { HiresUpscaleMethod } from '../api/hires-fix'
 import { releaseVideoBlobUrl } from '../api/mlx-video'
 import { isMlxImageHost } from '../api/mlx-image'
@@ -136,6 +137,15 @@ export const MODEL_TYPE_DEFAULTS: Record<ModelType, {
   // Qwen-Image 2.1: mirrors comfyui.ts MODEL_TYPE_DEFAULTS.qwenimage, which
   // takes every number straight from the official Comfy-Org templates.
   qwenimage:   { steps: 25, cfgScale: 1.0, sampler: 'euler',           scheduler: 'simple', width: 1024, height: 1024 },
+  // The five families below came in with the header sniff (Discord
+  // 2026-09-28); numbers mirror comfyui.ts MODEL_TYPE_DEFAULTS, which takes
+  // them from the official Comfy-Org templates. HiDream dev/full get their
+  // own numbers in hidreamDefaults().
+  qwenimage1:  { steps: 20, cfgScale: 4.0, sampler: 'euler',           scheduler: 'simple', width: 1328, height: 1328 },
+  chroma:      { steps: 26, cfgScale: 3.5, sampler: 'euler',           scheduler: 'beta',   width: 1024, height: 1024 },
+  hidream:     { steps: 16, cfgScale: 1.0, sampler: 'lcm',             scheduler: 'normal', width: 1024, height: 1024 },
+  sd3:         { steps: 20, cfgScale: 4.0, sampler: 'euler',           scheduler: 'sgm_uniform', width: 1024, height: 1024 },
+  lumina2:     { steps: 25, cfgScale: 4.0, sampler: 'res_multistep',   scheduler: 'simple', width: 1024, height: 1024 },
   wan:         { steps: 25, cfgScale: 5.0, sampler: 'euler',           scheduler: 'normal', width: 848,  height: 480, frames: 49, fps: 16 },
   wan22:       { steps: 30, cfgScale: 5.0, sampler: 'euler',           scheduler: 'simple', width: 1024, height: 576, frames: 49, fps: 24 },
   hunyuan:     { steps: 30, cfgScale: 6.0, sampler: 'euler',           scheduler: 'normal', width: 848,  height: 480, frames: 45, fps: 15 },
@@ -158,6 +168,17 @@ export const MODEL_TYPE_DEFAULTS: Record<ModelType, {
   // MODEL_TYPE_DEFAULTS.animatediff, which the workflow builder reads).
   animatediff: { steps: 20, cfgScale: 7.5, sampler: 'euler_ancestral', scheduler: 'normal', width: 512,  height: 512, frames: 16, fps: 8  },
   unknown:     { steps: 20, cfgScale: 7.0, sampler: 'euler',           scheduler: 'normal', width: 1024, height: 1024 },
+}
+
+/** The strongest Edit repaint. At 1.0 an img2img sampler ignores the source
+ *  entirely, which is never what Edit means (Discord 2026-09-25). */
+export const EDIT_MAX_DENOISE = 0.95
+
+/** HiDream I1 ships as fast, dev and full, three different samplers
+ *  (hidream_i1_fast / _dev / _full templates). Fast is the type default. */
+export function hidreamDefaults(model: string): (typeof MODEL_TYPE_DEFAULTS)['hidream'] {
+  const s = hidreamSampling(model)
+  return { ...MODEL_TYPE_DEFAULTS.hidream, steps: s.steps, cfgScale: s.cfg, sampler: s.sampler, scheduler: s.scheduler }
 }
 
 export interface GalleryItem {
@@ -214,6 +235,13 @@ export interface GalleryItem {
    *  is unreachable. Tiles render an honest offline state and Download
    *  disables instead of silently no-oping. */
   unavailable?: boolean
+  /** Runtime-only: why. 'offline' = ComfyUI did not answer; 'gone' = ComfyUI
+   *  answered and the file is not in its output any more. */
+  unavailableReason?: 'offline' | 'gone'
+  /** Runtime-only: bumped when ComfyUI comes back, so a tile that errored
+   *  while it was down loads again (Discord 2026-09-26, tbjdrw: "why do I
+   *  keep getting that?" — the flag never cleared until a restart). */
+  reloadKey?: number
 }
 
 interface CreateState {
@@ -363,6 +391,9 @@ interface CreateState {
    *  prompt. Runtime-only — useCreate sets it when a video gen would fall
    *  back to animated .webp; the modal resolves with the user's choice. */
   vhsInstallPrompt: ((choice: 'install' | 'webp' | 'cancel') => void) | null
+  /** A render is missing files or a newer ComfyUI; Create asks before fixing
+   *  it (lib/render-fixups.ts). Never persisted. */
+  fixupPrompt: (FixupPrompt & { resolve: (go: boolean) => void }) | null
 
   setMode: (mode: 'image' | 'video') => void
   setVideoBackend: (backend: VideoBackendKind) => void
@@ -438,6 +469,7 @@ interface CreateState {
   setProgressPhase: (phase: ProgressPhase) => void
   setCurrentPromptId: (id: string | null) => void
   setVhsInstallPrompt: (resolver: ((choice: 'install' | 'webp' | 'cancel') => void) | null) => void
+  setFixupPrompt: (prompt: (FixupPrompt & { resolve: (go: boolean) => void }) | null) => void
   setError: (error: string | null) => void
   setLastGenTime: (time: string | null) => void
   addToGallery: (item: GalleryItem) => void
@@ -617,6 +649,7 @@ export const useCreateStore = create<CreateState>()(
       motionModelList: [],
       comfyRunning: false,
       vhsInstallPrompt: null,
+      fixupPrompt: null,
 
       setVideoBackend: (videoBackend) => set({ videoBackend, videoBackendInitialized: true }),
       setMode: (mode) => set((state) => {
@@ -649,7 +682,7 @@ export const useCreateStore = create<CreateState>()(
       setPrompt: (prompt) => set({ prompt }),
       setNegativePrompt: (negativePrompt) => set({ negativePrompt }),
       setImageModel: (model, type) => {
-        const defaults = MODEL_TYPE_DEFAULTS[type]
+        const defaults = type === 'hidream' ? hidreamDefaults(model) : MODEL_TYPE_DEFAULTS[type]
         set({
           imageModel: model, imageModelType: type,
           steps: defaults.steps, cfgScale: defaults.cfgScale,
@@ -924,6 +957,7 @@ export const useCreateStore = create<CreateState>()(
       setProgressPhase: (phase) => set({ progressPhase: phase }),
       setCurrentPromptId: (id) => set({ currentPromptId: id }),
       setVhsInstallPrompt: (resolver) => set({ vhsInstallPrompt: resolver }),
+      setFixupPrompt: (prompt) => set({ fixupPrompt: prompt }),
       setError: (error) => set({ error }),
       setLastGenTime: (time) => set({ lastGenTime: time }),
       // Ein frisches Cloud-Ergebnis stellt den Wolken-Modellwaehler auf das
@@ -992,8 +1026,16 @@ export const useCreateStore = create<CreateState>()(
       }),
       removeFromGallery: (id) => set((s) => {
         const gone = s.gallery.find((g) => g.id === id)
-        if (gone) releaseItemMedia(gone)
-        return { gallery: s.gallery.filter((g) => g.id !== id) }
+        const remaining = s.gallery.filter((g) => g.id !== id)
+        if (gone) {
+          releaseItemMedia(gone)
+          // The file goes too, into the Recycle Bin (lib/gallery-trash.ts).
+          void import('../lib/gallery-trash')
+            .then((m) => m.trashGalleryFile(gone, remaining))
+            .then((problem) => { if (problem) useCreateStore.getState().setError(problem) })
+            .catch(() => { /* the entry is gone either way */ })
+        }
+        return { gallery: remaining }
       }),
       clearGallery: () => set((s) => {
         for (const g of s.gallery) releaseItemMedia(g)
@@ -1008,7 +1050,19 @@ export const useCreateStore = create<CreateState>()(
       clearPromptHistory: () => set({ promptHistory: [] }),
       setImageModelList: (list) => set({ imageModelList: list }),
       setVideoModelList: (list) => set({ videoModelList: list }),
-      setComfyRunning: (running) => set({ comfyRunning: running }),
+      setComfyRunning: (running) => set((s) => {
+        if (!running || s.comfyRunning) return { comfyRunning: running }
+        // ComfyUI is back: every local tile that failed while it was away
+        // gets another go instead of staying dark until the next restart.
+        const retry = (g: GalleryItem) => g.unavailable && g.unavailableReason !== 'gone' && !g.jobId && !g.localPath
+        if (!s.gallery.some(retry)) return { comfyRunning: running }
+        return {
+          comfyRunning: running,
+          gallery: s.gallery.map((g) => retry(g)
+            ? { ...g, unavailable: undefined, unavailableReason: undefined, reloadKey: (g.reloadKey ?? 0) + 1 }
+            : g),
+        }
+      }),
     }),
     {
       name: 'create-store',
@@ -1039,7 +1093,7 @@ export const useCreateStore = create<CreateState>()(
         // dataUrls would blow the origin quota (~5-10 MB in WebView2/WKWebView)
         // and every subsequent set() would throw, killing ALL create-store
         // persistence. Cloud items carry remoteUrl + jobId and re-sign lazily.
-        gallery: state.gallery.map(({ dataUrl, unavailable, ...g }: GalleryItem) => g),
+        gallery: state.gallery.map(({ dataUrl, unavailable, unavailableReason, reloadKey, ...g }: GalleryItem) => g),
         promptHistory: state.promptHistory,
         // ── redesign additions (advanced params only; runtime inputs
         //    source/mask/backend/caps stay unpersisted). No version bump: these

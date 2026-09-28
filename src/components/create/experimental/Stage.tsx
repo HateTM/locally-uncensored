@@ -16,7 +16,7 @@ import { mediaRefFrom } from './mediaRef'
 import {
   subscribeInstallRuns, getInstallRun, startInstallRun, cancelInstallRun, clearInstallRun,
 } from '../../../lib/model-install-runs'
-import { galleryItemUrl, fetchGalleryItemBlob, recoverGalleryUrl } from './galleryUrl'
+import { GALLERY_DRAG_TYPE, galleryItemUrl, fetchGalleryItemBlob, recoverGalleryUrl } from './galleryUrl'
 import { InstallCancelled } from '../../../lib/bundle-install'
 import { isMlxImageHost } from '../../../api/mlx-image'
 import { bundleForVideoIntent } from '../../../api/comfyui'
@@ -254,7 +254,14 @@ function InputSlot() {
           onClick={() => inputRef.current?.click()}
           onDragOver={(e) => { e.preventDefault(); setDrag(true) }}
           onDragLeave={() => setDrag(false)}
-          onDrop={(e) => { e.preventDefault(); setDrag(false); const f = e.dataTransfer.files[0]; if (f) handleFile(f) }}
+          onDrop={(e) => {
+            e.preventDefault()
+            setDrag(false)
+            const f = e.dataTransfer.files[0]
+            if (f) { void handleFile(f); return }
+            const item = gallery.find((g) => g.id === e.dataTransfer.getData(GALLERY_DRAG_TYPE))
+            if (item && !loading) void adoptFromGallery(item)
+          }}
           className={cn(
             // max-h trimmed 44vh→36vh so the "or pick from your gallery" strip
             // below stays visible without scrolling at typical window heights

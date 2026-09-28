@@ -1,3 +1,4 @@
+import { resolveMessageAttachments } from '../../lib/chat-attachments'
 /**
  * Anthropic Provider — Claude API
  *
@@ -305,6 +306,7 @@ export class AnthropicProvider implements ProviderClient {
     messages: ChatMessage[],
     options?: ChatOptions,
   ): AsyncGenerator<ChatStreamChunk> {
+    messages = await resolveMessageAttachments(messages)
     const { system, anthropicMessages } = this.convertMessages(messages)
 
     const body: MessagesBody = {
@@ -514,6 +516,7 @@ export class AnthropicProvider implements ProviderClient {
     tools: ToolDefinition[],
     options?: ChatOptions,
   ): Promise<{ content: string; toolCalls: ToolCall[]; promptEvalCount?: number; evalCount?: number }> {
+    messages = await resolveMessageAttachments(messages)
     const { system, anthropicMessages } = this.convertMessages(messages)
 
     const body: MessagesBody = {

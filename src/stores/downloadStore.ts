@@ -4,7 +4,7 @@ import {
   getDownloadProgress, pauseDownload, cancelDownload, clearDownloadEntry, resumeDownload,
   startModelDownload, startModelDownloadToPath, lookupFileMeta, modelsNotVisibleInComfy,
   isPermanentDownloadError, findOrphanDownloads, deleteOrphanDownload, orphanFilename,
-  catalogFilenames, ENUM_SUBFOLDERS, type DownloadProgress, type OrphanDownload,
+  catalogFilenames, ENUM_SUBFOLDERS, comfyModelTarget, type DownloadProgress, type OrphanDownload,
 } from '../api/discover'
 import { isTauri } from '../api/backend'
 import { coalescedJSONStorage } from '../lib/coalescedStorage'
@@ -46,6 +46,9 @@ async function announceUntilVisible(filename: string, subfolder: string | undefi
     // One cheap probe first: with the engine down the wait would spend its
     // whole budget on requests that cannot be answered.
     if (!(await checkComfyConnection())) return
+    // A ComfyUI on another machine cannot see a file on this one until the
+    // user copies it over (GH #143); the Model Manager already said so.
+    if ((await comfyModelTarget()).remote) return
     const left = await waitForModelsVisible({
       missing: () => modelsNotVisibleInComfy([filename]),
       refresh: async () => {

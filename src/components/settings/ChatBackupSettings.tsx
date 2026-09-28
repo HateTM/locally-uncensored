@@ -1,7 +1,8 @@
 import { useRef, useState } from 'react'
 import { Download, Upload } from 'lucide-react'
 import { useChatStore } from '../../stores/chatStore'
-import { exportAllConversations, parseImportedChats } from '../../lib/chat-export'
+import { exportAllConversations, parseImportedChats, missingImagesNote } from '../../lib/chat-export'
+import { backendCall, isTauri } from '../../api/backend'
 
 /**
  * Chat Backup (konata 2026-06-28) — export ALL conversations to one JSON file
@@ -22,10 +23,38 @@ export function ChatBackupSettings() {
     }
     const res = await exportAllConversations(conversations)
     if (res.status === 'cancelled') return
+    if (res.status === 'error') { setMsg(res.error ?? 'Could not export chats.'); return }
     if (res.status === 'saved') {
-      setMsg(`Saved ${res.count} chat${res.count === 1 ? '' : 's'} to ${res.path}`)
+      setMsg(`Saved ${res.count} chat${res.count === 1 ? '' : 's'} to ${res.path}.${missingImagesNote(res.missing)}`)
     } else {
       setMsg(`Downloaded ${res.count} chat${res.count === 1 ? '' : 's'} as JSON.`)
+    }
+  }
+
+  const importText = (content: string) => {
+    try {
+      const convs = parseImportedChats(content)
+      const { added, skipped } = importConversations(convs, 'merge')
+      setMsg(
+        added > 0
+          ? `Imported ${added} chat${added === 1 ? '' : 's'}${skipped ? `, skipped ${skipped} already present` : ''}.`
+          : `Nothing new, all ${skipped} chat${skipped === 1 ? '' : 's'} were already here.`,
+      )
+    } catch (err) {
+      setMsg(err instanceof Error ? err.message : 'Could not import that file.')
+    }
+  }
+
+  // Desktop: the file is read natively and its images are moved into the
+  // attachment store before the WebView parses it, so a large export with
+  // every image inline is never one string in the renderer.
+  const handleImportClick = async () => {
+    if (!isTauri()) { fileRef.current?.click(); return }
+    try {
+      const content = await backendCall<string | null>('import_chats_dialog')
+      if (content) importText(content)
+    } catch (err) {
+      setMsg(err instanceof Error ? err.message : String(err))
     }
   }
 
@@ -40,17 +69,7 @@ export function ChatBackupSettings() {
         setMsg('Could not read that file.')
         return
       }
-      try {
-        const convs = parseImportedChats(content)
-        const { added, skipped } = importConversations(convs, 'merge')
-        setMsg(
-          added > 0
-            ? `Imported ${added} chat${added === 1 ? '' : 's'}${skipped ? `, skipped ${skipped} already present` : ''}.`
-            : `Nothing new, all ${skipped} chat${skipped === 1 ? '' : 's'} were already here.`,
-        )
-      } catch (err) {
-        setMsg(err instanceof Error ? err.message : 'Could not import that file.')
-      }
+      importText(content)
     }
     reader.onerror = () => setMsg('Could not read that file.')
     reader.readAsText(file)
@@ -70,7 +89,7 @@ export function ChatBackupSettings() {
           <Download size={12} /> Export all chats
         </button>
         <button
-          onClick={() => fileRef.current?.click()}
+          onClick={() => void handleImportClick()}
           className="flex-1 text-[0.65rem] flex items-center justify-center gap-1.5 px-2 py-1.5 rounded border border-gray-200 dark:border-white/10 text-gray-600 dark:text-gray-300 hover:border-gray-400 dark:hover:border-white/20 transition-colors"
         >
           <Upload size={12} /> Import chats

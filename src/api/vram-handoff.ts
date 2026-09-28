@@ -51,6 +51,7 @@ import { listRunningModels, loadModel, unloadModel } from './ollama'
 import { startBundledEngine } from './engine'
 import { getAmdGpuArch } from '../lib/hardware'
 import { useSettingsStore } from '../stores/settingsStore'
+import { portraitFrame, wantsFullFigure } from '../lib/subject-framing'
 import {
   getImageModels,
   getVideoModels,
@@ -71,6 +72,7 @@ import {
   buildTxt2VidWorkflow,
   snapToVideoGrid,
   MODEL_TYPE_DEFAULTS,
+  hidreamSampling,
   isPromptQueued,
   type VideoBackend,
 } from './comfyui'
@@ -1251,16 +1253,31 @@ async function generateImage(
     // Capability-aware: read this model's REAL limits/enums from ComfyUI and
     // REJECT (not clamp) any explicit user value beyond them (decision 2).
     const caps = await fetchCaps(model, 'image')
+    // The family from the file header, the same list Create picks from
+    // (Discord 2026-09-26..28): the name alone sent every file it could not
+    // place to the checkpoint loader, and ComfyUI refused a model that sits in
+    // diffusion_models. The header also says whether the file carries its own
+    // text encoder and VAE.
+    const listed = (await getImageModels().catch(() => [])).find((m) => m.name === model)
+    const type = listed?.type ?? classifyModel(model)
     // Per-architecture defaults instead of one hardcoded cfg 7 / 1024² for every
     // image model: Flux/Flux2 are distilled and need cfg 1.0 (cfg 7 fries them),
     // Z-Image Turbo wants ~3.5 / 12 steps, SD1.5 must default to 512² not 1024².
-    const idef = MODEL_TYPE_DEFAULTS[classifyModel(model)] ?? MODEL_TYPE_DEFAULTS.unknown
+    const idef = type === 'hidream'
+      ? { ...MODEL_TYPE_DEFAULTS.hidream, ...hidreamSampling(model) }
+      : MODEL_TYPE_DEFAULTS[type] ?? MODEL_TYPE_DEFAULTS.unknown
     const tun = resolveTunables(args, caps, { steps: idef.steps, cfg: idef.cfg, sampler: idef.sampler, scheduler: idef.scheduler })
     if (tun.reject) return `Cannot generate: ${tun.reject}`
 
     const a = args as Record<string, unknown>
-    const width = clampInt(a.width, idef.width, 64, 4096)
-    const height = clampInt(a.height, idef.height, 64, 4096)
+    // GH #142: a whole figure in the model's square default comes out as a
+    // close-up. Nobody named a size and the prompt wants the full figure, so
+    // it gets the portrait frame the model was trained on (lib/subject-framing).
+    const frame = a.width == null && a.height == null && !args.inputImage && wantsFullFigure(prompt)
+      ? portraitFrame(idef.width)
+      : { width: idef.width, height: idef.height }
+    const width = clampInt(a.width, frame.width, 64, 4096)
+    const height = clampInt(a.height, frame.height, 64, 4096)
     const seed = (typeof a.seed === 'number' && Number.isFinite(a.seed)) ? Math.floor(a.seed) : -1
     const batchSize = clampInt(a.batchSize ?? a.batch_size, 1, 1, 8)
 
@@ -1301,8 +1318,9 @@ async function generateImage(
         ...(typeof a.vae === 'string' && a.vae ? { vae: a.vae as string } : {}),
         ...(typeof a.clipSkip === 'number' ? { clipSkip: a.clipSkip as number } : {}),
         ...(inputImage ? { inputImage, denoise } : {}),
+        ...(listed?.parts ? { modelParts: listed.parts } : {}),
       },
-      classifyModel(model),
+      type,
     )
     // Phase markers (chat-agent hang 2026-06-03): make it obvious in the log
     // whether a stall is in the workflow build (/object_info) or the submit

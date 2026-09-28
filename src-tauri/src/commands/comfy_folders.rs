@@ -176,6 +176,12 @@ impl ComfyFolders {
     /// file the catalog calls a `diffusion_models` file belongs in the folder of
     /// that name. Both are scanned, so this is about keeping the tree the way
     /// the user (and our own delete) expects it, not about visibility.
+    /// Every directory the engine scans for one key (`diffusion_models` is
+    /// `[models/unet, models/diffusion_models]` plus extra_model_paths).
+    pub fn dirs_for(&self, key: &str) -> Vec<PathBuf> {
+        self.dirs.get(&key.trim().to_ascii_lowercase()).cloned().unwrap_or_default()
+    }
+
     pub fn dir_for(&self, subfolder: &str) -> Option<PathBuf> {
         let key = subfolder.trim().to_ascii_lowercase();
         if key.is_empty() || key.contains('/') || key.contains('\\') {

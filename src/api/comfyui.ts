@@ -52,6 +52,9 @@ export interface GenerateParams {
   seed: number
   batchSize: number
   inputImage?: string   // I2I source image filename (uploaded to ComfyUI)
+  /** What the model file carries besides the diffusion model (header sniff).
+   *  Lets an all-in-one file in models/checkpoints use its own encoder/VAE. */
+  modelParts?: { textEncoder: boolean; vae: boolean }
   denoise?: number      // I2I denoise strength (0.0–1.0, default 1.0 = full txt2img)
   removebg?: boolean    // Background removal: LoadImage → RMBG → SaveImage cutout (no diffusion)
   // Local Edit (mask inpaint): ComfyUI /upload/image filename of the painted
@@ -153,7 +156,7 @@ export function galleryTypeForFile(
 // 2.5.8: ace / wans2v / wananimate / wanvace are the specialized local-lane
 // architectures (music, talking character, motion control). They are neither
 // image nor video picker material — each lane has its own model list.
-export type ModelType = 'flux' | 'flux2' | 'krea2' | 'zimage' | 'ernie_image' | 'qwenimage' | 'sdxl' | 'sd15' | 'wan' | 'wan22' | 'hunyuan' | 'ltx' | 'mochi' | 'cosmos' | 'cogvideo' | 'svd' | 'framepack' | 'pyramidflow' | 'allegro' | 'ace' | 'wans2v' | 'wananimate' | 'wanvace' | 'animatediff' | 'unknown'
+export type ModelType = 'flux' | 'flux2' | 'krea2' | 'zimage' | 'ernie_image' | 'qwenimage' | 'qwenimage1' | 'chroma' | 'hidream' | 'sd3' | 'lumina2' | 'sdxl' | 'sd15' | 'wan' | 'wan22' | 'hunyuan' | 'ltx' | 'mochi' | 'cosmos' | 'cogvideo' | 'svd' | 'framepack' | 'pyramidflow' | 'allegro' | 'ace' | 'wans2v' | 'wananimate' | 'wanvace' | 'animatediff' | 'unknown'
 export type VideoBackend = 'wan' | 'animatediff' | 'none'
 
 export interface ClassifiedModel {
@@ -166,6 +169,9 @@ export interface ClassifiedModel {
    *  (counter-check 2026-08-29, and five more folders in the R5 re-measure
    *  the day after). */
   source: ComfyModelSource
+  /** What the file carries besides the diffusion model, read from its header
+   *  (commands/model_sniff.rs). Absent when the header was not readable. */
+  parts?: { textEncoder: boolean; vae: boolean }
 }
 
 /** The ComfyUI\models folders that hold files a user installs, none of which
@@ -284,6 +290,21 @@ export function classifyModel(name: string | null | undefined): ModelType {
   // Before the 'krea' check and the 'xl' suffix scan below, so no later tag
   // can take a 2.1 file first.
   if (/qwen[._-]?image/.test(lower) && /2[._-]?1/.test(lower)) return 'qwenimage'
+  // Qwen-Image 1 (2508, 2512) and Qwen-Image-Edit (2509, 2511, FireRed):
+  // Qwen2.5-VL 7B encoder, qwen_image_vae, and for the edit files
+  // TextEncodeQwenImageEditPlus (Discord 2026-09-28: "every model except
+  // Juggernaut" — these used to fall through to 'unknown' and the checkpoint
+  // loader). Never the VAE that carries the same stem.
+  if ((/qwen[._-]?image/.test(lower) || lower.includes('firered_image_edit')) && !/[._-]vae/.test(lower)) return 'qwenimage1'
+
+  // Families that used to fall through to 'unknown' and the checkpoint loader.
+  // The header sniff (commands/model_sniff.rs) finds them under any name; the
+  // names here cover a ComfyUI on another machine, where no header is readable.
+  // Word start only: zavychromaXL is an SDXL checkpoint.
+  if (/(^|[^a-z])chroma/.test(lower)) return 'chroma'
+  if (lower.includes('hidream')) return 'hidream'
+  if (/(^|[^a-z0-9])sd[._-]?3|stable[._-]?diffusion[._-]?3/.test(lower)) return 'sd3'
+  if (lower.includes('lumina') || lower.includes('netayume')) return 'lumina2'
 
   // Z-Image (uses qwen_image CLIP type, NOT flux2 — different embedding dimensions)
   if (lower.includes('z_image') || lower.includes('z-image') || lower.includes('zimage')) return 'zimage'
@@ -320,8 +341,20 @@ export function classifyModel(name: string | null | undefined): ModelType {
   return 'unknown'
 }
 
+/** HiDream I1 ships as fast, dev and full, three different samplers
+ *  (hidream_i1_fast / _dev / _full templates). Fast is the type default. */
+export function hidreamSampling(model: string): { steps: number; cfg: number; sampler: string; scheduler: string } {
+  const lower = model.toLowerCase()
+  if (lower.includes('full')) return { steps: 50, cfg: 5.0, sampler: 'uni_pc', scheduler: 'simple' }
+  if (lower.includes('dev')) return { steps: 28, cfg: 1.0, sampler: 'lcm', scheduler: 'normal' }
+  const d = MODEL_TYPE_DEFAULTS.hidream
+  return { steps: d.steps, cfg: d.cfg, sampler: d.sampler, scheduler: d.scheduler }
+}
+
 export function isImageModelType(type: ModelType): boolean {
-  return type === 'flux' || type === 'flux2' || type === 'krea2' || type === 'zimage' || type === 'ernie_image' || type === 'qwenimage' || type === 'sdxl' || type === 'sd15' || type === 'unknown'
+  return type === 'flux' || type === 'flux2' || type === 'krea2' || type === 'zimage' || type === 'ernie_image' || type === 'qwenimage'
+    || type === 'qwenimage1' || type === 'chroma' || type === 'hidream' || type === 'sd3' || type === 'lumina2'
+    || type === 'sdxl' || type === 'sd15' || type === 'unknown'
 }
 
 export function isVideoModelType(type: ModelType): boolean {
@@ -451,6 +484,13 @@ export const MODEL_TYPE_DEFAULTS: Record<string, ModelTypeDefaults> = {
   // KSampler widgets: 25 steps, cfg 1, euler, simple; canvas 1024x1024 at
   // 1 megapixel). Native 2K is available by raising width/height.
   qwenimage: { steps: 25, cfg: 1.0, sampler: 'euler',        scheduler: 'simple', width: 1024, height: 1024, frames: 1, fps: 1 },
+  // Numbers from the official Comfy-Org templates (image_qwen_image, image_qwen_image_edit_2509,
+  // image_chroma_text_to_image, hidream_i1_fast, sd3.5_simple_example) and nodes_lumina2.
+  qwenimage1: { steps: 20, cfg: 4.0, sampler: 'euler',       scheduler: 'simple', width: 1328, height: 1328, frames: 1, fps: 1 },
+  chroma:     { steps: 26, cfg: 3.5, sampler: 'euler',       scheduler: 'beta',   width: 1024, height: 1024, frames: 1, fps: 1 },
+  hidream:    { steps: 16, cfg: 1.0, sampler: 'lcm',         scheduler: 'normal', width: 1024, height: 1024, frames: 1, fps: 1 },
+  sd3:        { steps: 20, cfg: 4.0, sampler: 'euler',       scheduler: 'sgm_uniform', width: 1024, height: 1024, frames: 1, fps: 1 },
+  lumina2:    { steps: 25, cfg: 4.0, sampler: 'res_multistep', scheduler: 'simple', width: 1024, height: 1024, frames: 1, fps: 1 },
   unknown:{ steps: 25, cfg: 7.0, sampler: 'euler',           scheduler: 'normal', width: 1024, height: 1024, frames: 1, fps: 1 },
   // ── Video ──
   wan: { steps: 30, cfg: 6.0, sampler: 'euler', scheduler: 'normal', width: 832, height: 480, frames: 81, fps: 16 },
@@ -897,6 +937,71 @@ export async function filterPartialFiles(filenames: string[]): Promise<Set<strin
  * The catalogue card keeps its own verdict (discover.ts filters there) and goes
  * on saying honestly that the package is not fully downloaded.
  */
+/** A VAE that landed in a main model folder (Discord 2026-09-26: a CivitAI
+ *  download of minimax_h3_video_vae_fp16 showed up as an IMAGE model). It can
+ *  never run as one, so the picker leaves it out. Deliberately narrow: only a
+ *  name that ENDS in vae (plus a precision tag). */
+export function isStrayAddonFile(name: string): boolean {
+  const base = name.split(/[\\/]/).pop()!.toLowerCase()
+  // "bakedvae", "realvisxl_v40_vae": checkpoints that carry their VAE.
+  if (base.includes('baked') || /v\d+[a-z0-9]*[._-]vae/.test(base)) return false
+  return /[._-]vae([._-](fp16|fp32|bf16|fp8[a-z0-9_]*))?\.(safetensors|sft|pt|pth|ckpt|bin|gguf)$/.test(base)
+}
+
+/** Header families that map straight onto a ModelType. */
+const SNIFF_TYPES: Record<string, ModelType> = {
+  flux: 'flux', flux2: 'flux2', krea2: 'krea2', zimage: 'zimage', ernie_image: 'ernie_image',
+  qwenimage: 'qwenimage', qwenimage1: 'qwenimage1', chroma: 'chroma', hidream: 'hidream',
+  sd3: 'sd3', lumina2: 'lumina2', sdxl: 'sdxl', sd15: 'sd15', wan: 'wan',
+}
+
+/** Name types the header may overrule: the image families and 'unknown'. A
+ *  video or lane name keeps its name type, because Wan 2.1 and 2.2 (and S2V,
+ *  Animate, VACE) share one tensor layout and only the name tells them apart. */
+const SNIFF_OVERRULES = (t: ModelType) => isImageModelType(t)
+
+/**
+ * Discord 2026-09-26..28 (boromirofgeo, haschbar, s3aldra): a CivitAI name
+ * says nothing reliable about the architecture, and every name LU could not
+ * place went to the checkpoint loader ("Node 1 (CheckpointLoaderSimple):
+ * Value not in list"). The file header does say it. Rewrites `type` in place
+ * from the header, drops files that are a bare VAE or text encoder, and
+ * records which parts an all-in-one file carries. Best effort: a ComfyUI on
+ * another machine, a GGUF, or a browser build keeps the name-based answer.
+ */
+export async function applyHeaderSniff(models: ClassifiedModel[]): Promise<void> {
+  const ask = models.filter((m) => SNIFF_OVERRULES(m.type) && !m.name.toLowerCase().endsWith('.gguf'))
+  if (ask.length === 0) return
+  let answers: Array<{ folder: string; name: string; arch?: string | null; hasTextEncoder?: boolean; hasVae?: boolean }>
+  try {
+    const { backendCall, isTauri } = await import('./backend')
+    if (!isTauri()) return
+    answers = await backendCall('sniff_model_files', {
+      files: ask.map((m) => ({ folder: m.source === 'checkpoint' ? 'checkpoints' : 'diffusion_models', name: m.name })),
+    })
+  } catch (err) {
+    log.warn('comfyui.header_sniff_failed', { err })
+    return
+  }
+  const byKey = new Map(answers.map((a) => [`${a.folder}|${a.name}`, a]))
+  const drop = new Set<ClassifiedModel>()
+  for (const m of ask) {
+    const a = byKey.get(`${m.source === 'checkpoint' ? 'checkpoints' : 'diffusion_models'}|${m.name}`)
+    if (!a?.arch) continue
+    if (a.arch === 'vae' || a.arch === 'text_encoder') { drop.add(m); continue }
+    const type = SNIFF_TYPES[a.arch]
+    if (type && type !== m.type) {
+      log.info('comfyui.header_sniff_retyped', { name: m.name, from: m.type, to: type })
+      m.type = type
+    }
+    m.parts = { textEncoder: !!a.hasTextEncoder, vae: !!a.hasVae }
+  }
+  if (drop.size > 0) {
+    const kept = models.filter((m) => !drop.has(m))
+    models.splice(0, models.length, ...kept)
+  }
+}
+
 async function mainModelLane(
   keep: (type: ModelType) => boolean,
   hidePartialDownloads: boolean,
@@ -917,29 +1022,27 @@ async function mainModelLane(
     : null
   const result: ClassifiedModel[] = []
 
+  const candidates: ClassifiedModel[] = []
   for (const name of checkpoints) {
     if (complete && !complete.has(name)) continue
-    const type = classifyModel(name)
-    // One predicate for both loops. isImageModelType lets 'unknown' through, so
-    // a checkpoint the classifier cannot name is still offered, while the video
-    // types (SVD) and the lane architectures (ACE audio, Wan S2V/Animate/VACE)
-    // stay in their own pickers. The old branch renamed anything unmatched to
-    // sdxl instead of skipping it, which put an ACE-Step music checkpoint at
-    // the top of the image picker on a real box.
-    if (!keep(type)) continue
-    result.push({ name, type, source: 'checkpoint' })
+    if (isStrayAddonFile(name)) continue
+    candidates.push({ name, type: classifyModel(name), source: 'checkpoint' })
   }
-
   for (const name of unets) {
     if (complete && !complete.has(name)) continue
-    const type = classifyModel(name)
-    // isImageModelType already lets 'unknown' through, so a UNET the classifier
-    // cannot name is still offered. The lane-specific architectures (ACE audio,
-    // Wan S2V/Animate/VACE) are excluded by that same predicate and stay in
-    // their own pickers.
-    if (keep(type)) {
-      result.push({ name, type, source: 'diffusion_model' })
-    }
+    if (isStrayAddonFile(name)) continue
+    candidates.push({ name, type: classifyModel(name), source: 'diffusion_model' })
+  }
+  await applyHeaderSniff(candidates)
+
+  // One predicate for both folders. isImageModelType lets 'unknown' through,
+  // so a file neither the name nor the header can place is still offered,
+  // while the video types (SVD) and the lane architectures (ACE audio, Wan
+  // S2V/Animate/VACE) stay in their own pickers. The old branch renamed
+  // anything unmatched to sdxl instead of skipping it, which put an ACE-Step
+  // music checkpoint at the top of the image picker on a real box.
+  for (const m of candidates) {
+    if (keep(m.type)) result.push(m)
   }
 
   return result
@@ -1795,7 +1898,14 @@ export async function submitWorkflow(workflow: ComfyApiGraph, clientId?: string)
       if (isRecord(nodeErrors)) {
         for (const [nodeId, data] of Object.entries(nodeErrors)) {
           const errs = asRecordArray(isRecord(data) ? data.errors : undefined)
-            .map((e) => asString(e.message) ?? asString(e.details) ?? '')
+            // "Value not in list" alone names no value; the details say which
+            // one ("ckpt_name: 'x.safetensors' not in [...]"). The list itself
+            // can be hundreds of file names, so it is cut off.
+            .map((e) => {
+              const message = asString(e.message) ?? ''
+              const details = asString(e.details)?.split(' not in [')[0].slice(0, 200)
+              return details && message ? `${message} (${details})` : message || details || ''
+            })
             .filter(Boolean)
             .join(', ') || 'unknown'
           const cls = (isRecord(data) ? asString(data.class_type) : undefined) ?? '?'

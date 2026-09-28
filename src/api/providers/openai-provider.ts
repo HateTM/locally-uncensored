@@ -1,3 +1,4 @@
+import { resolveMessageAttachments } from '../../lib/chat-attachments'
 import { captureFlashGeneration, parseFlashPolicy, recordFlashResponse } from '../../lib/flash-ui'
 
 /**
@@ -225,6 +226,20 @@ function toModelEntry(m: Record<string, unknown>): OpenAIModelEntry {
  */
 function asUnfiltered(u: unknown): 'full' | 'partial' | undefined {
   return u === 'full' || u === 'partial' ? u : undefined
+}
+
+/**
+ * llama.cpp's context refusal (`exceed_context_size_error`) carries its two
+ * numbers beside the sentence, and the sentence alone drops them. Keep them in
+ * the text: the Code Agent cuts its history by exactly that much and sends the
+ * step again (GH #140, hooks/codex/context-overflow.ts).
+ */
+function withContextNumbers(message: string, err: unknown): string {
+  const nCtx = prop(err, 'n_ctx')
+  const nPrompt = prop(err, 'n_prompt_tokens')
+  return typeof nCtx === 'number' && typeof nPrompt === 'number'
+    ? `${message} (request (${nPrompt} tokens), context size (${nCtx} tokens))`
+    : message
 }
 
 // ── Known context lengths for popular models ───────────────────
@@ -782,6 +797,7 @@ export class OpenAIProvider implements ProviderClient {
     messages: ChatMessage[],
     options?: ChatOptions,
   ): AsyncGenerator<ChatStreamChunk> {
+    messages = await resolveMessageAttachments(messages)
     const body: OpenAIChatRequest = {
       model,
       // Bug B3: one system message, first. The built-in engine and LM Studio
@@ -896,7 +912,7 @@ export class OpenAIProvider implements ProviderClient {
           throw new Error(
             typeof streamErr === 'string'
               ? streamErr
-              : (asString(prop(streamErr, 'message')) || 'Streaming error'),
+              : withContextNumbers(asString(prop(streamErr, 'message')) || 'Streaming error', streamErr),
           )
         }
 
@@ -996,6 +1012,7 @@ export class OpenAIProvider implements ProviderClient {
     tools: ToolDefinition[],
     options?: ChatOptions,
   ): Promise<{ content: string; toolCalls: ToolCall[]; promptEvalCount?: number; evalCount?: number; thinking?: string }> {
+    messages = await resolveMessageAttachments(messages)
     const body: OpenAIChatRequest = {
       model,
       // Bug B3: same invariant as chatStream, see providers/normalize-system.ts.
@@ -1692,7 +1709,7 @@ export class OpenAIProvider implements ProviderClient {
       } else if (err && typeof err === 'object') {
         const eo = err as { message?: string; code?: string }
         if (eo.message) {
-          message = eo.message
+          message = withContextNumbers(eo.message, err)
           hasServerMessage = true
         }
         if (eo.code) code = eo.code

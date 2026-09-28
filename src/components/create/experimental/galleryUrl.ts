@@ -1,4 +1,4 @@
-import { getImageUrl } from '../../../api/comfyui'
+import { checkComfyConnection, getImageUrl } from '../../../api/comfyui'
 import { refreshResultUrl, resolveResultUrl } from '../../../api/cloud/jobs'
 import { backendCall, fetchLocalhostBytes, isTauri } from '../../../api/backend'
 import { useCreateStore, type GalleryItem } from '../../../stores/createStore'
@@ -7,13 +7,10 @@ import { useCreateStore, type GalleryItem } from '../../../stores/createStore'
  *  remoteUrl (cloud signed URL) → dataUrl (in-memory self-contained fallback)
  *  → ComfyUI /view path (filename/subfolder). */
 export function galleryItemUrl(item: GalleryItem): string {
-  return item.remoteUrl
-    ?? item.dataUrl
-    ?? getImageUrl(
-      item.filename,
-      item.subfolder,
-      item.comfyType ?? 'output',
-    )
+  if (item.remoteUrl ?? item.dataUrl) return (item.remoteUrl ?? item.dataUrl)!
+  const view = getImageUrl(item.filename, item.subfolder, item.comfyType ?? 'output')
+  // A new URL per retry, or the element never asks again (setComfyRunning).
+  return item.reloadKey ? `${view}${view.includes('?') ? '&' : '?'}lu_retry=${item.reloadKey}` : view
 }
 
 // Cloud signed URLs expire ~1 h after the last read, so a persisted item's
@@ -41,10 +38,19 @@ export function recoverGalleryUrl(item: GalleryItem): void {
       void restoreFromDisk(item)
       return
     }
-    // Local ComfyUI item whose /view fetch failed (engine not running /
-    // output pruned) — nothing to re-sign. Flag it so the tiles can render
-    // an honest "engine offline" state instead of a silently dead <img>.
-    if (!item.unavailable) useCreateStore.getState().updateGalleryItem(item.id, { unavailable: true })
+    // Local ComfyUI item whose /view fetch failed — nothing to re-sign. Say
+    // which of the two it is: an engine that does not answer (the tile comes
+    // back by itself when it does, see setComfyRunning), or an engine that
+    // answers and no longer has the file.
+    if (!item.unavailable) {
+      void checkComfyConnection().catch(() => false).then((up) => {
+        useCreateStore.getState().updateGalleryItem(item.id, { unavailable: true, unavailableReason: up ? 'gone' : 'offline' })
+        if (!up) {
+          useCreateStore.getState().setComfyRunning(false)
+          watchForEngine()
+        }
+      })
+    }
     return
   }
   const last = recovered.get(item.id)
@@ -67,6 +73,26 @@ export function recoverGalleryUrl(item: GalleryItem): void {
     // Could not ask. Release the guard so the next remount tries again.
     recovered.delete(item.id)
   })
+}
+
+// While tiles wait for an engine that did not answer, ask again every 10 s
+// and let setComfyRunning(true) bring them back. Nothing else polls the
+// connection, so without this they stayed dark until the next app start.
+// Stops by itself as soon as no tile is waiting.
+let engineWatch: ReturnType<typeof setInterval> | null = null
+function watchForEngine(): void {
+  if (engineWatch) return
+  engineWatch = setInterval(() => {
+    const waiting = useCreateStore.getState().gallery.some((g) => g.unavailable && g.unavailableReason === 'offline')
+    if (!waiting) {
+      clearInterval(engineWatch!)
+      engineWatch = null
+      return
+    }
+    void checkComfyConnection().catch(() => false).then((up) => {
+      if (up) useCreateStore.getState().setComfyRunning(true)
+    })
+  }, 10_000)
 }
 
 /**
@@ -175,3 +201,9 @@ export async function fetchGalleryItemBlob(item: GalleryItem): Promise<Blob> {
     throw err
   }
 }
+
+/** Discord 2026-09-26 (boromirofgeo): dragging a gallery tile onto the Edit
+ *  drop zone did nothing. An in-page <img> drag carries a URL, never a File,
+ *  so the zone's `dataTransfer.files[0]` was always empty. The tile now names
+ *  its gallery item under this type, and the zone adopts it like a click. */
+export const GALLERY_DRAG_TYPE = 'application/x-lu-gallery-item'

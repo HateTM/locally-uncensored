@@ -5,6 +5,8 @@ import type { Conversation, Message, ChatArtifact, CompactionRecord } from '../t
 import type { AgentBlock } from '../types/agent-mode'
 import { clampSampling, type SamplingOverrides } from '../lib/sampling'
 import { idbStorage } from '../lib/idbStorage'
+import { externalizeConversations, hasInlineImages } from '../lib/chat-attachments'
+import { holdBackup, releaseBackup } from '../lib/backup-hold'
 import { coalescedJSONStorage } from '../lib/coalescedStorage'
 import { migrateBlockInPlace } from '../api/agents/block-helpers'
 import { markStaleWorkflowProgressStoppedOnBlock, extractWorkflowNameFromProgressMessage } from '../lib/workflow-progress-view'
@@ -188,7 +190,43 @@ interface ChatState {
  * history that was gigabytes of live strings per answer and an Out of Memory in
  * the renderer. Now the newest state is written at most once per window.
  */
-const chatStorage = coalescedJSONStorage<ChatState>(idbStorage)
+const MIGRATION_HOLD = 'chat-attachment-migration'
+const durableAttachments = typeof indexedDB !== 'undefined'
+// Released by the first write after hydration, or right at hydration when
+// there is nothing to move. See lib/backup-hold.ts.
+if (durableAttachments) holdBackup(MIGRATION_HOLD)
+
+const chatStorage = coalescedJSONStorage<ChatState>(idbStorage, {
+  // Hydration first, then writes: see `ready` in coalescedStorage.ts. Without
+  // it a set() during hydration (picking a model does one) wrote an empty
+  // history over the real one, and a crash before the next write kept it.
+  // try: a write offered while create() itself runs sees the store before its
+  // binding exists, and that write is one of the ones to drop.
+  ready: (): boolean => { try { return useChatStore.persist.hasHydrated() } catch { return false } },
+  // Keep synchronous fallback hydration in environments without durable blobs.
+  ...(durableAttachments ? {
+    prepare: async (value) => {
+      if (!Array.isArray(value.state?.conversations)) return value
+      const conversations = await externalizeConversations(value.state.conversations)
+      // Whatever could move has moved. If a disk error kept some images
+      // inline, the backup goes on as it always did rather than stay held.
+      if (conversations === value.state.conversations) releaseBackup(MIGRATION_HOLD)
+      return conversations === value.state.conversations ? value : { ...value, state: { ...value.state, conversations } }
+    },
+    prepared: (before, after) => {
+      releaseBackup(MIGRATION_HOLD)
+      if (before === after) return
+      // Replace only the exact image arrays we migrated. Streaming content,
+      // deleted chats and new messages that arrived while saving win.
+      const replacements = new Map(before.state.conversations.flatMap((c, ci) =>
+        c.messages.flatMap((m, mi) => m.images && m.images !== after.state.conversations[ci].messages[mi].images
+          ? [[m.images, after.state.conversations[ci].messages[mi].images] as const] : [])))
+      useChatStore.setState(state => ({ conversations: state.conversations.map(c => ({ ...c,
+        messages: c.messages.map(m => m.images && replacements.has(m.images) ? { ...m, images: replacements.get(m.images) } : m),
+      })) }))
+    },
+  } : {}),
+})
 
 /**
  * Write the chat history out NOW instead of waiting for the coalescing window.
@@ -645,3 +683,24 @@ export const useChatStore = create<ChatState>()(
     }
   )
 )
+
+/**
+ * After hydration, move a legacy history's images out through the ordinary
+ * write path. Nothing here blocks the app: the chats are on screen already,
+ * the old value stays on disk untouched until the lighter one has landed, and
+ * an interruption at any point leaves one of the two complete.
+ */
+function afterHydration(): void {
+  if (!durableAttachments) return
+  const state = useChatStore.getState()
+  if (!hasInlineImages(state.conversations)) {
+    releaseBackup(MIGRATION_HOLD)
+    return
+  }
+  const { name, version, partialize } = useChatStore.persist.getOptions()
+  if (!name) return
+  const persisted = (partialize ? partialize({ ...state }) : { ...state }) as ChatState
+  void chatStorage.setItem(name, { state: persisted, version })
+}
+if (useChatStore.persist.hasHydrated()) afterHydration()
+else useChatStore.persist.onFinishHydration(afterHydration)

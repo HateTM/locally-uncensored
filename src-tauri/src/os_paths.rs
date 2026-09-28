@@ -154,7 +154,7 @@ pub(crate) mod test_storage {
         let fixture = r#"{"native-isolation-fixture":"owned"}"#.to_string();
         crate::commands::system::backup_stores(fixture.clone()).unwrap();
         assert_eq!(std::fs::read_to_string(persistent.join("store_backup.json")).unwrap(), fixture);
-        assert_eq!(crate::commands::system::restore_stores().unwrap(), Some(fixture));
+        assert_eq!(crate::commands::system::read_store_backup().unwrap(), Some(fixture));
     }
 }
 

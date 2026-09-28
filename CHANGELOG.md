@@ -2,6 +2,81 @@
 
 All notable changes to Locally Uncensored are documented here.
 
+## [3.0.3] - 2026-09-28
+
+A hotfix for chats with many images, which could run the app out of memory,
+for Create with models it could not place by their file name, and for the five
+bugs reported on GitHub since 3.0.2. The open-model counts from 3.0.2 still
+hold: fourteen video models and seven image models in the cloud catalogue.
+
+### Fixed
+
+- **Chats with many images no longer run the app out of memory.** Every image
+  was kept inline in the saved chat history, and a few chats with phone photos
+  were enough to make that history too big for the app's memory. On Windows the
+  history could not be saved at all once it passed 127 MiB, so newer chats
+  could end up only in the app's backup file. Images are now stored as separate
+  files outside the history. An existing history is moved over once, on the
+  first start of this version, and chats or messages that only the backup file
+  still held are restored from it once. In a long chat, image previews load
+  only near the part you are looking at.
+- **Create reads a model's family from the file, not from its name.** Renders
+  failed with "Value not in list" for models whose file name did not say what
+  they are, which on CivitAI is most of them, because a name Create could not
+  place went to the checkpoint loader. Create now reads the family from the
+  file header (only the header, not the weights) and loads the model from the
+  folder it actually sits in. Chroma, HiDream I1, SD 3.5, Lumina 2, Qwen-Image
+  and Qwen-Image-Edit get pipelines of their own. If the model needs a text
+  encoder or VAE that is not on disk, Create asks once and downloads it. If
+  ComfyUI on this machine is too old for the model, Create asks once and
+  updates it. Before, the run ended with a pointer to the Model Manager. A bare
+  VAE or text encoder file in a model folder no longer shows up as a model.
+- **Edit keeps your photo at full strength.** At strength 1.00, Edit dropped
+  the source image without a word and painted a new picture from the prompt
+  alone. It always keeps the source now, and the slider stops at 0.95, the
+  strongest repaint that still starts from your photo.
+- **Deleting a render in the gallery removes its file too.** Deleting a local
+  render, also from the large view, now moves the file to the Recycle Bin
+  (Windows) or the Trash (Linux), so the ComfyUI output folder stops growing.
+  Before, only the gallery entry went. Dragging a picture from the gallery onto
+  the Edit drop zone now loads it, as a click already did. Tiles that went dark
+  while ComfyUI was not answering come back as soon as it answers; they used to
+  stay dark until the next start.
+- **The agent shows which folder it works in, and how to reach your files.**
+  Setting every agent permission to Auto never let the agent open files
+  outside the chat's working folder, and nothing said so: a dismissed folder
+  dialog left the agent in its own sandbox without a sign. The button next to
+  Agent now always shows where the agent works, Sandbox included, and one click
+  leads to "Pick a folder…". When a file is refused because it is outside that
+  folder, a line above the chat says what to do, and the model gets the same
+  hint. In Settings, Filesystem no longer claims to reach files anywhere.
+- **Typing in the prompt box no longer lags in long chats** (issue 139). Each
+  key made the page lay out the whole visible chat twice to size the box, so
+  the delay grew with the conversation. The box is now measured on a hidden
+  copy and resized only when a line is added or removed. This covers the Chat
+  and Code tabs and the Create prompt field.
+- **Stop works in the Code tab again, also in the /loop bar** (issue 140).
+  Both Stop buttons passed the click event where the stop function expected a
+  conversation, so they stopped nothing. A loop pass that ends early no longer
+  leaves the bar on "running" with the working folder locked. When a server
+  refuses a step because the request exceeds its context size, the step is
+  sent again with the history shortened to fit, and the pass goes on. Later
+  steps start at that size.
+- **The recent list in the collapsed sidebar follows the mode** (issue 141).
+  With Code or Remote picked, it listed the plain chats. It now lists that
+  mode's chats, and opening one stays in that mode.
+- **"Full body" in a chat image shows the whole figure** (issue 142). The
+  chat's image tool rendered every picture in the model's square default, and
+  SDXL, Pony and Illustrious models crop a whole person in a square frame to
+  the face. When the prompt asks for a whole figure and names no size, the
+  picture now gets the upright frame those models were trained on.
+- **Model downloads work with ComfyUI on another machine** (issue 143). With
+  ComfyUI running on another computer, downloads failed with "permission
+  denied" or "ComfyUI path not set". They now go to the Model Storage folder,
+  in ComfyUI's own folder layout. The Model Manager and Create say where the
+  files are and what is left to do on the other machine: copy the folders over
+  or share them, and install any node packs a bundle needs there.
+
 ## [3.0.2] - 2026-09-22
 
 A hotfix for the Code tab, where a conversation taller than the window lost its

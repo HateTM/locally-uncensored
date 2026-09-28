@@ -1,6 +1,6 @@
 [package]
 name = "locally-uncensored"
-version = "3.0.2"
+version = "3.0.3"
 description = "Private, local AI chat & image/video generation"
 authors = ["purpledoubled"]
 edition = "2021"
@@ -38,6 +38,9 @@ which = "6"
 regex = "1"
 glob = "0.3"
 sysinfo = "0.33"
+# Gallery delete moves the render to the Recycle Bin / Trash instead of
+# erasing it (Discord 2026-09-25: deleted renders stayed in ComfyUI/output).
+trash = "5"
 walkdir = "2"
 hostname = "0.4"
 whoami = "1"

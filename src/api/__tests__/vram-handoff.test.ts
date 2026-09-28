@@ -992,3 +992,52 @@ describe('chat-gen image path — per-architecture defaults (not one hardcoded c
     expect(buildDynamicWorkflow.mock.calls[0][0].width).toBe(512)
   })
 })
+
+// ── The chat image tool: framing (GH #142) and the model family (Discord) ──
+
+describe('vramHandoffGenerate — what the image tool builds', () => {
+  beforeEach(() => {
+    getActiveAgentModel.mockReturnValue({ name: 'gpt-4o', providerId: 'openai', remote: false })
+    buildDynamicWorkflow.mockResolvedValue({ '9': { class_type: 'SaveImage' } })
+    submitWorkflow.mockResolvedValue('pid-1')
+    getHistory.mockResolvedValue(completedHistory())
+  })
+  const built = () => buildDynamicWorkflow.mock.calls[0] as [Record<string, unknown>, string]
+
+  it('GH #142: a full-body prompt with no size gets the portrait frame, not the square', async () => {
+    getImageModels.mockResolvedValue([{ name: 'sdxl.safetensors', type: 'sdxl', source: 'checkpoint' }])
+    await vramHandoffGenerate('image', { prompt: 'full body shot of a woman kneeling on a bed, whole bed in frame' })
+    expect([built()[0].width, built()[0].height]).toEqual([832, 1216])
+  })
+
+  it('SD 1.5 gets its own trained portrait size', async () => {
+    getImageModels.mockResolvedValue([{ name: 'sd15.safetensors', type: 'sd15', source: 'checkpoint' }])
+    await vramHandoffGenerate('image', { prompt: 'a knight, head to toe, standing' })
+    expect([built()[0].width, built()[0].height]).toEqual([512, 768])
+  })
+
+  it('a size the caller named wins', async () => {
+    getImageModels.mockResolvedValue([{ name: 'sdxl.safetensors', type: 'sdxl', source: 'checkpoint' }])
+    await vramHandoffGenerate('image', { prompt: 'full body shot of a woman', width: 1216, height: 832 })
+    expect([built()[0].width, built()[0].height]).toEqual([1216, 832])
+  })
+
+  it('COUNTER-CHECK: anything else keeps the model default', async () => {
+    getImageModels.mockResolvedValue([{ name: 'sdxl.safetensors', type: 'sdxl', source: 'checkpoint' }])
+    await vramHandoffGenerate('image', { prompt: 'close-up portrait of a woman' })
+    expect([built()[0].width, built()[0].height]).toEqual([1024, 1024])
+  })
+
+  it('the family comes from the header list, with the parts the file carries', async () => {
+    // A Z-Image under a CivitAI name the name rules cannot place: by name
+    // alone it went to the checkpoint loader and ComfyUI refused it.
+    getImageModels.mockResolvedValue([{
+      name: 'mystery_merge_v3.safetensors', type: 'zimage', source: 'diffusion_model',
+      parts: { textEncoder: false, vae: false },
+    }])
+    await vramHandoffGenerate('image', { prompt: 'a lighthouse at dusk' })
+    const [params, type] = built()
+    expect(type).toBe('zimage')
+    expect(params.modelParts).toEqual({ textEncoder: false, vae: false })
+  })
+})

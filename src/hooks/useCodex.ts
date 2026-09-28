@@ -26,7 +26,7 @@ import { setExplicitFanout } from '../api/agents/sub-agent'
 import { appendTaskReport } from '../lib/agent-task-report'
 import { useAgentTaskStore } from '../stores/agentTaskStore'
 import { useAgentGoalStore, renderGoalSection } from '../stores/agentGoalStore'
-import { useAgentLoopStore } from '../stores/agentLoopStore'
+import { endLoopUnlessRearmed, useAgentLoopStore } from '../stores/agentLoopStore'
 import { beginRun, isRunStopped, stopRun } from '../lib/run-stop'
 import { CODEX_CONFIRM_TOOLS, renderApprovalPreview } from './codexShellGate'
 import { buildHermesToolPrompt, buildHermesToolResult, buildHermesToolCall, parseHermesToolCalls, stripToolCallTags, hasToolCallTags } from '../api/hermes-tool-calling'
@@ -77,6 +77,7 @@ import { generateEmbeddings } from '../api/rag'
 import { truncateToolResult } from '../lib/truncate-tool-result'
 import { toolCallCapMs, raceWithToolTimeout, SHELL_EXECUTE_DEFAULT_TIMEOUT_MS } from '../lib/tool-timeout'
 import { getModelMaxTokens, estimateTokens } from '../lib/context-compaction'
+import { capToLearnedWindow, contextOverflowOf, learnSendWindow, shrunkSendWindow } from './codex/context-overflow'
 import { buildRequestMessages, trimWorkingHistory, decayRestoredToolResult, isToolResult } from '../lib/context-decay'
 import { effectiveSendWindow } from '../lib/send-window'
 import { sendsToALanBackend } from '../lib/lan-openai-slot'
@@ -1112,6 +1113,11 @@ export function useCodex() {
       // letting them surface as the assistant's reply. Cap silent
       // retries so we never loop forever.
       let echoRetriesRemaining = 3
+      // GH #140: a step the server refused as larger than its context goes out
+      // again with a shorter history (codex/context-overflow.ts), at most this
+      // many times in a row. Reset by every step that gets through.
+      let overflowRetries = 0
+      const MAX_OVERFLOW_RETRIES = 3
       // Agentic harness for SMALL local models (v2.5.0). qwen2.5-coder:7b and
       // similar 7B/8B models frequently NARRATE the next step ("I'm about to
       // read the source file.") or ASK for info they could discover themselves
@@ -1228,14 +1234,19 @@ export function useCodex() {
         // fear is largely a myth). effectiveSendWindow carries that profile,
         // and on a paid provider it also carries the send cap.
         const decayOn = settings.contextDecay !== false
-        const sendWindow = effectiveSendWindow({
+        const sendWindow = capToLearnedWindow(effectiveSendWindow({
           providerId,
           modelWindow: numCtx,
           sendWindowTokens: settings.codexSendWindowTokens,
           capEnabled: decayOn,
           smallModelMode: settings.smallModelMode,
           localBackend: sendsToALanBackend(providerId),
-        })
+        }), modelToUse, numCtx)
+        // What this step sends, estimated: the history, and the catalogue that
+        // rides beside it on the native transport. Read when the server
+        // refuses the step as too large (GH #140).
+        let stepPromptEstimate = 0
+        let stepToolsEstimate = 0
         let sendMessages: ChatMessage[] = messages.slice()
         let trimmedReadKeys: ReadonlySet<string> = NO_TRIMMED_KEYS
         try {
@@ -1253,6 +1264,7 @@ export function useCodex() {
             keyOf: (m) => guardKeyOfResult.get(m as unknown as object),
           })
           sendMessages = built.messages
+          stepPromptEstimate = built.promptTokens
           trimmedReadKeys = new Set(built.trimmedKeys)
           if (convId) {
             useSendSizeStore.getState().report(convId, {
@@ -1326,6 +1338,8 @@ export function useCodex() {
         const settleLivePaint = livePaint.settle
         const liveContent = livePaint.feed
 
+        // The three transports, in one try for the context refusal below.
+        try {
         if (strategy === 'native') {
           // Route on the USER's instruction, never on the newest user-role
           // message (audit B6): steers, nudges and blocked-tool notes are
@@ -1404,8 +1418,9 @@ export function useCodex() {
           // provider bills for it, and it is chosen here, after the request was
           // built. Without this the meter showed the messages alone: 732 tokens
           // on the first coding step against 2.400 on the wire.
+          stepToolsEstimate = estimateTokens(JSON.stringify(tools))
           if (convId) {
-            useSendSizeStore.getState().reportTools(convId, estimateTokens(JSON.stringify(tools)))
+            useSendSizeStore.getState().reportTools(convId, stepToolsEstimate)
           }
           void diagLog('iter-start', {
             iter: i,
@@ -1671,6 +1686,30 @@ export function useCodex() {
           } else {
             turnContent = raw
           }
+        }
+        overflowRetries = 0
+        } catch (stepErr) {
+          // GH #140: the server held less than this step. Cut the history to
+          // what fits and send the step again, instead of ending the pass on
+          // HTTP 400 and, under /loop, firing the same refusal every interval.
+          const overflow = contextOverflowOf(stepErr)
+          const sent = stepPromptEstimate > 0 ? Math.min(sendWindow, stepPromptEstimate) : sendWindow
+          const next = overflow && overflowRetries < MAX_OVERFLOW_RETRIES && !abort.signal.aborted
+            ? shrunkSendWindow(sent, overflow, sent + stepToolsEstimate)
+            : null
+          if (!overflow || next === null) throw stepErr
+          overflowRetries++
+          settleLivePaint()
+          learnSendWindow(modelToUse, numCtx, next)
+          void diagLog('context-overflow-retry', { iter: i, sent, next, window: overflow.window, promptTokens: overflow.promptTokens })
+          addBlock({
+            id: uuid(),
+            phase: 'reflection',
+            content: `↻ Context full${overflow.window ? ` (the model holds ${overflow.window} tokens)` : ''}: shortened the history to about ${next} tokens and sent the step again.`,
+            timestamp: Date.now(),
+          })
+          i--
+          continue
         }
 
         // End-of-turn settlement, through the ONE shared routine every path
@@ -2437,6 +2476,12 @@ export function useCodex() {
           hint = '\n\nHint: this model does not support tool calling, so Code mode cannot use it. Pick a model that supports tool calling (Qwen 3, Llama 3.1+, Gemma 4) or an LU Cloud model shown with the tools badge.'
         } else if (/timed out/i.test(msg)) {
           hint = '\n\nHint: a tool call exceeded its time budget. For long builds, raise the command timeout, split the work, or start the command with background: true and poll it with task: "status".'
+        } else if (contextOverflowOf(err)) {
+          // Refused even after the history was cut (GH #140): the fixed part
+          // of the request (instructions and tools) is already too large, and
+          // another /loop pass would only be refused the same way.
+          loopHalt = "too large for the model's context window"
+          hint = "\n\nHint: this step does not fit the model's context window, even with the history shortened. Give the model a larger context window (Settings, or where the server loads the model), or start a new chat for the next task."
         }
         // An empty wallet is not a crash and no retry fixes it. Replace the
         // status-code line with the plain explanation the other surfaces use.
@@ -2653,10 +2698,16 @@ export function useCodex() {
               codexLoopTimers.set(convForLoop, setTimeout(fireLoopPass, 5000))
               return
             }
-            void sendRef.current?.(buildLoopRecheck(loopState.task, nextPass), {
-              displayContent: cap > 0 ? `pass ${nextPass} of ${cap}` : `pass ${nextPass}`,
-              loop: { ...loopState, pass: nextPass },
-            })
+            // A pass that ends before it reaches this driver must not leave
+            // the bar "running" and the folder locked (GH #140).
+            void endLoopUnlessRearmed(
+              convForLoop,
+              sendRef.current?.(buildLoopRecheck(loopState.task, nextPass), {
+                displayContent: cap > 0 ? `pass ${nextPass} of ${cap}` : `pass ${nextPass}`,
+                loop: { ...loopState, pass: nextPass },
+              }),
+              () => codexLoopTimers.has(convForLoop),
+            )
           }
           codexLoopTimers.set(convForLoop, setTimeout(fireLoopPass, loopState.intervalMs))
         }
@@ -2719,7 +2770,12 @@ export function useCodex() {
     // B2 Commit 5: the caller names the run, see useAgentChat.ts's stopAgent
     // for why (today's one caller already resolves it this way, but the
     // function itself should not have to assume that).
-    const stoppedConvId = conversationId !== undefined
+    //
+    // GH #140: only a real id counts. Both Stop buttons of the Code view
+    // handed this function straight to onClick, so the click EVENT arrived as
+    // the conversation to stop, matched nothing, and neither Stop did
+    // anything at all.
+    const stoppedConvId = typeof conversationId === 'string' || conversationId === null
       ? conversationId
       : useChatStore.getState().activeConversationId
     // Both of these reach a run a PREVIOUS hook instance started (the Code view

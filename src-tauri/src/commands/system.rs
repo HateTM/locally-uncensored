@@ -531,19 +531,45 @@ pub fn backup_stores(data: String) -> Result<(), String> {
         file.sync_all().map_err(|e| os_error::english(&e))?;
     }
     std::fs::rename(&tmp, &target).map_err(|e| os_error::english(&e))?;
+    // A complete snapshot just landed, so the set of images anything can still
+    // point at is known: the live stores (this file) and the older backups.
+    // Not after a merged one: its chat value may be older than the live store.
+    if lost.is_empty() {
+        crate::commands::chat_attachments::collect_garbage_soon(dir);
+    }
     Ok(())
 }
 
-/// Restore stores from the %APPDATA% backup, falling back through the rotated
-/// generations when the newest file cannot be read as a backup at all.
-#[tauri::command]
-pub fn restore_stores() -> Result<Option<String>, String> {
+/// Read the store backup, falling back through the rotated generations when
+/// the newest file cannot be read as a backup at all. Plain read, for the
+/// native callers that only look inside (the onboarding decision).
+pub fn read_store_backup() -> Result<Option<String>, String> {
     let dir = persistent_dir()?;
     Ok(pick_backup(
         backup_candidates(&dir)
             .into_iter()
             .filter_map(|p| std::fs::read_to_string(p).ok()),
     ))
+}
+
+/// Restore stores from the %APPDATA% backup, for the WebView.
+///
+/// A backup written before the attachment store carries every chat image
+/// inline, and handing that to the WebView as one string is the largest
+/// allocation the renderer ever sees: the IPC string, its parse, the
+/// IndexedDB write, and after the reload the hydration read of the same
+/// value. So the images are moved into `chat-attachments` HERE, in native
+/// memory and off the main thread, and the WebView receives the small form.
+/// An image whose file cannot be written stays inline, so nothing is lost.
+#[tauri::command]
+pub async fn restore_stores() -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let Some(raw) = read_store_backup()? else { return Ok(None) };
+        let dir = crate::commands::chat_attachments::attachment_dir()?;
+        Ok(Some(crate::commands::chat_attachments::externalize_store_backup(&raw, &dir).unwrap_or(raw)))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Backup the IndexedDB RAG chunks (embedding vectors) to %APPDATA%.

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
-import { Cpu, Sparkles, ImageDown, Maximize2, Download, Wand2, MonitorOff, AudioLines, Film } from 'lucide-react'
+import { Cpu, Sparkles, ImageDown, Maximize2, Download, Wand2, MonitorOff, AudioLines, Film, Trash2 } from 'lucide-react'
 import { coldLoadHint } from '../../../lib/cold-load-notice'
 import { useCreateStore, type GalleryItem, type ProgressPhase } from '../../../stores/createStore'
 import { backendCall, downloadComfyFile, isTauri } from '../../../api/backend'
@@ -273,7 +273,11 @@ export function ResultView({ item, onFullscreen, onSendToEditor, onAnimate }: Re
         {item.unavailable && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 rounded-[var(--radius-panel)] bg-black/60 text-gray-400 p-6 text-center">
             <MonitorOff size={ICON_LG} />
-            <span className="t-body">This render lives on the local engine, which isn't reachable right now.</span>
+            <span className="t-body">
+              {item.unavailableReason === 'gone'
+                ? 'This file is no longer in the ComfyUI output folder.'
+                : 'This render lives on the local engine, which isn\'t reachable right now. It shows up again as soon as ComfyUI is running.'}
+            </span>
           </div>
         )}
         <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -293,6 +297,12 @@ export function ResultView({ item, onFullscreen, onSendToEditor, onAnimate }: Re
           {!isAudio && (
             <IconBtn title="Fullscreen" onClick={onFullscreen}><Maximize2 size={14} /></IconBtn>
           )}
+          {/* Discord 2026-09-28 (lapbo, #feature-requests "DELETE BUTTON"):
+              delete from the big view too, not only from the tile's corner.
+              The file goes to the Recycle Bin (lib/gallery-trash.ts). */}
+          <IconBtn title="Delete (moves the file to the Recycle Bin)" onClick={() => useCreateStore.getState().removeFromGallery(item.id)}>
+            <Trash2 size={14} />
+          </IconBtn>
         </div>
       </div>
       <div className="flex items-center gap-3 mt-3 t-mono text-gray-600">
