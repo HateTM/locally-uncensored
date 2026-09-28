@@ -1,3 +1,4 @@
+import { ChatAttachment } from './ChatAttachment'
 import { motion } from 'framer-motion'
 import { User, Copy, Check, Pencil, RefreshCw, X, Wrench, Trash2, Scissors, Unlink } from 'lucide-react'
 import { useState, useRef, useEffect, useMemo, memo } from 'react'
@@ -405,18 +406,7 @@ function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, o
         {message.images && message.images.length > 0 && (
           <div className="flex gap-1 flex-wrap">
             {message.images.map((img, i) => (
-              <a
-                key={i}
-                href={`data:${img.mimeType};base64,${img.data}`}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                <img
-                  src={`data:${img.mimeType};base64,${img.data}`}
-                  alt={img.name}
-                  className="max-w-[180px] max-h-[120px] object-cover rounded-md border border-white/10 hover:border-white/25 transition-colors cursor-pointer"
-                />
-              </a>
+              <ChatAttachment key={i} image={img} />
             ))}
           </div>
         )}

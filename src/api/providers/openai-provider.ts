@@ -1,3 +1,4 @@
+import { resolveMessageAttachments } from '../../lib/chat-attachments'
 import { captureFlashGeneration, parseFlashPolicy, recordFlashResponse } from '../../lib/flash-ui'
 
 /**
@@ -782,6 +783,7 @@ export class OpenAIProvider implements ProviderClient {
     messages: ChatMessage[],
     options?: ChatOptions,
   ): AsyncGenerator<ChatStreamChunk> {
+    messages = await resolveMessageAttachments(messages)
     const body: OpenAIChatRequest = {
       model,
       // Bug B3: one system message, first. The built-in engine and LM Studio
@@ -996,6 +998,7 @@ export class OpenAIProvider implements ProviderClient {
     tools: ToolDefinition[],
     options?: ChatOptions,
   ): Promise<{ content: string; toolCalls: ToolCall[]; promptEvalCount?: number; evalCount?: number; thinking?: string }> {
+    messages = await resolveMessageAttachments(messages)
     const body: OpenAIChatRequest = {
       model,
       // Bug B3: same invariant as chatStream, see providers/normalize-system.ts.

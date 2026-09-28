@@ -38,7 +38,7 @@ import { ABCompare } from './ABCompare'
 import { RecentChats } from './RecentChats'
 import { useUIStore } from '../../stores/uiStore'
 import { useCompareStore } from '../../stores/compareStore'
-import { exportConversation } from '../../lib/chat-export'
+import { exportConversation, missingImagesNote } from '../../lib/chat-export'
 import { conversationMode } from '../../lib/conversation-mode'
 import { PermissionOverrideBar } from './PermissionOverrideBar'
 import { CodexView } from './CodexView'
@@ -657,8 +657,10 @@ export function ChatView() {
                                     setExportOpen(false)
                                     if (!conv) return
                                     const result = await exportConversation(conv, fmt)
-                                    if (result.status === 'saved' && result.path) {
-                                      setExportToast(`Saved to ${result.path}`)
+                                    if (result.status === 'error') {
+                                      setExportToast(result.error ?? 'Could not export chat.')
+                                    } else if (result.status === 'saved' && result.path) {
+                                      setExportToast(`Saved to ${result.path}.${missingImagesNote(result.missing)}`)
                                     } else if (result.status === 'downloaded') {
                                       setExportToast(`Downloaded .${fmt === 'markdown' ? 'md' : 'json'}`)
                                     }

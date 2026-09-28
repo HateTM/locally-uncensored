@@ -31,7 +31,8 @@ import { extractMemoriesFromPair } from '../../hooks/useMemory'
 import { detectLocalBackends, type DetectedBackend } from '../../lib/backend-detector'
 import { whenRunsIdle } from '../../lib/run-idle'
 import { backendCall, isTauri } from '../../api/backend'
-import { idbStorage } from '../../lib/idbStorage'
+import { idbStorage, hasStoredItem } from '../../lib/idbStorage'
+import { recoverChatsFromBackup } from '../../lib/chat-backup-recovery'
 import { STORE_KEYS, IDB_STORE_KEYS, backupStoresIfChanged, flushSyncStoreBackup } from '../../lib/store-backup'
 import { idbKeysToRestore, mayReloadForIdbRestore } from '../../lib/idb-restore'
 import { log } from '../../lib/logger'
@@ -378,7 +379,14 @@ export function AppShell() {
           try {
             const live: Record<string, string | null> = {}
             for (const key of IDB_STORE_KEYS) {
-              live[key] = await Promise.resolve(idbStorage.getItem(key)).catch(() => null)
+              // Presence only. Only an absent store is restored, and reading
+              // the whole value here doubled the largest string at launch.
+              const present = await hasStoredItem(key)
+              live[key] = present === true
+                ? 'present'
+                : present === false
+                  ? null
+                  : await Promise.resolve(idbStorage.getItem(key)).catch(() => null)
             }
             if (Object.values(live).some((v) => !v)) {
               const raw = await backendCall<string | null>('restore_stores')
@@ -405,6 +413,19 @@ export function AppShell() {
               }
             }
           } catch { /* best-effort, the RAG restore below still runs */ }
+          // Chats a failed IndexedDB save never kept, see chat-backup-recovery.ts.
+          // Before resolveRestoreDecided below: the first backup must not
+          // replace store_backup.json before it has been looked at.
+          try {
+            await new Promise<void>((resolve) => {
+              if (useChatStore.persist.hasHydrated()) resolve()
+              else useChatStore.persist.onFinishHydration(() => resolve())
+            })
+            await recoverChatsFromBackup(
+              () => useChatStore.getState().conversations,
+              (chats) => { useChatStore.getState().importConversations(chats, 'merge') },
+            )
+          } catch (err) { log.warn('[AppShell] chat recovery from the backup failed, will retry next launch', { err: String(err) }) }
           try {
             const data = await backendCall<string | null>('restore_rag_chunks')
             if (data) {

@@ -8,6 +8,7 @@
 
 import type { Conversation } from '../types/chat'
 import { isTauri, backendCall } from '../api/backend'
+import { originalAttachment } from './chat-attachments'
 import { conversationModelOf } from './conversation-model'
 
 export function exportAsMarkdown(conversation: Conversation): string {
@@ -92,16 +93,20 @@ export function downloadFile(content: string, filename: string, type: string) {
 export async function exportConversation(
   conversation: Conversation,
   format: 'markdown' | 'json',
-): Promise<{ status: 'saved' | 'cancelled' | 'downloaded'; path?: string; error?: string }> {
+): Promise<{ status: 'saved' | 'cancelled' | 'downloaded' | 'error'; path?: string; error?: string; missing?: number }> {
   const safeTitle = conversation.title.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 50)
   const ext = format === 'markdown' ? 'md' : 'json'
   const extLabel = format === 'markdown' ? 'Markdown' : 'JSON'
   const mime = format === 'markdown' ? 'text/markdown' : 'application/json'
   const filename = `${safeTitle}.${ext}`
-  const content = format === 'markdown' ? exportAsMarkdown(conversation) : exportAsJSON(conversation)
 
-  // Inside Tauri → native Save As dialog + real disk write
+  // Inside Tauri → native Save As dialog + real disk write. A JSON export
+  // goes out with its image references, and the native side puts the image
+  // bytes back while it streams to the file (export_chats_dialog), so the
+  // WebView never holds the full export.
   if (isTauri()) {
+    if (format === 'json') return saveNativeExport(exportAsJSON(conversation), filename)
+    const content = exportAsMarkdown(conversation)
     try {
       const chosenPath = await backendCall<string | null>('save_text_file_dialog', {
         content,
@@ -119,8 +124,25 @@ export async function exportConversation(
   }
 
   // Plain browser fallback
+  const content = format === 'markdown' ? exportAsMarkdown(conversation) : exportAsJSON(await portableConversation(conversation))
   downloadFile(content, filename, mime)
   return { status: 'downloaded' }
+}
+
+async function saveNativeExport(content: string, defaultName: string): Promise<{ status: 'saved' | 'cancelled' | 'error'; path?: string; error?: string; missing?: number }> {
+  try {
+    const outcome = await backendCall<{ path: string; missing: number } | null>('export_chats_dialog', { content, defaultName })
+    if (!outcome) return { status: 'cancelled' }
+    return { status: 'saved', path: outcome.path, missing: outcome.missing }
+  } catch (e) {
+    return { status: 'error', error: `Could not export chats: ${e instanceof Error ? e.message : String(e)}` }
+  }
+}
+
+/** The line a UI shows after a saved export. */
+export function missingImagesNote(missing: number | undefined): string {
+  if (!missing) return ''
+  return ` ${missing} image${missing === 1 ? ' was' : 's were'} no longer on this computer and could not be included.`
 }
 
 // ── Bulk backup (konata 2026-06-28: the web build has no store_backup.json,
@@ -154,28 +176,15 @@ export function serializeAllConversations(conversations: Conversation[]): string
  */
 export async function exportAllConversations(
   conversations: Conversation[],
-): Promise<{ status: 'saved' | 'cancelled' | 'downloaded'; path?: string; count: number; error?: string }> {
+): Promise<{ status: 'saved' | 'cancelled' | 'downloaded' | 'error'; path?: string; count: number; error?: string; missing?: number }> {
   const count = conversations.length
-  const content = serializeAllConversations(conversations)
   const filename = `locally-uncensored-chats-${count}.json`
 
-  if (isTauri()) {
-    try {
-      const chosenPath = await backendCall<string | null>('save_text_file_dialog', {
-        content,
-        defaultName: filename,
-        extension: 'json',
-        extLabel: 'JSON',
-      })
-      if (!chosenPath) return { status: 'cancelled', count }
-      return { status: 'saved', path: chosenPath, count }
-    } catch (e) {
-      downloadFile(content, filename, 'application/json')
-      return { status: 'downloaded', count, error: String(e) }
-    }
-  }
+  if (isTauri()) return { ...(await saveNativeExport(serializeAllConversations(conversations), filename)), count }
 
-  downloadFile(content, filename, 'application/json')
+  const portable: Conversation[] = []
+  for (const conversation of conversations) portable.push(await portableConversation(conversation))
+  downloadFile(serializeAllConversations(portable), filename, 'application/json')
   return { status: 'downloaded', count }
 }
 
@@ -217,4 +226,18 @@ export function parseImportedChats(json: string): Conversation[] {
     throw new Error('No valid conversations found in that file.')
   }
   return valid
+}
+
+/** References are installation-local. The browser build exports the original
+ *  bytes; an image that can no longer be read keeps its reference rather than
+ *  costing the user the whole export. */
+export async function portableConversation(conversation: Conversation): Promise<Conversation> {
+  const messages = []
+  for (const message of conversation.messages) {
+    if (!message.images?.length) { messages.push(message); continue }
+    const images = []
+    for (const image of message.images) images.push(await originalAttachment(image).catch(() => image))
+    messages.push({ ...message, images })
+  }
+  return { ...conversation, messages }
 }

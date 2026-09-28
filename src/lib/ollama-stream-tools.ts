@@ -1,3 +1,4 @@
+import { resolveMessageAttachments } from './chat-attachments'
 import type { ChatMessage, ToolCall, ToolDefinition } from '../api/providers/types'
 import { ollamaUrl, localFetchStream } from '../api/backend'
 import { isLocalTransportFailure, localBackendUnreachableMessage } from './local-backend-transport'
@@ -64,6 +65,7 @@ export async function streamOllamaChatWithTools(
   // strategy resolution only routes here after Ollama reported the model's
   // `tools` capability), so the tool channel stays native and only the
   // system-first rule is enforced.
+  messages = await resolveMessageAttachments(messages)
   const ollamaMessages = applyTemplateContract(messages, {
     toolRole: 'native',
     alternate: false,

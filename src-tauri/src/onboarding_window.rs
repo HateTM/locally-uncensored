@@ -64,7 +64,7 @@ use std::time::Duration;
 
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 
-use crate::commands::system::{is_onboarding_done, restore_stores, write_onboarding_marker};
+use crate::commands::system::{is_onboarding_done, read_store_backup, write_onboarding_marker};
 use crate::state::AppState;
 
 /// Das Label des Hauptfensters (`tauri.conf.json`).
@@ -153,7 +153,7 @@ pub fn onboarding_done_in_backup(backup_json: &str) -> bool {
 pub fn decide_first_window() -> FirstWindow {
     let marker = is_onboarding_done();
     let backup_says_done = !marker
-        && matches!(restore_stores(), Ok(Some(json)) if onboarding_done_in_backup(&json));
+        && matches!(read_store_backup(), Ok(Some(json)) if onboarding_done_in_backup(&json));
     if backup_says_done {
         if let Err(e) = write_onboarding_marker(true) {
             tracing::warn!("onboarding marker could not be migrated from the backup: {e}");

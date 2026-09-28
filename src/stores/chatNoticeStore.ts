@@ -33,7 +33,7 @@ import type { HinweisTon } from '../lib/hinweis'
 
 /** Die Zeilen, die es gibt. Kein freier Schluessel: eine Aufzaehlung laesst
  *  sich nachzaehlen, ein String-Schluessel waechst unbemerkt. */
-export type ChatNoticeId = 'attachment-is-not-an-image' | 'model-cannot-see-images'
+export type ChatNoticeId = 'attachment-is-not-an-image' | 'model-cannot-see-images' | 'image-attach'
 
 export interface ChatNotice {
   id: ChatNoticeId

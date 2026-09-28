@@ -17,6 +17,7 @@
 import { backendCall } from '../api/backend'
 import { idbStorage, hasFailedRead, onIdbWrite } from './idbStorage'
 import { log } from './logger'
+import { isBackupHeld } from './backup-hold'
 
 /** Every store that is worth carrying across an update or a wiped WebView2
  *  profile. Order is irrelevant, presence is not: a key missing from this list
@@ -110,6 +111,9 @@ async function idbValueForBackup(key: string): Promise<string | null> {
   if (mirrored !== undefined) return mirrored
   const read = await Promise.resolve(idbStorage.getItem(key)).catch(() => undefined)
   if (read === undefined || hasFailedRead(key)) return null
+  // A write (including attachment migration) may finish during the initial read.
+  // Never replace its current metadata with the stale pre-migration blob.
+  if (idbMirror[key] !== undefined) return idbMirror[key]
   idbMirror[key] = read
   return read
 }
@@ -145,8 +149,8 @@ function unreadableIdbKeys(): string[] {
  *  the identical string reference (everything the mirror serves) settle on the
  *  pointer comparison. */
 function differsFromDisk(next: Record<string, string>): boolean {
-  if (!lastWritten) return true
-  const prev = lastWritten
+  const prev = pendingWrite?.body ?? activeWrite?.body ?? lastWritten
+  if (!prev) return true
   const prevKeys = Object.keys(prev)
   const nextKeys = Object.keys(next)
   if (prevKeys.length !== nextKeys.length) return true
@@ -186,14 +190,48 @@ async function collectComparableSnapshot(): Promise<Record<string, string>> {
   return body
 }
 
-function writeSnapshot(body: Record<string, string>): void {
-  try { localStorage.setItem('lu-restore-complete', '1') } catch { /* quota */ }
-  // Marked clean optimistically so the next tick can skip, and un-marked if the
-  // invoke fails — otherwise one failed write would make the triad believe the
-  // change is on disk and it would never be retried.
-  lastWritten = body
-  backendCall('backup_stores', { data: JSON.stringify({ __ts: new Date().toISOString(), ...body }) })
-    .catch(() => { if (lastWritten === body) lastWritten = null })
+interface SnapshotWrite {
+  body: Record<string, string>
+  done: Promise<boolean>
+  resolve: (ok: boolean) => void
+}
+
+// One native write and one latest snapshot. Never queue serialized histories:
+// the IPC payload itself stays live until the native command returns.
+let activeWrite: SnapshotWrite | null = null
+let pendingWrite: SnapshotWrite | null = null
+
+function dispatchWrite(job: SnapshotWrite): void {
+  activeWrite = job
+  const complete = (ok: boolean) => {
+    if (ok) lastWritten = job.body
+    activeWrite = null
+    job.resolve(ok)
+    const next = pendingWrite
+    pendingWrite = null
+    if (next) dispatchWrite(next)
+  }
+  try {
+    try { localStorage.setItem('lu-restore-complete', '1') } catch { /* quota must not block the file backup */ }
+    const data = JSON.stringify({ __ts: new Date().toISOString(), ...job.body })
+    void backendCall('backup_stores', { data }).then(() => complete(true), () => complete(false))
+  } catch {
+    complete(false)
+  }
+}
+
+function writeSnapshot(body: Record<string, string>): Promise<boolean> {
+  if (pendingWrite) {
+    // All callers waiting for a queued snapshot wait for its newest version.
+    pendingWrite.body = body
+    return pendingWrite.done
+  }
+  let resolve!: (ok: boolean) => void
+  const done = new Promise<boolean>(r => { resolve = r })
+  const job = { body, done, resolve }
+  if (activeWrite) pendingWrite = job
+  else dispatchWrite(job)
+  return done
 }
 
 /**
@@ -208,6 +246,9 @@ function writeSnapshot(body: Record<string, string>): void {
  * a written one.
  */
 export async function backupStoresIfChanged(): Promise<'written' | 'unchanged' | 'held-back'> {
+  // A store is about to shrink (lib/backup-hold.ts). The file on disk keeps
+  // the previous snapshot meanwhile, so waiting costs nothing.
+  if (isBackupHeld()) return 'held-back'
   const body = await collectComparableSnapshot()
   const blind = unreadableIdbKeys()
   if (blind.length > 0) {
@@ -222,16 +263,20 @@ export async function backupStoresIfChanged(): Promise<'written' | 'unchanged' |
     })
   }
   if (!differsFromDisk(body)) return 'unchanged'
-  writeSnapshot(body)
+  void writeSnapshot(body)
   return 'written'
 }
 
 /**
  * beforeunload's flush. Synchronous on purpose: an await during page teardown
  * means the trailing `backup_stores` invoke may never fire, so this reads the
- * localStorage stores directly and the IndexedDB ones from the mirror.
+ * localStorage stores directly and the IndexedDB ones from the mirror. If a
+ * native write is still running, its successor is queued without another IPC
+ * allocation. Delivery during teardown remains best effort; update-time backup
+ * explicitly awaits that queue before restart.
  */
 export function flushSyncStoreBackup(): 'written' | 'unchanged' | 'held-back' {
+  if (isBackupHeld()) return 'held-back'
   try {
     // The mirror is the only IndexedDB value reachable without awaiting, and
     // before the first async backup has filled it there is no way to tell
@@ -248,7 +293,7 @@ export function flushSyncStoreBackup(): 'written' | 'unchanged' | 'held-back' {
       if (val) body[key] = val
     }
     if (!differsFromDisk(body)) return 'unchanged'
-    writeSnapshot(body)
+    void writeSnapshot(body)
     return 'written'
   } catch {
     return 'held-back' // best-effort: the window is going away either way
@@ -258,10 +303,9 @@ export function flushSyncStoreBackup(): 'written' | 'unchanged' | 'held-back' {
 /**
  * Build a snapshot and write it, and resolve only once the file is on disk.
  *
- * The triad's own backup is fire and forget on purpose, it must never hold up
- * a render. This one is awaited, because its whole reason to exist is the
- * caller that is about to end the process. It ignores the dirty check for the
- * same reason: an update is the one moment worth paying for a redundant write.
+ * All callers share the same bounded write queue. This one awaits the native
+ * completion because its caller is about to end the process. It ignores the
+ * dirty check for the same reason: an update is the one moment worth paying for a redundant write.
  *
  * Returns whether the file was written. Never throws: a backup that fails is
  * not a reason to refuse an update the user already agreed to.
@@ -280,14 +324,9 @@ export async function backupStoresNow(): Promise<boolean> {
         keys: blind,
       })
     }
-    localStorage.setItem('lu-restore-complete', '1')
-    await backendCall('backup_stores', { data: JSON.stringify(snapshot) })
-    // Same body the dirty check compares against, so the tick right after an
-    // update-time backup does not rewrite the identical file.
     const body: Record<string, string> = { ...snapshot }
     delete body.__ts
-    lastWritten = body
-    return true
+    return await writeSnapshot(body)
   } catch {
     return false
   }

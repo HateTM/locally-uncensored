@@ -38,6 +38,9 @@ const DB_VERSION = 1
 // hydrated or migrated — treat it as absent so the store starts clean.
 const LEGACY_CORRUPT = '[object Object]'
 
+/** Above this a localStorage fallback cannot succeed (about 5 MB per origin). */
+const LS_FALLBACK_MAX_CHARS = 4 * 1024 * 1024
+
 function lsGet(k: string): string | null {
   try { return typeof localStorage !== 'undefined' ? localStorage.getItem(k) : null } catch { return null }
 }
@@ -231,6 +234,22 @@ export async function compareAndSetIdbItem(
   }
 }
 
+/**
+ * Whether `key` holds a value, without reading it. For callers that only need
+ * to know if a store is there, such as the restore check at launch: reading a
+ * large chat history just to test it for null put a second full copy of it in
+ * memory while hydration was reading the first. Answers null when IndexedDB
+ * could not be asked, so the caller can fall back to its old path.
+ */
+export async function hasStoredItem(key: string): Promise<boolean | null> {
+  if (!hasIDB) return lsGet(key) != null
+  try {
+    return (await idbHas(key)) || lsGet(key) != null
+  } catch {
+    return null
+  }
+}
+
 let _persistAsked = false
 function askPersist(): void {
   if (_persistAsked) return
@@ -291,8 +310,12 @@ export const idbStorage: StateStorage = {
           key: name,
           err: String(err),
         })
-        lsSet(name, value) // idb write failed → localStorage best-effort
-        if (lsGet(name) !== value) {
+        // localStorage holds about 5 MB per origin. Offering it a larger value
+        // only copies the string once more on the way to the quota error,
+        // which is the worst moment for a copy: the value that failed here is
+        // typically one Chromium refused as too large (127 MiB cap).
+        if (value.length <= LS_FALLBACK_MAX_CHARS) lsSet(name, value) // idb write failed → localStorage best-effort
+        if (value.length > LS_FALLBACK_MAX_CHARS || lsGet(name) !== value) {
           log.error('[idbStorage] BOTH backends failed — this state is NOT being persisted', {
             key: name,
             bytes: value.length,

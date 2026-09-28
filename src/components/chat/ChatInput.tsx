@@ -12,6 +12,7 @@ import { isThinkingCompatible, isVisionCompatible, declaredVision } from '../../
 import { clampEffort, effortChoices, effortLabel, nextEffort, DEFAULT_EFFORT } from '../../lib/effort'
 import type { AgentToolCall } from '../../types/agent-mode'
 import type { ImageAttachment } from '../../types/chat'
+import { MAX_CHAT_IMAGES, prepareChatImages } from '../../lib/chat-image-input'
 import { COMPOSER_MAX_W } from './composer-width'
 import { consumeComposerFocusPending } from '../../hooks/useKeyboardShortcuts'
 import { useChatNoticeStore, CHAT_NOTICE_MS } from '../../stores/chatNoticeStore'
@@ -82,23 +83,12 @@ function passSendLock(lock: { current: number }): boolean {
   return true
 }
 
-function fileToImageAttachment(file: File): Promise<ImageAttachment> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => {
-      const dataUrl = reader.result as string
-      const base64 = dataUrl.split(',')[1]
-      resolve({ data: base64, mimeType: file.type || 'image/png', name: file.name })
-    }
-    reader.onerror = reject
-    reader.readAsDataURL(file)
-  })
-}
-
 export function ChatInput({ onSend, onStop, isGenerating, waitingForLocalLane, pendingApproval, onApprove, onReject, disabled, slashCommands, composerModel, composerActions, composerAbove }: Props) {
   const [input, setInput] = useState('')
   const [images, setImages] = useState<ImageAttachment[]>([])
   const [isDragOver, setIsDragOver] = useState(false)
+  const [preparingImages, setPreparingImages] = useState(false)
+  const imageJob = useRef({ busy: false, epoch: 0 })
   const [isVoiceRecording, setIsVoiceRecording] = useState(false)
   // Slash-command autocomplete (v2.5.3). When the input is a lone "/token", show
   // the matching agent commands; ↑/↓ to move, Enter/Tab to pick, Esc to dismiss.
@@ -149,6 +139,14 @@ export function ChatInput({ onSend, onStop, isGenerating, waitingForLocalLane, p
    * nicht gelesen werden (Regel 1), und gelesen werden muessen hier beide.
    */
   const conversationId = useChatStore((s) => s.activeConversationId)
+  useEffect(() => {
+    const job = imageJob.current
+    const unsubscribe = useChatStore.subscribe((state, previous) => {
+      if (state.activeConversationId !== previous.activeConversationId) job.epoch++
+    })
+    const stop = () => { job.epoch++; unsubscribe() }
+    return stop
+  }, [])
   const [entwuerfe, setEntwuerfe] = useState<Record<string, { text: string; bilder: ImageAttachment[] }>>({})
   const [letztesGespraech, setLetztesGespraech] = useState(conversationId)
   if (letztesGespraech !== conversationId) {
@@ -266,9 +264,41 @@ export function ChatInput({ onSend, onStop, isGenerating, waitingForLocalLane, p
       )
     }
     if (imageFiles.length === 0) return
-    const newImages = await Promise.all(imageFiles.map(fileToImageAttachment))
-    setImages(prev => [...prev, ...newImages].slice(0, 5)) // max 5 images
-  }, [])
+    // Die Zeilen zum Bildanhang stehen oben im Verlauf (`ChatNotices`), nie
+    // im Eingabekasten: „NICHTS im Prompt-Fenster", David 21.09.2026.
+    const notices = useChatNoticeStore.getState()
+    const job = imageJob.current
+    if (job.busy) {
+      notices.show('image-attach', 'Still preparing the previous images. Add these again in a moment.', 'ruhig', CHAT_NOTICE_MS)
+      return
+    }
+    const slots = MAX_CHAT_IMAGES - images.length
+    if (slots <= 0) {
+      notices.show('image-attach', 'You can attach up to five images per message.', 'ruhig', CHAT_NOTICE_MS)
+      return
+    }
+    job.busy = true
+    const epoch = job.epoch
+    const cancelled = () => job.epoch !== epoch || useChatStore.getState().activeConversationId !== conversationId
+    setPreparingImages(true)
+    notices.show('image-attach', 'Preparing images…')
+    try {
+      const result = await prepareChatImages(imageFiles, slots, cancelled)
+      if (cancelled()) return
+      setImages(prev => [...prev, ...result.images].slice(0, MAX_CHAT_IMAGES))
+      const message = result.errors[0] ?? (imageFiles.length > slots
+        ? 'You can attach up to five images per message. Extra images were not added.'
+        : '')
+      if (message) notices.show('image-attach', message, 'ruhig', CHAT_NOTICE_MS)
+      else notices.dismiss('image-attach')
+    } finally {
+      job.busy = false
+      setPreparingImages(false)
+      if (useChatNoticeStore.getState().notices.some(n => n.id === 'image-attach' && n.text === 'Preparing images…')) {
+        useChatNoticeStore.getState().dismiss('image-attach')
+      }
+    }
+  }, [images.length, conversationId])
 
   /**
    * Ein Bild an einem Modell, das keine sieht.
@@ -319,7 +349,7 @@ export function ChatInput({ onSend, onStop, isGenerating, waitingForLocalLane, p
   const sendLockRef = useRef(0)
   const handleSend = () => {
     const trimmed = input.trim()
-    if ((!trimmed && images.length === 0) || isGenerating || waitingForLocalLane || disabled) return
+    if (imageJob.current.busy || (!trimmed && images.length === 0) || isGenerating || waitingForLocalLane || disabled) return
     if (!passSendLock(sendLockRef)) return
     onSend(trimmed || '(image)', images.length > 0 ? images : undefined)
     setInput('')
@@ -586,7 +616,7 @@ export function ChatInput({ onSend, onStop, isGenerating, waitingForLocalLane, p
           {/* Clip button */}
           <button
             onClick={() => fileInputRef.current?.click()}
-            disabled={isGenerating}
+            disabled={isGenerating || preparingImages}
             className="lu-control lu-control--icon"
             title="Attach images. For PDFs and documents use the Documents panel"
           >
@@ -595,7 +625,7 @@ export function ChatInput({ onSend, onStop, isGenerating, waitingForLocalLane, p
           <input
             ref={fileInputRef}
             type="file"
-            accept="image/*"
+            accept="image/png,image/jpeg,image/webp,image/gif"
             multiple
             className="hidden"
             onChange={(e) => { if (e.target.files) addFiles(e.target.files); e.target.value = '' }}
@@ -725,7 +755,7 @@ export function ChatInput({ onSend, onStop, isGenerating, waitingForLocalLane, p
             ) : (
               <button
                 onClick={handleSend}
-                disabled={(!input.trim() && images.length === 0) || isTranscribing || !!waitingForLocalLane}
+                disabled={preparingImages || (!input.trim() && images.length === 0) || isTranscribing || !!waitingForLocalLane}
                 className="lu-control lu-control--icon lu-primary w-full h-full"
                 aria-label="Send message"
               >
