@@ -67,6 +67,15 @@ const CORE_NODES = new Set([
   'WanSoundImageToVideo', 'WanAnimateToVideo', 'WanVaceToVideo',
   // sampling
   'KSampler',
+  // LTX-2 and Wan 2.2 A14B, the nodes of their official templates
+  // (video_ltx2_3_t2v/_i2v, video_wan2_2_14B_t2v/_i2v), each found in ComfyUI
+  // 0.37 core on 2026-09-29: nodes.py (KSamplerAdvanced), nodes_custom_sampler,
+  // nodes_lt, nodes_lt_audio, nodes_lt_upsampler, nodes_hunyuan, nodes_wan.
+  'KSamplerAdvanced', 'CFGGuider', 'KSamplerSelect', 'ManualSigmas', 'RandomNoise', 'SamplerCustomAdvanced',
+  'LTXAVTextEncoderLoader', 'LTXVAudioVAELoader', 'LTXVAudioVAEDecode', 'LTXVEmptyLatentAudio',
+  'LTXVConcatAVLatent', 'LTXVSeparateAVLatent', 'LTXVConditioning', 'LTXVCropGuides',
+  'LTXVImgToVideoInplace', 'LTXVPreprocess', 'LTXVLatentUpsampler', 'LatentUpscaleModelLoader',
+  'EmptyHunyuanLatentVideo', 'WanImageToVideo',
   // lora
   'LoraLoader', 'LoraLoaderModelOnly',
   // decode + image ops

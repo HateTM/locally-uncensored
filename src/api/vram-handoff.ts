@@ -76,10 +76,8 @@ import {
   snapToVideoGrid,
   MODEL_TYPE_DEFAULTS,
   hidreamSampling,
-  isLightningMerge,
-  LIGHTNING_SAMPLING,
-  isCfgDistilledHunyuan15,
-  HUNYUAN15_DISTILLED_SAMPLING,
+  videoSamplingOverride,
+  wan22Expert,
   isPromptQueued,
   type VideoBackend,
   type ModelType,
@@ -1492,8 +1490,9 @@ async function generateVideo(
       if (frameRej) return frameRej
       const i2vMax = caps?.frameRange?.max ?? (type === 'framepack' ? FRAMEPACK_MAX_FRAMES : 25)
       const { frames, fps } = resolveClip(args, { defFps, defFrames: type === 'framepack' ? 49 : 25, maxFrames: i2vMax })
-      const i2vDefs = isLightningMerge(model)
-        ? { steps: LIGHTNING_SAMPLING.steps, cfg: LIGHTNING_SAMPLING.cfg }
+      const i2vFast = videoSamplingOverride(model)
+      const i2vDefs = i2vFast
+        ? { steps: i2vFast.steps, cfg: i2vFast.cfg }
         : { steps: type === 'framepack' ? 25 : 20, cfg: 3 }
       const tun = resolveTunables(args, caps, { ...i2vDefs, sampler: 'euler', scheduler: 'normal' })
       if (tun.reject) return `Cannot generate: ${tun.reject}`
@@ -1545,9 +1544,7 @@ async function generateVideo(
     if (tFrameRej) return tFrameRej
     const t2vMax = caps?.frameRange?.max ?? Math.max(defaults.frames, 161)
     const { frames, fps } = resolveClip(args, { defFps: defaults.fps, defFrames: defaults.frames, maxFrames: t2vMax })
-    const fast = isLightningMerge(model) ? LIGHTNING_SAMPLING
-      : isCfgDistilledHunyuan15(model) ? HUNYUAN15_DISTILLED_SAMPLING
-      : null
+    const fast = videoSamplingOverride(model)
     const tun = resolveTunables(args, caps, {
       steps: fast ? fast.steps : defaults.steps,
       cfg: fast ? fast.cfg : defaults.cfg,
@@ -1558,24 +1555,28 @@ async function generateVideo(
     const snapped = snapToVideoGrid(clampInt(av.width, defaults.width, 64, 2048), clampInt(av.height, defaults.height, 64, 2048))
     const seed = (typeof av.seed === 'number' && Number.isFinite(av.seed)) ? Math.floor(av.seed) : -1
 
-    const workflow = await buildTxt2VidWorkflow(
-      {
-        prompt,
-        negativePrompt: typeof args.negativePrompt === 'string' ? args.negativePrompt : '',
-        model,
-        sampler: tun.sampler,
-        scheduler: tun.scheduler,
-        steps: tun.steps,
-        cfgScale: tun.cfg,
-        width: snapped.width,
-        height: snapped.height,
-        seed,
-        batchSize: 1,
-        frames,
-        fps,
-      },
-      backend,
-    )
+    const t2vParams = {
+      prompt,
+      negativePrompt: typeof args.negativePrompt === 'string' ? args.negativePrompt : '',
+      model,
+      sampler: tun.sampler,
+      scheduler: tun.scheduler,
+      steps: tun.steps,
+      cfgScale: tun.cfg,
+      width: snapped.width,
+      height: snapped.height,
+      seed,
+      batchSize: 1,
+      frames,
+      fps,
+    }
+    // HunyuanVideo 1.5, LTX and the Wan 2.2 A14B pair have their own graphs
+    // (FINDINGS 23). The legacy Wan 2.1 builder below rendered them as Wan 2.1:
+    // noise, or a ComfyUI rejection.
+    const dedicated = type === 'hunyuan' || type === 'ltx' || wan22Expert(model) !== null
+    const workflow = dedicated
+      ? await (await import('./dynamic-workflow')).buildDynamicWorkflow(t2vParams, type)
+      : await buildTxt2VidWorkflow(t2vParams, backend)
     log.info('vram_handoff.video.submit', { model, i2v: false, backend })
     const submitted = await submitCancellable(workflow, seq)
     if (submitted === CANCELLED) return `${label('video')} generation cancelled.`

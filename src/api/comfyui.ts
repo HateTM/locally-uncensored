@@ -263,6 +263,8 @@ export function classifyModel(name: string | null | undefined): ModelType {
   // Wan 2.2 TI2V-5B — unified text+image-to-video. Detect BEFORE the generic Wan
   // match: it needs its own latent node (Wan22ImageToVideoLatent), the Wan 2.2 VAE
   // and the dual T2V/I2V path, none of which the Wan 2.1 'unet_video' strategy has.
+  // Wan 2.2 A14B experts and 14B merges are Wan 2.1 architecture (see isWan22Big).
+  if (isWan22Big(lower)) return 'wan'
   if (lower.includes('ti2v') || lower.includes('wan2.2') || lower.includes('wan2_2') || lower.includes('wan22')) return 'wan22'
   if (lower.includes('wan')) return 'wan'
   if (lower.includes('hunyuan')) return 'hunyuan'
@@ -384,6 +386,8 @@ export function isVideoModelType(type: ModelType): boolean {
  */
 export function isI2VModel(name: string): boolean {
   const lower = name.toLowerCase()
+  // An A14B expert is either t2v or i2v, its name says which.
+  if (wan22Expert(name)) return lower.includes('i2v')
   return lower.includes('i2v') || lower.includes('svd') || lower.includes('framepack')
     || lower.includes('ti2v') || lower.includes('wan2.2') || lower.includes('wan2_2') || lower.includes('wan22')
     || lower.includes('ltx') || lower.includes('video2world')
@@ -403,6 +407,7 @@ export function isT2VCapable(name: string): boolean {
   // Merged i2v-only builds (rapid AIO) carry the wan2.2 tag but cannot run a
   // T2V graph — check before the generic wan2.2 pass-through.
   if (lower.includes('rapid') && lower.includes('i2v')) return false
+  if (wan22Expert(name)) return lower.includes('t2v')
   if (lower.includes('ti2v') || lower.includes('wan2.2') || lower.includes('wan2_2') || lower.includes('wan22')) return true
   if (lower.includes('svd') || lower.includes('framepack')) return false
   if (lower.includes('video2world')) return false
@@ -1629,9 +1634,11 @@ export async function findMatchingVAE(modelType: ModelType): Promise<string> {
     throw new Error(`No Wan 2.2 VAE found. Download "wan2.2_vae.safetensors" from the Model Manager.`)
   }
   if (modelType === 'ltx') {
+    // No first-VAE fallback: a foreign VAE decodes LTX latents to garbage. A
+    // checkpoint uses its own VAE when this throws (dynamic-workflow carriesVae).
     const match = vaes.find(v => lower(v).includes('ltx'))
     if (match) return match
-    return vaes[0]
+    throw new Error('No LTX-Video VAE found. Use the full LTX-Video checkpoint in models/checkpoints, which carries its VAE.')
   }
   if (modelType === 'mochi') {
     const match = vaes.find(v => lower(v).includes('mochi'))
@@ -1741,6 +1748,54 @@ export function isCfgDistilledHunyuan15(model: string): boolean {
 }
 export const HUNYUAN15_DISTILLED_SAMPLING = { steps: 20, cfg: 1.0 } as const
 
+/**
+ * LTX-2 / LTX-2.3, told apart from LTX-Video 0.9 by its file name. The two
+ * share the `ltx` type but not a graph: LTX-2 is an audio+video checkpoint
+ * with a Gemma 3 encoder read through `LTXAVTextEncoderLoader`, its own audio
+ * VAE and a fixed distilled sigma schedule (official video_ltx2_3_* templates).
+ * `ltx-video-2b-v0.9` is the old model and must not match.
+ */
+export function isLtx2(model: string): boolean {
+  return /ltx[-_ ]?2(?:[._ -]|$)/i.test(model)
+}
+/** The fixed schedule is 8 sigmas at cfg 1 (the templates' ManualSigmas and
+ *  CFGGuider). Steps and cfg only show it in the UI; the graph ignores them. */
+export const LTX2_SAMPLING = { steps: 8, cfg: 1.0 } as const
+
+/**
+ * One of the two Wan 2.2 A14B experts (`wan2.2_t2v_high_noise_14B_*`,
+ * `…_low_noise_…`). A14B samples the first half of the steps on the high-noise
+ * model and hands the latent to the low-noise one (official
+ * video_wan2_2_14B_t2v / _i2v templates). Either file selects the pair.
+ */
+export function wan22Expert(model: string): 'high' | 'low' | null {
+  const lower = model.toLowerCase()
+  if (!/wan[._-]?2[._]?2/.test(lower)) return null
+  const m = lower.match(/(high|low)[_-]?noise/)
+  return m ? (m[1] as 'high' | 'low') : null
+}
+/** The template's sampling without the lightx2v LoRAs: 20 steps, cfg 3.5. */
+export const WAN22_A14B_SAMPLING = { steps: 20, cfg: 3.5 } as const
+
+/**
+ * A Wan 2.2 14B file that is not TI2V-5B: an A14B expert or a single-file 14B
+ * merge. Both are the Wan 2.1 architecture (16-channel latent, wan_2.1_vae),
+ * so they classify as 'wan', not as the 5B's 'wan22'.
+ */
+function isWan22Big(lower: string): boolean {
+  if (!/wan[._-]?2[._]?2/.test(lower) || lower.includes('ti2v') || /(^|[^0-9])5b/.test(lower)) return false
+  return /(high|low)[_-]?noise/.test(lower) || lower.includes('14b')
+}
+
+/** Steps and cfg a model needs instead of its type's defaults, or null. */
+export function videoSamplingOverride(model: string): { steps: number; cfg: number } | null {
+  if (isLightningMerge(model)) return LIGHTNING_SAMPLING
+  if (isCfgDistilledHunyuan15(model)) return HUNYUAN15_DISTILLED_SAMPLING
+  if (isLtx2(model)) return LTX2_SAMPLING
+  if (wan22Expert(model)) return WAN22_A14B_SAMPLING
+  return null
+}
+
 /** Where the byT5 glyph encoder HunyuanVideo 1.5 needs comes from. */
 export const HUNYUAN15_BYT5 = {
   filename: 'byt5_small_glyphxl_fp16.safetensors',
@@ -1842,6 +1897,13 @@ export async function findMatchingCLIP(modelType: ModelType, activeModelName?: s
     throw new Error(`No Wan text encoder found. Download "umt5_xxl_fp8_e4m3fn_scaled.safetensors" from the Model Manager.`)
   }
   if (modelType === 'ltx') {
+    // LTX-Video 0.9 reads T5-XXL (CLIPLoader type ltxv, ltxv_text_to_video
+    // template); LTX-2 reads Gemma 3 (its own builder).
+    if (activeModelName && !isLtx2(activeModelName)) {
+      const t5 = clips.find(c => lower(c).includes('t5xxl')) || clips.find(c => lower(c).includes('t5') && !lower(c).includes('umt5'))
+      if (t5) return t5
+      throw new Error('No LTX-Video text encoder found. Download "t5xxl_fp16.safetensors" from the Model Manager.')
+    }
     const match = clips.find(c => lower(c).includes('gemma'))
     if (match) return match
     throw new Error(`No LTX Video text encoder found. Download "gemma_3_12B_it_fp8_scaled.safetensors" from the Model Manager.`)

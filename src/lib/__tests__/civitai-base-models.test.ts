@@ -30,7 +30,7 @@ describe('civitaiFamily', () => {
 
   it('says why the families that do not run locally are left out', () => {
     // FINDINGS 23: the local graphs for these do not match ComfyUI yet.
-    for (const b of ['Wan Video 2.2 I2V-A14B', 'Wan Video 2.2 T2V-A14B', 'LTXV 2.3', 'Hunyuan Video']) {
+    for (const b of ['LTXV', 'LTXV 2.5', 'Hunyuan Video']) {
       const f = civitaiFamily(b)
       expect(f.supported).toBe(false)
       if (!f.supported) expect(f.reason).toMatch(/not|no local/i)
