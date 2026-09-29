@@ -75,7 +75,7 @@ const FULL_NODES: Record<string, object> = Object.fromEntries(
     'LoadVideo', 'GetVideoComponents', 'CreateVideo', 'SaveVideo',
     'DWPreprocessor', 'UnetLoaderGGUF', 'UNETLoader', 'CLIPLoader',
     'VAELoader', 'CLIPTextEncode', 'KSampler', 'VAEDecode',
-    'ModelSamplingSD3', 'LoadImage', 'ImageScale',
+    'ModelSamplingSD3', 'ModelSamplingAuraFlow', 'LoadImage', 'ImageScale',
   ].map((n) => [n, {}]),
 )
 
@@ -141,6 +141,15 @@ describe('resolveLocalOpPick', () => {
 })
 
 describe('buildMusicWorkflow', () => {
+  it('samples ACE 1 on the SD3 shift and ACE 1.5 on the AuraFlow shift, like their templates', () => {
+    const v1: ComfyGraph = buildMusicWorkflow(baseParams({}), 7, FULL_NODES)
+    expect(nodeOfType(v1, 'ModelSamplingSD3').inputs?.shift).toBe(5)
+    expect(Object.values(v1).map((x) => x.class_type)).not.toContain('ModelSamplingAuraFlow')
+    const v15: ComfyGraph = buildMusicWorkflow(baseParams({ model: 'ace_step_1.5_turbo_aio.safetensors' }), 7, FULL_NODES)
+    expect(nodeOfType(v15, 'ModelSamplingAuraFlow').inputs?.shift).toBe(3)
+    expect(Object.values(v15).map((x) => x.class_type)).not.toContain('ModelSamplingSD3')
+  })
+
   it('builds the v1 ACE graph (checkpoint, encode, latent, mp3 save)', () => {
     const wf: ComfyGraph = buildMusicWorkflow(baseParams({ seconds: 45, lyrics: 'la la' }), 7, FULL_NODES)
     const types = classTypes(wf)

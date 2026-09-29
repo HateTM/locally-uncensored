@@ -1902,7 +1902,15 @@ export function buildMusicWorkflow(params: LocalOpParams, seed: number, allNodes
   const isAce15 = /1[._-]?5/.test(params.model.toLowerCase().replace(/\.safetensors$/, '').replace(/^.*ace[_-]?step/, ''))
   const encodeNode = isAce15 ? 'TextEncodeAceStepAudio1.5' : 'TextEncodeAceStepAudio'
   const latentNode = isAce15 ? 'EmptyAceStep1.5LatentAudio' : 'EmptyAceStepLatentAudio'
-  requireNodes(allNodes, [encodeNode, latentNode, 'VAEDecodeAudio', 'SaveAudioMP3'], 'Local music')
+  // The two generations sample differently. ACE-Step 1 is tuned on the SD3
+  // shift (its template: ModelSamplingSD3, shift 5). ACE-Step 1.5 declares
+  // multiplier 1.0 (comfy/supported_models.py, ACEStep15) and every official
+  // 1.5 template uses ModelSamplingAuraFlow at shift 3. The SD3 node re-patches
+  // the multiplier to 1000; rendered side by side on 29.09.2026 (same seed and
+  // prompt) the 1.5 track was still music, but the official setting was the
+  // one that sounded better (FINDINGS 23).
+  const samplingNode = isAce15 ? 'ModelSamplingAuraFlow' : 'ModelSamplingSD3'
+  requireNodes(allNodes, [encodeNode, latentNode, samplingNode, 'VAEDecodeAudio', 'SaveAudioMP3'], 'Local music')
 
   const seconds = Math.max(5, Math.min(600, params.seconds || 120))
   const ckptId = String(n++)
@@ -1936,7 +1944,7 @@ export function buildMusicWorkflow(params: LocalOpParams, seed: number, allNodes
   }
 
   const shiftId = String(n++)
-  workflow[shiftId] = { class_type: 'ModelSamplingSD3', inputs: { model: [ckptId, 0], shift: 5.0 } }
+  workflow[shiftId] = { class_type: samplingNode, inputs: { model: [ckptId, 0], shift: isAce15 ? 3.0 : 5.0 } }
   const latentId = String(n++)
   workflow[latentId] = { class_type: latentNode, inputs: { seconds, batch_size: 1 } }
   // ACE-Step samples on the flow-match euler/simple pairing, NOT the composer's
