@@ -58,7 +58,7 @@ import { buildWithFixups, type FixupDeps } from '../lib/render-fixups'
 import { useDownloadStore } from '../stores/downloadStore'
 import { useComfyInstallStore } from '../stores/comfyInstallStore'
 import { checkPromptSafety, SAFETY_BLOCK_MESSAGE } from '../lib/render/safety'
-import { applyLoraPrompts } from '../stores/loraInfoStore'
+import { applyLoraPrompts, loraMismatchNote } from '../stores/loraInfoStore'
 import { resolveRunSeed } from '../lib/run-seed'
 import {
   clearTrainingSet, stageTrainingImage, startCharacterTraining,
@@ -961,9 +961,16 @@ export function useCreate() {
       // Each selected LoRA's saved prompt / learned trigger words go in front of
       // the prompt, its saved negative after the negative (lib/lora-auto.ts).
       // A background cutout runs no diffusion and so no LoRA.
+      // A LoRA CivitAI says was trained for another family adds nothing and is
+      // named on the progress line: it will load without effect.
       const loraPrompts = isRemoveBg
-        ? { prompt, negative: negativePrompt }
-        : applyLoraPrompts(prompt, negativePrompt, selectedLoras.map((l) => l.name))
+        ? { prompt, negative: negativePrompt, mismatched: [] }
+        : applyLoraPrompts(prompt, negativePrompt, selectedLoras.map((l) => l.name), imageModelType)
+      const loraNote = loraMismatchNote(loraPrompts.mismatched, activeModel)
+      if (loraNote) {
+        console.warn('[useCreate] LoRA family mismatch', { model: activeModel, mismatched: loraPrompts.mismatched })
+        setProgress(0, loraNote)
+      }
       const baseParams = {
         prompt: loraPrompts.prompt, negativePrompt: loraPrompts.negative,
         model: activeModel, sampler, scheduler, steps, cfgScale, width, height, seed: runSeed, batchSize,

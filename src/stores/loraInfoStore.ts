@@ -1,8 +1,10 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { safeJSONStorage } from '../lib/storage-quota'
-import { loraKey, type LoraInfo } from '../lib/lora-triggers'
+import { findLoraInfo, loraKey, type LoraInfo } from '../lib/lora-triggers'
 import { withLoraPrompts, withLoraNegatives, type LoraPrompt } from '../lib/lora-auto'
+import { loraFitsModel } from '../lib/civitai-base-models'
+import type { ModelType } from '../api/comfyui'
 
 /**
  * The automatic prompt side of LoRAs (lib/lora-auto.ts), keyed by file name:
@@ -51,13 +53,46 @@ export function rememberLoraHit(hit: { filename?: string; trainedWords?: string[
   })
 }
 
-/** Both prompts with the saved/learned additions of these LoRAs applied. */
+/** A LoRA CivitAI says was trained for another model family. */
+export interface LoraMismatch {
+  lora: string
+  baseModel: string
+}
+
+/**
+ * Both prompts with the saved/learned additions of these LoRAs applied.
+ *
+ * With `modelType`, a LoRA whose CivitAI base model belongs to another family
+ * contributes nothing and is reported in `mismatched`: ComfyUI loads such a
+ * LoRA with "lora key not loaded" warnings and no effect, and its trigger words
+ * would only steer the prompt (FINDINGS 25). LoRAs LU knows nothing about are
+ * applied as before.
+ */
 export function applyLoraPrompts(
   prompt: string,
   negative: string,
   loras: readonly string[],
-): { prompt: string; negative: string } {
-  if (loras.length === 0) return { prompt, negative }
+  modelType?: ModelType,
+): { prompt: string; negative: string; mismatched: LoraMismatch[] } {
+  if (loras.length === 0) return { prompt, negative, mismatched: [] }
   const { prompts, known } = useLoraInfoStore.getState()
-  return { prompt: withLoraPrompts(prompt, loras, prompts, known), negative: withLoraNegatives(negative, loras, prompts) }
+  const mismatched: LoraMismatch[] = []
+  const fitting = loras.filter((lora) => {
+    const baseModel = findLoraInfo(lora, known)?.baseModel
+    if (loraFitsModel(baseModel, modelType)) return true
+    mismatched.push({ lora, baseModel: baseModel ?? '' })
+    return false
+  })
+  return {
+    prompt: withLoraPrompts(prompt, fitting, prompts, known),
+    negative: withLoraNegatives(negative, fitting, prompts),
+    mismatched,
+  }
+}
+
+/** One English line for mismatched LoRAs, '' when there are none. */
+export function loraMismatchNote(mismatched: readonly LoraMismatch[], modelLabel: string): string {
+  if (mismatched.length === 0) return ''
+  const list = mismatched.map((m) => `${m.lora} (${m.baseModel})`).join(', ')
+  return `LoRA not made for ${modelLabel}, its prompt words were left out and it will likely have no effect: ${list}.`
 }

@@ -341,6 +341,19 @@ export function classifyModel(name: string | null | undefined): ModelType {
   return 'unknown'
 }
 
+/**
+ * Lightning / rapid merges ("Rapid AIO", lightx2v) are distilled to a few steps
+ * at cfg 1. The architecture defaults (Wan: 30 steps, cfg 6; the agent's I2V
+ * path: 20 steps, cfg 3) render them oversaturated and take several times as
+ * long. The Create tab applied this rule on its own (createStore.setVideoModel);
+ * the agent's video paths did not (FINDINGS 25). One rule for both now.
+ */
+export const LIGHTNING_SAMPLING = { steps: 6, cfg: 1.0 } as const
+
+export function isLightningMerge(model: string): boolean {
+  return /rapid|lightning|lightx2v/i.test(model)
+}
+
 /** HiDream I1 ships as fast, dev and full, three different samplers
  *  (hidream_i1_fast / _dev / _full templates). Fast is the type default. */
 export function hidreamSampling(model: string): { steps: number; cfg: number; sampler: string; scheduler: string } {

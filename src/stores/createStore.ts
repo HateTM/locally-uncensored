@@ -22,7 +22,7 @@ const RUNTIME_ONLY_KEYS: readonly string[] = [
   'cloudFrames', 'cloudFps',
 ]
 import type { ModelType, ClassifiedModel } from '../api/comfyui'
-import { classifyModel, hidreamSampling } from '../api/comfyui'
+import { classifyModel, hidreamSampling, isLightningMerge, LIGHTNING_SAMPLING } from '../api/comfyui'
 import type { HiresUpscaleMethod } from '../api/hires-fix'
 import { releaseVideoBlobUrl } from '../api/mlx-video'
 import { isMlxImageHost } from '../api/mlx-image'
@@ -695,10 +695,11 @@ export const useCreateStore = create<CreateState>()(
         const defaults = MODEL_TYPE_DEFAULTS[type] || MODEL_TYPE_DEFAULTS.unknown
         // Lightning/rapid merges are distilled to few steps at cfg 1 — the
         // architecture defaults (30 steps, cfg 5+) render them to mush.
-        const lightning = /rapid|lightning|lightx2v/i.test(model)
+        const lightning = isLightningMerge(model)
         set({
           videoModel: model,
-          steps: lightning ? 6 : defaults.steps, cfgScale: lightning ? 1.0 : defaults.cfgScale,
+          steps: lightning ? LIGHTNING_SAMPLING.steps : defaults.steps,
+          cfgScale: lightning ? LIGHTNING_SAMPLING.cfg : defaults.cfgScale,
           sampler: defaults.sampler, scheduler: defaults.scheduler,
           width: defaults.width, height: defaults.height,
           ...(defaults.frames ? { frames: defaults.frames } : {}),
