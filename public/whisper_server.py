@@ -3,7 +3,7 @@ Persistent faster-whisper server for Locally Uncensored.
 Communicates via stdin/stdout with line-based JSON protocol.
 
 Input (one JSON per line on stdin):
-  {"action": "transcribe", "path": "/tmp/audio.wav"}
+  {"action": "transcribe", "path": "/tmp/audio.wav", "model": "small"}
   {"action": "status"}
   {"action": "quit"}
 
@@ -37,6 +37,36 @@ def error_text(e: BaseException) -> str:
         return "%s%s (os error %s)" % (type(e).__name__, where, code)
     return str(e)
 
+# Model sizes the app offers (Settings, Voice). "base" was the only one until
+# FINDINGS 16: it is the weakest usable size and noticeably worse on Russian
+# than small or medium. large-v3-turbo is the large model with a pruned decoder.
+MODELS = ("base", "small", "medium", "large-v3-turbo")
+DEFAULT_MODEL = "base"
+
+
+def pick_model(name):
+    return name if name in MODELS else DEFAULT_MODEL
+
+
+def load_model(WhisperModel, name):
+    """Load on the GPU when CTranslate2 sees one, else on the processor.
+
+    CUDA needs cuBLAS and cuDNN next to CTranslate2; when they are missing the
+    load raises, and the processor path is the answer instead of no speech
+    input at all. LU_WHISPER_DEVICE=cpu forces the processor.
+    """
+    forced = os.environ.get("LU_WHISPER_DEVICE", "").strip().lower()
+    if forced != "cpu":
+        try:
+            import ctranslate2
+            if ctranslate2.get_cuda_device_count() > 0:
+                model = WhisperModel(name, device="cuda", compute_type="float16")
+                return model, "cuda"
+        except Exception as e:
+            print("GPU load failed, using the processor: %s" % error_text(e), file=sys.stderr, flush=True)
+    return WhisperModel(name, device="cpu", compute_type="int8"), "cpu"
+
+
 def main():
     # Unbuffered stdout for real-time communication with Node.js
     sys.stdout.reconfigure(line_buffering=True)
@@ -50,16 +80,19 @@ def main():
         respond({"status": "error", "error": "faster-whisper not installed"})
         sys.exit(1)
 
-    # Load model once — this is the slow part (~170s on some systems)
+    # Load model once — this is the slow part (~170s on some systems). The app
+    # names the size in LU_WHISPER_MODEL; a transcribe command may name another,
+    # which is then loaded in its place.
+    loaded = pick_model(os.environ.get("LU_WHISPER_MODEL", DEFAULT_MODEL))
     try:
-        model = WhisperModel("base", device="cpu", compute_type="int8")
-        print("Model loaded, ready for transcription.", file=sys.stderr, flush=True)
+        model, device = load_model(WhisperModel, loaded)
+        print("Model %s loaded on %s, ready for transcription." % (loaded, device), file=sys.stderr, flush=True)
     except Exception as e:
         respond({"status": "error", "error": f"Model load failed: {error_text(e)}"})
         sys.exit(1)
 
     # Signal readiness
-    respond({"status": "ready", "backend": "faster-whisper"})
+    respond({"status": "ready", "backend": "faster-whisper", "model": loaded, "device": device})
 
     # Main loop: read commands from stdin
     for line in sys.stdin:
@@ -76,13 +109,23 @@ def main():
         action = cmd.get("action", "")
 
         if action == "status":
-            respond({"status": "ready", "backend": "faster-whisper"})
+            respond({"status": "ready", "backend": "faster-whisper", "model": loaded, "device": device})
 
         elif action == "transcribe":
             audio_path = cmd.get("path", "")
             if not audio_path or not os.path.exists(audio_path):
                 respond({"error": f"File not found: {audio_path}", "transcript": ""})
                 continue
+
+            wanted = pick_model(cmd.get("model") or loaded)
+            if wanted != loaded:
+                try:
+                    model, device = load_model(WhisperModel, wanted)
+                    loaded = wanted
+                    print("Switched to model %s on %s." % (loaded, device), file=sys.stderr, flush=True)
+                except Exception as e:
+                    respond({"error": f"Model load failed: {error_text(e)}", "transcript": ""})
+                    continue
 
             try:
                 segments, info = model.transcribe(audio_path)

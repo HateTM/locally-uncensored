@@ -42,6 +42,13 @@ interface VoiceState {
   autoReadAloud: boolean;
   /** Selected Piper neural voice id (e.g. "en_US-lessac-medium"). */
   piperVoice: string;
+  /** Piper voice for a reply written in Cyrillic (e.g. "ru_RU-irina-medium"),
+   *  "" for none. An English voice reading Russian text spells it out letter
+   *  by letter, so a Russian reply needs its own voice (FINDINGS 16). */
+  piperVoiceCyrillic: string;
+  /** faster-whisper size for local speech-to-text. "base" was fixed until
+   *  FINDINGS 16; small and up are markedly better on Russian. */
+  whisperModel: WhisperModelSize;
   /** Browser SpeechSynthesis voice — only the fallback when neural is off. */
   ttsVoice: string;
   ttsRate: number;
@@ -74,6 +81,8 @@ interface VoiceState {
       ttsVoice: string;
       ttsRate: number;
       ttsPitch: number;
+      piperVoiceCyrillic: string;
+      whisperModel: WhisperModelSize;
       ttsMode: "piper" | "external";
       externalTtsUrl: string;
       externalTtsVoice: string;
@@ -86,6 +95,10 @@ interface VoiceState {
    *  reflects what is installed on disk, not a preference. */
   resetVoiceDefaults: () => void;
 }
+
+/** The faster-whisper sizes whisper_server.py accepts (its MODELS). */
+export const WHISPER_MODEL_SIZES = ["base", "small", "medium", "large-v3-turbo"] as const;
+export type WhisperModelSize = (typeof WHISPER_MODEL_SIZES)[number];
 
 export const useVoiceStore = create<VoiceState>()(
   persist(
@@ -109,6 +122,8 @@ export const useVoiceStore = create<VoiceState>()(
       ttsEnabled: false,
       autoReadAloud: false,
       piperVoice: "en_US-lessac-medium",
+      piperVoiceCyrillic: "",
+      whisperModel: "base",
       ttsVoice: "",
       ttsRate: 1.0,
       ttsPitch: 1.0,
@@ -145,6 +160,8 @@ export const useVoiceStore = create<VoiceState>()(
           ttsEnabled: false,
           autoReadAloud: false,
           piperVoice: "en_US-lessac-medium",
+          piperVoiceCyrillic: "",
+          whisperModel: "base",
           ttsVoice: "",
           ttsRate: 1.0,
           ttsPitch: 1.0,
@@ -162,6 +179,8 @@ export const useVoiceStore = create<VoiceState>()(
         ttsEnabled: state.ttsEnabled,
         autoReadAloud: state.autoReadAloud,
         piperVoice: state.piperVoice,
+        piperVoiceCyrillic: state.piperVoiceCyrillic,
+        whisperModel: state.whisperModel,
         ttsVoice: state.ttsVoice,
         ttsRate: state.ttsRate,
         ttsPitch: state.ttsPitch,
