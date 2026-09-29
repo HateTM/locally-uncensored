@@ -27,6 +27,7 @@ vi.mock('../comfyui', async (importOriginal) => {
   return {
     ...actual,
     findMatchingCLIP: vi.fn(async () => 'mock_text_encoder.safetensors'),
+    findHunyuan15Encoders: vi.fn(async () => ({ qwen: 'qwen_2.5_vl_7b_fp8_scaled.safetensors', byt5: 'byt5_small_glyphxl_fp16.safetensors' })),
     findMatchingVAE: vi.fn(async () => 'mock_vae.safetensors'),
   }
 })
@@ -133,30 +134,48 @@ describe('buildDynamicWorkflow — I2V override on the main path', () => {
     expect(i2v.inputs.sampling_mode).toBe('flow')
   })
 
-  it('Hunyuan i2v: single CONDITIONING output re-points positive only', async () => {
+  it('HunyuanVideo 1.5 i2v: its own node, dual encoder and 1.5 latent family', async () => {
+    // Was HunyuanVideo 1 through HunyuanImageToVideo. The v1 path rendered
+    // noise and is refused now (see below); the catalogue ships 1.5, whose
+    // official i2v template uses HunyuanVideo15ImageToVideo.
+    vi.mocked(getAllNodeInfo).mockResolvedValue({
+      ...CORE,
+      UNETLoader: { input: { required: { unet_name: [['hunyuanvideo1.5_720p_i2v_fp8.safetensors']] } } },
+      CLIPLoader: { input: { required: { clip_name: [['qwen_2.5_vl_7b_fp8_scaled.safetensors']] } } },
+      DualCLIPLoader: { input: { required: {} } },
+      VAELoader: { input: { required: { vae_name: [['hunyuanvideo15_vae_fp16.safetensors']] } } },
+      EmptyHunyuanVideo15Latent: { input: { required: {} } },
+      ModelSamplingSD3: { input: { required: {} } },
+      HunyuanVideo15ImageToVideo: {
+        input: {
+          required: { positive: ['CONDITIONING'], negative: ['CONDITIONING'], vae: ['VAE'], width: ['INT'], height: ['INT'], length: ['INT'], batch_size: ['INT'] },
+          optional: { start_image: ['IMAGE', {}], clip_vision_output: ['CLIP_VISION_OUTPUT', {}] },
+        },
+        output: ['CONDITIONING', 'CONDITIONING', 'LATENT'],
+      },
+    } as never)
+
+    const wf = await buildDynamicWorkflow(vidParams('hunyuanvideo1.5_720p_i2v_fp8.safetensors') as never, 'hunyuan')
+    const [i2vId, i2v] = nodeOf(wf, 'HunyuanVideo15ImageToVideo')!
+    const [, sampler] = nodeOf(wf, 'KSampler')!
+    const [, clip] = nodeOf(wf, 'DualCLIPLoader')!
+    expect(clip.inputs).toMatchObject({ clip_name1: 'qwen_2.5_vl_7b_fp8_scaled.safetensors', clip_name2: 'byt5_small_glyphxl_fp16.safetensors', type: 'hunyuan_video_15' })
+    expect(i2v.inputs.start_image).toBeDefined()
+    expect(sampler.inputs.positive).toEqual([i2vId, 0])
+    expect(sampler.inputs.negative).toEqual([i2vId, 1])
+    expect(sampler.inputs.latent_image).toEqual([i2vId, 2])
+    expect(nodeOf(wf, 'ModelSamplingSD3')![1].inputs.shift).toBe(7)
+  })
+
+  it('HunyuanVideo 1 is refused instead of rendering noise', async () => {
     vi.mocked(getAllNodeInfo).mockResolvedValue({
       ...CORE,
       UNETLoader: { input: { required: { unet_name: [['hunyuan_video_i2v_720_fp8.safetensors']] } } },
       CLIPLoader: { input: { required: { clip_name: [['llava_llama3_fp8_scaled.safetensors']] } } },
       VAELoader: { input: { required: { vae_name: [['hunyuan_video_vae_bf16.safetensors']] } } },
-      HunyuanImageToVideo: {
-        input: {
-          required: { positive: ['CONDITIONING'], vae: ['VAE'], width: ['INT'], height: ['INT'], length: ['INT'], batch_size: ['INT'], guidance_type: [['v1 (concat)', 'v2 (replace)']] },
-          optional: { start_image: ['IMAGE', {}] },
-        },
-        output: ['CONDITIONING', 'LATENT'],
-      },
     } as never)
-
-    const wf = await buildDynamicWorkflow(vidParams('hunyuan_video_i2v_720_fp8.safetensors') as never, 'hunyuan')
-    const [i2vId, i2v] = nodeOf(wf, 'HunyuanImageToVideo')!
-    const [, sampler] = nodeOf(wf, 'KSampler')!
-    // unknown required widget falls back to the schema's first combo option
-    expect(i2v.inputs.guidance_type).toBe('v1 (concat)')
-    expect(sampler.inputs.positive).toEqual([i2vId, 0])
-    expect(sampler.inputs.latent_image).toEqual([i2vId, 1])
-    // negative stays on the text encoder — Hunyuan's node emits no negative
-    expect(sampler.inputs.negative).not.toEqual([i2vId, expect.anything()])
+    await expect(buildDynamicWorkflow(vidParams('hunyuan_video_i2v_720_fp8.safetensors') as never, 'hunyuan'))
+      .rejects.toThrow(/HunyuanVideo 1 is not supported/)
   })
 
   it('LTX: LTXVImgToVideo wires image input and conditioning outputs', async () => {

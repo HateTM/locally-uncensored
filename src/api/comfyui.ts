@@ -1717,6 +1717,47 @@ export async function findFramePackCLIPPair(): Promise<{ clipL: string; llavaLla
  *   fall back to the full-precision variant, which is what most users
  *   want.
  */
+/**
+ * HunyuanVideo 1.5, told apart from HunyuanVideo 1 by its file name. The two
+ * share the `hunyuan` type but not a single graph node: 1.5 has its own text
+ * encoder pair (Qwen2.5-VL + byT5, `hunyuan_video_15`), a 32-channel latent at
+ * a sixteenth (`EmptyHunyuanVideo15Latent`) and its own image-to-video node.
+ */
+export function isHunyuanVideo15(model: string): boolean {
+  return /hunyuan[_ -]?video[_ -]?1[._-]?5/i.test(model)
+}
+
+/** The catalogue's HunyuanVideo 1.5 file, saved under a name without its
+ *  `cfg_distilled` tag (model-bundles.ts). */
+export const HUNYUAN15_CATALOG_FILE = 'hunyuanvideo1.5_480p_t2v_fp8.safetensors'
+
+/**
+ * A CFG-distilled HunyuanVideo 1.5: guidance is baked in, so it samples at
+ * cfg 1. At the type default (cfg 6) it overcooks. Rendered on 29.09.2026 at
+ * 12 steps / cfg 1 against ComfyUI 0.35: a clean clip.
+ */
+export function isCfgDistilledHunyuan15(model: string): boolean {
+  return isHunyuanVideo15(model) && (/distill/i.test(model) || model.toLowerCase() === HUNYUAN15_CATALOG_FILE)
+}
+export const HUNYUAN15_DISTILLED_SAMPLING = { steps: 20, cfg: 1.0 } as const
+
+/** Where the byT5 glyph encoder HunyuanVideo 1.5 needs comes from. */
+export const HUNYUAN15_BYT5 = {
+  filename: 'byt5_small_glyphxl_fp16.safetensors',
+  downloadUrl: 'https://huggingface.co/Comfy-Org/HunyuanVideo_1.5_repackaged/resolve/main/split_files/text_encoders/byt5_small_glyphxl_fp16.safetensors',
+}
+
+/** The two text encoders of HunyuanVideo 1.5, or an error naming the missing one. */
+export async function findHunyuan15Encoders(): Promise<{ qwen: string; byt5: string }> {
+  const clips = await getCLIPModels()
+  const lower = (c: string) => c.toLowerCase()
+  const qwen = clips.find((c) => lower(c).includes('qwen_2.5_vl_7b')) ?? clips.find((c) => lower(c).includes('qwen_2.5_vl'))
+  const byt5 = clips.find((c) => lower(c).includes('byt5'))
+  if (!qwen) throw new Error('HunyuanVideo 1.5 needs the "qwen_2.5_vl_7b_fp8_scaled.safetensors" text encoder. Download it from the Model Manager.')
+  if (!byt5) throw new Error(`HunyuanVideo 1.5 needs the "${HUNYUAN15_BYT5.filename}" text encoder (0.4 GB). Download it from the Model Manager.`)
+  return { qwen, byt5 }
+}
+
 export async function findMatchingCLIP(modelType: ModelType, activeModelName?: string): Promise<string> {
   const clips = await getCLIPModels()
   if (clips.length === 0) throw new Error('No text encoder models found. Download a CLIP/T5 model for your model type from the Model Manager.')

@@ -58,6 +58,11 @@ const CORE_NODES = new Set([
   'InpaintModelConditioning', 'AudioEncoderEncode', 'ModelSamplingSD3', 'ModelSamplingAuraFlow',
   'SVD_img2vid_Conditioning', 'VideoLinearCFGGuidance',
   // latents
+  // EmptyHunyuanVideo15Latent / HunyuanVideo15ImageToVideo: core
+  // (comfy_extras/nodes_hunyuan.py), both answered /object_info live on
+  // ComfyUI 0.35 on 2026-09-29 and are what the official HunyuanVideo 1.5
+  // templates use.
+  'EmptyHunyuanVideo15Latent', 'HunyuanVideo15ImageToVideo',
   'EmptyLatentImage', 'EmptyLTXVLatentVideo', 'Wan22ImageToVideoLatent', 'TrimVideoLatent',
   'WanSoundImageToVideo', 'WanAnimateToVideo', 'WanVaceToVideo',
   // sampling
