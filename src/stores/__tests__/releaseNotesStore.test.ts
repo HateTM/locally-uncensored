@@ -366,13 +366,10 @@ describe('the notes table', () => {
     }
   })
 
-  it('the 3.1.0 entry names the media agent, the LoRA prompts and the fork channel, now that it is the shipping version', () => {
-    // package.json, Cargo.toml/.lock and tauri.conf.json all moved to 3.1.0
-    // in one commit, so THIS is the shipping entry. One anchor per change.
-    const shipping = JSON.parse(
-      readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../../../package.json'), 'utf8'),
-    ).version as string
-    expect(shipping).toBe('3.1.0')
+  it('the 3.1.0 entry names the media agent, the LoRA prompts and the fork channel', () => {
+    // It shipped; since 3.2.0 it is no longer the running version, so it is
+    // read by its number, and every anchor stays.
+    const shipping = '3.1.0'
     const prose = proseOf(shipping)
     for (const anchor of [
       'attach a photo', 'background removal', 'mask inpainting',
@@ -380,6 +377,26 @@ describe('the notes table', () => {
       'downloads the loras you are missing', 'chain of steps', 'russian',
       'sexual content involving minors', 'the negative prompt wan was trained with',
       'hatetm/locally-uncensored',
+    ]) {
+      expect(prose, `${shipping}: nothing about "${anchor}"`).toContain(anchor)
+    }
+  })
+
+  it('the 3.2.0 entry names the CivitAI examples, core mp4 and cutouts and the video graphs, now that it is the shipping version', () => {
+    // package.json, Cargo.toml/.lock and tauri.conf.json all moved to 3.2.0
+    // in one commit, so THIS is the shipping entry. One anchor per change.
+    const shipping = JSON.parse(
+      readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../../../package.json'), 'utf8'),
+    ).version as string
+    expect(shipping).toBe('3.2.0')
+    const prose = proseOf(shipping)
+    for (const anchor of [
+      'examples button', 'civitai.red', 'use this example', 'mp4', 'birefnet',
+      'hunyuanvideo 1.5', 'ltx 2.3', 'wan 2.2 a14b', 'ace-step 1.5',
+      'trending on hugging face', 'fit hint', 'mask', 'ten seconds', 'rapid aio',
+      'russian piper voice', 'whisper size', 'token estimate', 'nomic-embed-text',
+      'a/b compare', 'gpu you pick', 'sexual content involving minors', 'web fetch',
+      'code blocks',
     ]) {
       expect(prose, `${shipping}: nothing about "${anchor}"`).toContain(anchor)
     }

@@ -130,6 +130,94 @@ export interface ReleaseNote {
 }
 
 export const RELEASE_NOTES: ReleaseNote[] = [
+  // 3.2.0 (29.09.2026): Beispiele von CivitAI in jedem Bereich, mp4 und
+  // Freistellen auf ComfyUI-Kernknoten, die grossen Videomodelle auf ihren
+  // offiziellen Graphen, Live-Modelle in Discover. package.json,
+  // Cargo.toml/Cargo.lock und tauri.conf.json stehen in einem Zug mit diesem
+  // Eintrag auf 3.2.0.
+  {
+    version: '3.2.0',
+    headline: 'Start any render from a CivitAI example, get mp4 and cutouts from ComfyUI itself, and run the big video models on their official graphs.',
+    lines: [
+      {
+        title: 'Examples from CivitAI in every section with a prompt.',
+        detail: 'Image, Edit, Video, Animate and Extend have an Examples button next to the prompt. Pick an image or video from civitai.com or civitai.red and Use this example copies its prompt, negative prompt and settings, with the LoRAs you have installed. A missing LoRA downloads with one click.',
+      },
+      {
+        title: 'Video is saved as mp4 without VideoHelperSuite.',
+        detail: 'Every video render writes mp4 through ComfyUI\'s own nodes, like the official templates. Background removal runs the official BiRefNet graph and needs only its 424 MB model; ComfyUI-RMBG stays as the fallback.',
+      },
+      {
+        title: 'HunyuanVideo 1.5, LTX 2.3 and Wan 2.2 A14B work.',
+        detail: 'HunyuanVideo 1.5, LTX 2.3 and Wan 2.2 A14B render on their official graphs now. HunyuanVideo 1.5 gave coloured noise before, and the other two did not run as built. ACE-Step 1.5 music samples like its own templates.',
+      },
+      {
+        title: 'Live models in Discover.',
+        detail: 'A Trending on Hugging Face section lists new GGUF text models the LU Engine can load, and a popular CivitAI list shows checkpoints and LoRAs with their model family. The fit hint counts the context, as the engine does.',
+      },
+    ],
+    details: [
+      {
+        title: 'Create',
+        items: [
+          {
+            title: 'An Edit keeps its mask.',
+            detail: 'With a workflow preset, after a builder error and after switching from cloud to local, the painted mask and the source picture now reach the render instead of the whole picture being repainted.',
+          },
+          {
+            title: 'Results appear as soon as ComfyUI finishes.',
+            detail: 'Create waited up to ten seconds for a poll before showing a finished render.',
+          },
+          {
+            title: 'Lightning and Rapid AIO merges on every path.',
+            detail: 'The agent\'s video renders now sample Lightning and Rapid AIO merges at 6 steps and CFG 1 too, and a LoRA made for another model family adds no trigger words.',
+          },
+        ],
+      },
+      {
+        title: 'Chat and voice',
+        items: [
+          {
+            title: 'Voice mode speaks Russian.',
+            detail: 'A Russian reply is read by a Russian Piper voice of your choice. The Whisper size is selectable and runs on the GPU when there is one.',
+          },
+          {
+            title: 'Russian chats are trimmed in time.',
+            detail: 'The token estimate follows how text is split into tokens, so a Russian chat or a long tool result is trimmed before the model\'s window is full.',
+          },
+          {
+            title: 'Document chat finds more and no longer freezes.',
+            detail: 'nomic-embed-text gets its task prefixes, and keyword search over a large document runs in one pass.',
+          },
+          {
+            title: 'A/B Compare measures generation.',
+            detail: 'The A/B Compare numbers leave the model load out, and a side that fails says why.',
+          },
+        ],
+      },
+      {
+        title: 'Engine, safety and more',
+        items: [
+          {
+            title: 'The GPU you pick reaches the LU Engine.',
+            detail: 'On machines with more than one card, the GPU you pick in Hardware is the one the engine uses, and it plans its layers for that card.',
+          },
+          {
+            title: 'The safety check reads Russian.',
+            detail: 'The check that refuses sexual content involving minors now reads Russian prompts too.',
+          },
+          {
+            title: 'Web fetch stays on the address it checked.',
+            detail: 'The agent\'s web fetch connects only to the address it validated, on every redirect.',
+          },
+          {
+            title: 'Code blocks on the phone.',
+            detail: 'The mobile client shows code blocks as code, and Copy and Preview get the code itself.',
+          },
+        ],
+      },
+    ],
+  },
   // 3.1.0 (29.09.2026): der Medien-Agent, die LoRA-Prompts und der
   // CivitAI-Nachbau. package.json, Cargo.toml/Cargo.lock und tauri.conf.json
   // stehen in einem Zug mit diesem Eintrag auf 3.1.0.
