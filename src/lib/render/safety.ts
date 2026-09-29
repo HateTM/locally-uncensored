@@ -170,6 +170,87 @@ export interface SafetyVerdict {
   reason?: string
 }
 
+// ── Russian (FINDINGS 2) ──────────────────────────────────────────────
+//
+// The agent takes Russian requests since d684257a, and the term lists above
+// are English only. baseNormalize folds Cyrillic lookalikes onto Latin, which
+// is right for "a nude сhild" and ruins a Russian word ("голая" turns into a
+// mixed-script string), so Russian is matched on a view of its own:
+//
+//   - NFKC, zero-width characters stripped, lower case, ё -> е. Diacritics
+//     are NOT stripped here: й is и plus a combining breve;
+//   - inside a token that already holds Cyrillic, Latin lookalikes are folded
+//     back to Cyrillic ("гoлая" with a Latin o), and 0 / 3 / 6 between two
+//     Cyrillic letters become о / з / б. A purely Latin token is left alone,
+//     so English prose can never turn into a Russian stem;
+//   - letter-spaced runs ("г о л а я") are glued, like collapseSpacing.
+//
+// No \b anywhere: Cyrillic letters are not word characters in a JavaScript
+// regex. Terms are anchored on the left with (?<![а-я]) so a stem cannot
+// start inside another word ("детальный" is not "дети"). Same conjunctive
+// rule as the English lists: a minor term alone or a sexual term alone is
+// legitimate, the combination is not.
+const RU_MINOR_ALT = String.raw`(?<![а-я])(ребен[а-я]*|ребят[а-я]*|дет(и|ей|ям|ьми|ях|ишк[а-я]*|ск(ий|ая|ое|ие|ого|ой|ую|их|ими))(?![а-я])|девочк[а-я]*|мальчик[а-я]*|малолет[а-я]*|несовершеннолет[а-я]*|подрост[а-я]*|школьни[а-я]*|школьн(ая|ой|ую)\s*форм[а-я]*|младен[а-я]*|малыш[а-я]*|лолит[а-я]*|шот[аы](?![а-я])|(одно|двух|трех|четырех|пяти|шести|семи|восьми|девяти|десяти|одиннадцати|двенадцати|тринадцати|четырнадцати|пятнадцати|шестнадцати|семнадцати)летн[а-я]*)|(?<![0-9])(1[0-7]|[1-9])\s*-?\s*(лет|год)`
+const RU_SEXUAL_ALT = String.raw`(?<![а-я])(гол(ая|ый|ые|ой|ую|ых|ыми)(?![а-я])|голышом|обнаж[а-я]*|наг(ая|ой|ие|их|ишом)(?![а-я])|секс[а-я]*|эрот[а-я]*|порн[а-я]*|раздет[а-я]*|раздева[а-я]*|топлес|нижн[а-я]*\s*бель[а-я]*|кружевн[а-я]*\s*бель[а-я]*|трусик[а-я]*|фетиш[а-я]*|бдсм|бондаж[а-я]*|генитал[а-я]*|хентай|полов(ой|ые|ых|ым)\s*(акт|орган|член|сношен)[а-я]*|мастурб[а-я]*|оргазм[а-я]*|возбужденн[а-я]*|соблазнительн[а-я]*|провокационн[а-я]*|интим[а-я]*)`
+const RU_ALWAYS_ALT = String.raw`(?<![а-я])(детск[а-я]*\s*порн[а-я]*|педофил[а-я]*)`
+/** A glued letter-spaced run has no word edges left ("голаядевочка"), so it
+ *  is tested with the edge lookarounds taken out, as the English runs are. */
+const unanchored = (alt: string) => new RegExp(alt.replace(/\(\?<?!\[а-я\]\)/g, ''))
+const RU_MINOR = new RegExp(RU_MINOR_ALT)
+const RU_MINOR_RUN = unanchored(RU_MINOR_ALT)
+const RU_SEXUAL = new RegExp(RU_SEXUAL_ALT)
+const RU_SEXUAL_RUN = unanchored(RU_SEXUAL_ALT)
+const RU_ALWAYS = new RegExp(RU_ALWAYS_ALT)
+const RU_ALWAYS_RUN = unanchored(RU_ALWAYS_ALT)
+
+const CYRILLIC = /[а-я]/
+const LATIN_TO_CYRILLIC: Record<string, string> = {
+  a: 'а', e: 'е', o: 'о', p: 'р', c: 'с', x: 'х', y: 'у', k: 'к', m: 'м', h: 'н', t: 'т', b: 'в', r: 'г',
+}
+const DIGIT_TO_CYRILLIC: Record<string, string> = { '0': 'о', '3': 'з', '6': 'б' }
+
+/** The Russian view (see above). `runs` are glued letter-spaced runs,
+ *  matched without the left anchor, like the English `runs`. */
+export function cyrillicView(text: string): { text: string; runs: string[] } {
+  const lowered = text
+    .normalize('NFKC')
+    .replace(/[\u{200B}-\u{200D}\u{2060}\u{FEFF}]/gu, '')
+    .toLowerCase()
+    .replace(/ё/g, 'е')
+  const folded = lowered
+    .split(/(\s+)/)
+    .map((tok) => (CYRILLIC.test(tok)
+      ? tok
+        .replace(/[a-z]/g, (ch) => LATIN_TO_CYRILLIC[ch] ?? ch)
+        .replace(/(?<=[а-я])[036](?=[а-я])/g, (ch) => DIGIT_TO_CYRILLIC[ch] ?? ch)
+      : tok))
+    .join('')
+  const runs: string[] = []
+  let run: string[] = []
+  const flush = () => {
+    if (run.length > 1) runs.push(run.join(''))
+    run = []
+  }
+  for (const tok of folded.split(/[^а-яa-z0-9]+/)) {
+    if (tok.length === 1) run.push(tok)
+    else flush()
+  }
+  flush()
+  return { text: folded, runs }
+}
+
+/** The Russian half of the CSAM gate, or null when it finds nothing. The
+ *  English findings come in so a mixed prompt ("девочка, nude") still meets
+ *  the conjunction. */
+function russianVerdict(text: string, englishMinor: boolean, englishSexual: boolean): SafetyVerdict | null {
+  const { text: cyr, runs } = cyrillicView(text)
+  const hit = (re: RegExp, run: RegExp) => re.test(cyr) || runs.some((r) => run.test(r))
+  if (hit(RU_ALWAYS, RU_ALWAYS_RUN)) return { blocked: true, reason: 'csam' }
+  const minor = englishMinor || hit(RU_MINOR, RU_MINOR_RUN)
+  const sexual = englishSexual || hit(RU_SEXUAL, RU_SEXUAL_RUN)
+  return minor && sexual ? { blocked: true, reason: 'minor+sexual' } : null
+}
+
 /** 'local' = CSAM gate only (default). 'cloud' = CSAM + adult block: hosted
  *  rendering is SFW-only on 'strict', hardcore-only on 'soft'. */
 export type SafetyTier = 'local' | 'cloud'
@@ -274,6 +355,10 @@ export function checkPromptSafety(
   if (minor && sexual) {
     return { blocked: true, reason: 'minor+sexual' }
   }
+  // Russian, and a Russian term on one side of the conjunction with an
+  // English one on the other ("девочка, nude").
+  const ru = russianVerdict(text, minor, sexual)
+  if (ru) return ru
   // CSAM checks above run first so an adult+minor prompt always carries the
   // csam reason (and its alert path), never the softer adult-cloud one.
   if (opts.tier === 'cloud') {
