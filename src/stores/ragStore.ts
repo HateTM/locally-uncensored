@@ -37,6 +37,8 @@ interface RAGState {
   addDocument: (conversationId: string, meta: DocumentMeta) => void
   removeDocument: (conversationId: string, docId: string) => void
   addChunks: (newChunks: TextChunk[]) => void
+  /** Swap in re-embedded chunks (same ids) and persist their documents. */
+  replaceChunks: (updated: TextChunk[]) => void
   getConversationChunks: (conversationId: string) => TextChunk[]
   loadChunksFromDB: (conversationId: string) => Promise<void>
   setRagEnabled: (conversationId: string, enabled: boolean) => void
@@ -121,6 +123,20 @@ export const useRAGStore = create<RAGState>()(
         set((state) => ({
           chunks: [...state.chunks, ...newChunks],
         }))
+      },
+
+      replaceChunks: (updated) => {
+        if (updated.length === 0) return
+        const byId = new Map(updated.map((c) => [c.id, c]))
+        const chunks = get().chunks.map((c) => byId.get(c.id) ?? c)
+        set({ chunks })
+        // saveChunks overwrites a document's whole list, so write every chunk
+        // of each touched document, not just the replaced ones.
+        for (const docId of new Set(updated.map((c) => c.documentId))) {
+          saveChunks(docId, chunks.filter((c) => c.documentId === docId)).catch((err) =>
+            log.error("Failed to save re-embedded chunks to IndexedDB", { err })
+          )
+        }
       },
 
       getConversationChunks: (conversationId) => {

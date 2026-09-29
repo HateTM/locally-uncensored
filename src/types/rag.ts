@@ -13,6 +13,9 @@ export interface TextChunk {
   content: string
   embedding: number[]
   index: number
+  /** Embedded with nomic's `search_document: ` prefix (rag.ts embedForTask).
+   *  Absent on chunks indexed before it; those are re-embedded on first use. */
+  taskPrefixed?: boolean
 }
 
 export interface RAGContext {

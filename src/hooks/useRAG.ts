@@ -298,7 +298,10 @@ export function useRAG(conversationId: string | null) {
 
       if (chunks.length === 0) return null
 
-      const { context } = await retrieveContext(query, chunks, embeddingModel)
+      const { context, reembedded } = await retrieveContext(query, chunks, embeddingModel)
+      // Chunks indexed before the nomic task prefixes, re-embedded for this
+      // query: stored so the next question does not pay for them again.
+      useRAGStore.getState().replaceChunks(reembedded)
       return context
     },
     [conversationId]

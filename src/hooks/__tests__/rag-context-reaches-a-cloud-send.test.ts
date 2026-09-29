@@ -59,7 +59,8 @@ const okStream = () =>
   new Response('data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n', { status: 200 })
 
 function chunk(i: number, content: string): TextChunk {
-  return { id: `c${i}`, documentId: 'doc-1', content, embedding: [0.1, 0.2], index: i } as TextChunk
+  // taskPrefixed: an index built with the nomic task prefixes, as every new one is.
+  return { id: `c${i}`, documentId: 'doc-1', content, embedding: [0.1, 0.2], index: i, taskPrefixed: true } as TextChunk
 }
 
 /** A conversation with one indexed document and RAG switched on. */
@@ -136,6 +137,7 @@ describe('useChat puts the retrieved passages into the cloud request', () => {
   it('the matching passage arrives in the system message', async () => {
     seed([chunk(0, HIT)])
     retrieveContext.mockResolvedValue({
+      reembedded: [],
       context: { chunks: [{ content: HIT }], query: 'q', documentIds: ['doc-1'] },
       scoredChunks: [],
     })
@@ -153,6 +155,7 @@ describe('useChat puts the retrieved passages into the cloud request', () => {
     const convId = seed([chunk(0, HIT)])
     useRAGStore.setState({ ragEnabled: { [convId]: false } })
     retrieveContext.mockResolvedValue({
+      reembedded: [],
       context: { chunks: [{ content: HIT }], query: 'q', documentIds: ['doc-1'] },
       scoredChunks: [],
     })
@@ -166,6 +169,7 @@ describe('useChat puts the retrieved passages into the cloud request', () => {
   it('a retrieval that finds nothing spends no tokens on an empty instruction', async () => {
     seed([chunk(0, HIT)])
     retrieveContext.mockResolvedValue({
+      reembedded: [],
       context: { chunks: [], query: 'q', documentIds: [] },
       scoredChunks: [],
     })
@@ -187,6 +191,7 @@ describe('a selection is sent, not the library (S3)', () => {
     seed(all)
     // Retrieval hands back the one hit, which is its whole job.
     retrieveContext.mockResolvedValue({
+      reembedded: [],
       context: { chunks: [{ content: HIT }], query: 'q', documentIds: ['doc-1'] },
       scoredChunks: [],
     })
@@ -237,6 +242,7 @@ describe('a retrieval that fails is said out loud, not swallowed (S4)', () => {
     seed([chunk(0, HIT)])
     useRAGStore.getState().setRetrievalError(RETRIEVAL_FAILED_MESSAGE)
     retrieveContext.mockResolvedValue({
+      reembedded: [],
       context: { chunks: [{ content: HIT }], query: 'q', documentIds: ['doc-1'] },
       scoredChunks: [],
     })
@@ -250,6 +256,7 @@ describe('Agent mode carries the documents too, from the same builder', () => {
   it('the matching passage arrives in the agent run system prompt', async () => {
     seed([chunk(0, HIT)])
     retrieveContext.mockResolvedValue({
+      reembedded: [],
       context: { chunks: [{ content: HIT }], query: 'q', documentIds: ['doc-1'] },
       scoredChunks: [],
     })
@@ -266,6 +273,7 @@ describe('Agent mode carries the documents too, from the same builder', () => {
     const convId = seed([chunk(0, HIT)])
     useRAGStore.setState({ ragEnabled: { [convId]: false } })
     retrieveContext.mockResolvedValue({
+      reembedded: [],
       context: { chunks: [{ content: HIT }], query: 'q', documentIds: ['doc-1'] },
       scoredChunks: [],
     })
