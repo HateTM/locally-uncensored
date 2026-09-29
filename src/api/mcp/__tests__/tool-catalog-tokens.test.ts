@@ -108,11 +108,28 @@ const fullWire = () => JSON.stringify(wireTools(codingCatalog()))
  *
  * Der codierende Zug ist der, den jeder Refactor bezahlt, und er bleibt
  * gleich. Das ist der Grund, warum das Tor existiert.
+ *
+ * ── Media agent: all generation / edit settings, LoRAs, workflows ────────
+ * The agent got the Create tab's switches (HiRes, background removal, mask
+ * inpaint, clip skip, batch, SVD motion, Wan 2.2 LoRAs, attached photos) and
+ * four tools (media_list, lora_download, lora_prompt, workflow_create):
+ *
+ *   full catalog     17.843 -> 22.309 chars (+4.466, after cutting every new
+ *                    property description down to a few words; includes
+ *                    media_list civitaiImage and lora_download versionId)
+ *   coding step      unchanged: all four new tools sit behind the create
+ *                    gate, and the image/video settings only ride a creative
+ *                    turn
+ *
+ * The char ceiling is the measured value plus two per mille. The token
+ * ceiling was scaled by the ~4,4 chars/token this text measured before; it
+ * was NOT re-measured live (no local Ollama where this changed). Run the live
+ * half to pin it.
  */
 const CODING_CHAR_CEILING = 7600
 const CODING_TOKEN_CEILING = 1730
-const FULL_CHAR_CEILING = 17880
-const FULL_TOKEN_CEILING = 4090
+const FULL_CHAR_CEILING = 22355
+const FULL_TOKEN_CEILING = 5120
 
 describe('the coding step carries a catalog the diet actually shrank', () => {
   it('the gate really is what a plain coding turn gets', () => {

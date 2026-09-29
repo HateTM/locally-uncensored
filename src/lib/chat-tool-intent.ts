@@ -125,6 +125,20 @@ const FILE_NOUN_RE = /\b(a\s+|an\s+|the\s+|eine?\s+|die\s+)?(file|files|datei(en
 const FILENAME_RE = /\b[\w.-]+\.(txt|md|markdown|html?|css|js|ts|json|csv|xml|yaml|yml|py|sh|rs|toml|ini|log|svg|sql)\b/i
 const SAVE_TO_FILE_RE = /\b(save|write|export|dump|speicher\w*|schreib\w*)\b[^.?!]*\b(to|into|as|in)\b[^.?!]*\b(file|datei|disk|\.\w{1,5})\b/i
 
+// Russian. No \b anywhere: like the umlauts above, Cyrillic letters are not
+// word characters in a JavaScript regex, so a \b next to one never matches.
+// Stems instead of whole words, because Russian inflects.
+const RU_CREATE_VERB_RE = /(сделай|сделать|создай|создать|сгенерир|нарису|изобрази|отрисуй|покажи|нужн[аоы]|хочу)/i
+const RU_IMAGE_NOUN_RE = /(картин|изображени|фото|рисун|логотип|иконк|постер|аватар|портрет|обои|арт-|иллюстрац)/i
+const RU_VIDEO_NOUN_RE = /(видео|ролик|клип|анимац|гифк)/i
+const RU_INHERENT_IMAGE_RE = /(нарисуй|нарисовать|изобрази|сгенерируй\s+(картин|изображени|фото))/i
+const RU_ANIMATE_RE = /(анимируй|анимировать|оживи)/i
+// Editing a picture the user attached: "remove the car", "убери машину".
+// Imperatives only: "what would you change here?" is a question about the
+// picture, "change the sky to night" is an edit. The Russian forms end in a
+// lookahead so "изменил" (past tense) is not "измени".
+const EDIT_ATTACHED_RE = /^(please\s+|pls\s+|now\s+)?(edit|retouch|inpaint|restyle|remove|replace|change|recolou?r|add|erase|turn)\b|\bmake\s+the\s+background\b|(^|[^а-яё])(измени|отредактируй|убери|удали|замени|поменяй|добавь|перекрась|вырежи|сотри|сделай\s+фон)(?![а-яё])/i
+
 /**
  * Returns the capability a plain-chat message is asking for, or null if the
  * message is ordinary conversation that should stay on the plain path.
@@ -141,10 +155,17 @@ export function detectChatToolCapability(text: string, hasImages = false): ChatT
   if (CREATE_VERB_RE.test(t) && VIDEO_NOUN_RE.test(t)) return 'video'
   if (ANIMATE_RE.test(t)) return 'video'
   if (hasImages && /\b(animate|animier\w*|bring\s+to\s+life|make\s+it\s+move|in\s+ein\s+video)\b/i.test(t)) return 'video'
+  if (RU_CREATE_VERB_RE.test(t) && RU_VIDEO_NOUN_RE.test(t)) return 'video'
+  if (RU_ANIMATE_RE.test(t) && (hasImages || RU_IMAGE_NOUN_RE.test(t))) return 'video'
 
   // IMAGE
   if (CREATE_VERB_RE.test(t) && IMAGE_NOUN_RE.test(t)) return 'image'
   if (INHERENT_IMAGE_VERB_RE.test(t)) return 'image'
+  if (RU_CREATE_VERB_RE.test(t) && RU_IMAGE_NOUN_RE.test(t)) return 'image'
+  if (RU_INHERENT_IMAGE_RE.test(t)) return 'image'
+  // An attached picture plus an editing verb is an image edit (image_generate
+  // with inputImage "attached"), not a question about the picture.
+  if (hasImages && EDIT_ATTACHED_RE.test(t)) return 'image'
 
   // FILE WRITE
   if (FILENAME_RE.test(t) && FILE_VERB_RE.test(t)) return 'file'

@@ -236,6 +236,11 @@ const MOBILE_SKIP: ReadonlySet<string> = new Set<string>([
   'shell_execute_background',
   'shell_task_status', 'shell_task_kill', 'shell_task_list',
   'video_generate',
+  // Media housekeeping (media_list, lora_download, lora_prompt) and
+  // workflow_create: their executors (src/api/mcp/media-tools.ts) drive the
+  // desktop's ComfyUI, download store and persisted stores, none of which the
+  // mobile relay can reach — same situation as video_generate and run_workflow.
+  'media_list', 'lora_download', 'lora_prompt', 'workflow_create',
 ])
 
 describe('tool-description-parity — name sets', () => {

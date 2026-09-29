@@ -52,6 +52,9 @@ import { startBundledEngine } from './engine'
 import { getAmdGpuArch } from '../lib/hardware'
 import { useSettingsStore } from '../stores/settingsStore'
 import { portraitFrame, wantsFullFigure } from '../lib/subject-framing'
+import { isPendingInput, pendingInputFile } from '../lib/media-input-ref'
+import { checkPromptSafety, SAFETY_BLOCK_MESSAGE } from '../lib/render/safety'
+import { applyNativeHiresFix, type HiresUpscaleMethod } from './hires-fix'
 import {
   getImageModels,
   getVideoModels,
@@ -1289,10 +1292,16 @@ async function generateImage(
       inputImage = (await resolveInputImage(args.inputImage)).name
       denoise = clampFloat(args.denoise, 0.6, 0.05, 1.0)
     }
-    const workflow = await buildDynamicWorkflow(
+    const edit = resolveImageEditOptions(a, !!inputImage)
+    if (edit.reject) return `Cannot generate: ${edit.reject}`
+    const loras = edit.removebg ? { prompt, negative: '', note: '' } : await resolveLoraAutomation(prompt, a)
+    if (checkPromptSafety(`${loras.prompt} ${loras.negative}`).blocked) return `Cannot generate: ${SAFETY_BLOCK_MESSAGE}`
+    let maskImage: string | undefined
+    if (edit.mask) maskImage = (await resolveInputImage(edit.mask)).name
+    let workflow = await buildDynamicWorkflow(
       {
-        prompt,
-        negativePrompt: typeof args.negativePrompt === 'string' ? args.negativePrompt : '',
+        prompt: loras.prompt,
+        negativePrompt: loras.negative,
         model,
         sampler: tun.sampler,
         scheduler: tun.scheduler,
@@ -1318,10 +1327,17 @@ async function generateImage(
         ...(typeof a.vae === 'string' && a.vae ? { vae: a.vae as string } : {}),
         ...(typeof a.clipSkip === 'number' ? { clipSkip: a.clipSkip as number } : {}),
         ...(inputImage ? { inputImage, denoise } : {}),
+        ...(edit.removebg ? { removebg: true } : {}),
+        ...(maskImage ? { maskImage, growMaskBy: edit.growMaskBy } : {}),
         ...(listed?.parts ? { modelParts: listed.parts } : {}),
       },
       type,
     )
+    // Native HiRes is a graph transform on the finished text-to-image graph,
+    // exactly as the Create tab applies it (useCreate.ts).
+    if (edit.hires) {
+      workflow = applyNativeHiresFix(workflow, { baseWidth: width, baseHeight: height, ...edit.hires }).workflow
+    }
     // Phase markers (chat-agent hang 2026-06-03): make it obvious in the log
     // whether a stall is in the workflow build (/object_info) or the submit
     // (/prompt). Both are now timeout-bounded, so neither can strand the
@@ -1331,7 +1347,7 @@ async function generateImage(
     if (submitted === CANCELLED) return `${label('image')} generation cancelled.`
     const promptId = submitted
     log.info('vram_handoff.image.submitted', { promptId })
-    const result = await pollAndExtract(promptId, prompt, label('image'), getImageTimeoutMs())
+    const result = (await pollAndExtract(promptId, prompt, label('image'), getImageTimeoutMs())) + loras.note
     // Remember the produced filename so a follow-up "animate it" video call can
     // fall back to it when the model passes a wrong/hallucinated inputImage.
     const fn = result.match(/generated:\s*([^\s(]+\.(?:png|jpe?g|webp))/i)
@@ -1411,10 +1427,12 @@ async function generateVideo(
       const snapped = snapToVideoGrid(clampInt(av.width, base.width, 64, 2048), clampInt(av.height, base.height, 64, 2048))
       const seed = (typeof av.seed === 'number' && Number.isFinite(av.seed)) ? Math.floor(av.seed) : -1
 
+      const loras = await resolveLoraAutomation(prompt, av)
+      if (checkPromptSafety(`${loras.prompt} ${loras.negative}`).blocked) return `Cannot generate: ${SAFETY_BLOCK_MESSAGE}`
       const workflow = await buildDynamicWorkflow(
         {
-          prompt,
-          negativePrompt: typeof args.negativePrompt === 'string' ? args.negativePrompt : '',
+          prompt: loras.prompt,
+          negativePrompt: loras.negative,
           model,
           sampler: tun.sampler,
           scheduler: tun.scheduler,
@@ -1427,6 +1445,8 @@ async function generateVideo(
           frames,
           fps,
           ...(inputImage ? { inputImage } : {}),
+          // Video LoRAs (Wan 2.2): the builder chains LoraLoaderModelOnly.
+          ...wanLoraParams(av),
         },
         type,
       )
@@ -1435,7 +1455,7 @@ async function generateVideo(
       if (submitted === CANCELLED) return `${label('video')} generation cancelled.`
       const promptId = submitted
       log.info('vram_handoff.video.submitted', { promptId })
-      return await pollAndExtract(promptId, prompt, label('video'), getVideoTimeoutMs())
+      return (await pollAndExtract(promptId, prompt, label('video'), getVideoTimeoutMs())) + loras.note
     }
 
     // ── Image-to-video (SVD / FramePack) ───────────────────────────
@@ -1836,6 +1856,104 @@ function clampFloat(v: unknown, fallback: number, min: number, max: number): num
   return Math.max(min, Math.min(max, n))
 }
 
+const HIRES_METHODS: readonly HiresUpscaleMethod[] = ['nearest-exact', 'bilinear', 'area', 'bicubic', 'bislerp']
+
+export interface ImageEditOptions {
+  removebg: boolean
+  /** Mask reference (white = repaint), resolved like `inputImage`. */
+  mask?: string
+  growMaskBy: number
+  hires?: { scale: number; denoise: number; steps: number; upscaleMethod: HiresUpscaleMethod }
+  reject: string | null
+}
+
+/**
+ * The Create tab's editing switches, read from agent args: background removal,
+ * mask inpaint and native HiRes. Same defaults as Create (createStore), and the
+ * same reject-don't-guess rule as resolveTunables: a switch that cannot apply
+ * to this call is refused with the reason, never silently dropped.
+ * Exported for unit tests.
+ */
+export function resolveImageEditOptions(a: Record<string, unknown>, hasInput: boolean): ImageEditOptions {
+  const removebg = a.removeBackground === true || a.removebg === true
+  const maskRaw = a.mask ?? a.maskImage
+  const mask = typeof maskRaw === 'string' && maskRaw ? maskRaw : undefined
+  const growMaskBy = clampInt(a.growMaskBy, 6, 0, 64)
+  const out: ImageEditOptions = { removebg, growMaskBy, reject: null }
+  if (removebg && !hasInput) {
+    return { ...out, reject: 'removeBackground needs inputImage, the picture to cut out.' }
+  }
+  if (mask && !hasInput) {
+    return { ...out, reject: 'mask needs inputImage, the picture the mask belongs to.' }
+  }
+  if (mask) out.mask = mask
+  const scaleRaw = a.hiresScale ?? (a.hires === true ? 1.5 : undefined)
+  if (scaleRaw !== undefined) {
+    const scale = Number(scaleRaw)
+    if (hasInput || removebg) {
+      return { ...out, reject: 'hiresScale works on text-to-image only. Drop it for an edit.' }
+    }
+    if (!Number.isFinite(scale) || scale <= 1 || scale > 3) {
+      return { ...out, reject: `hiresScale ${String(scaleRaw)} is out of range. Use a value above 1.0 and at most 3.0.` }
+    }
+    const method = HIRES_METHODS.find((m) => m === a.hiresUpscaleMethod) ?? 'nearest-exact'
+    if (a.hiresUpscaleMethod !== undefined && a.hiresUpscaleMethod !== method) {
+      return { ...out, reject: `hiresUpscaleMethod "${String(a.hiresUpscaleMethod)}" is unknown. Available: ${HIRES_METHODS.join(', ')}.` }
+    }
+    out.hires = {
+      scale,
+      denoise: clampFloat(a.hiresDenoise, 0.5, 0.05, 1),
+      steps: clampInt(a.hiresSteps, 12, 1, 150),
+      upscaleMethod: method,
+    }
+  }
+  return out
+}
+
+/** The Wan 2.2 builder's LoRA contract, from the (possibly auto-filled) args. */
+function wanLoraParams(a: Record<string, unknown>): { lora?: string | string[]; loraStrength?: number | number[] } {
+  const lora = typeof a.lora === 'string' && a.lora
+    ? a.lora
+    : Array.isArray(a.lora) ? a.lora.filter((x): x is string => typeof x === 'string' && !!x) : []
+  if (Array.isArray(lora) && lora.length === 0) return {}
+  const s = a.loraStrength
+  const loraStrength = typeof s === 'number' ? s
+    : Array.isArray(s) ? s.filter((x): x is number => typeof x === 'number') : undefined
+  return { lora, ...(loraStrength !== undefined ? { loraStrength } : {}) }
+}
+
+function requestedLoras(a: Record<string, unknown>): string[] {
+  const l = a.lora
+  const arr = typeof l === 'string' ? l.split(/[,;]+/) : Array.isArray(l) ? l : []
+  return arr.filter((x): x is string => typeof x === 'string').map((x) => x.trim()).filter(Boolean)
+}
+
+/**
+ * LoRA prompts (lib/lora-auto.ts): every LoRA this render uses puts its saved
+ * prompt, or the trigger words LU learned for it, in front of the prompt, and
+ * its saved negative after the negative prompt. `autoLora: false` turns it
+ * off. Never throws: a failure here must not cost the render.
+ */
+async function resolveLoraAutomation(
+  prompt: string, a: Record<string, unknown>,
+): Promise<{ prompt: string; negative: string; note: string }> {
+  const negative = typeof a.negativePrompt === 'string' ? a.negativePrompt : ''
+  const loras = requestedLoras(a)
+  if (a.autoLora === false || loras.length === 0) return { prompt, negative, note: '' }
+  try {
+    const { applyLoraPrompts } = await import('../stores/loraInfoStore')
+    const next = applyLoraPrompts(prompt, negative, loras)
+    const changed = [
+      next.prompt !== prompt ? `prompt "${next.prompt}"` : '',
+      next.negative !== negative ? `negative "${next.negative}"` : '',
+    ].filter(Boolean)
+    return { ...next, note: changed.length ? `\nLoRA prompts applied: ${changed.join(', ')}.` : '' }
+  } catch (e) {
+    log.warn('vram_handoff.lora_prompt_failed', { err: String(e) })
+    return { prompt, negative, note: '' }
+  }
+}
+
 // ── Capability validation helpers (v2.5.0 — reject-and-report, decision 2) ──
 //
 // REJECT, don't clamp: when the user EXPLICITLY asks for a value beyond the
@@ -1988,6 +2106,21 @@ interface ResolvedInputImage {
 }
 
 async function resolveInputImage(ref: string): Promise<ResolvedInputImage> {
+  // A photo the user attached in the chat, parked by api/chat-media-input.ts
+  // until now, when ComfyUI is known to be up.
+  if (isPendingInput(ref)) {
+    const file = pendingInputFile(ref)
+    if (!file) throw new Error('the attached image is no longer available. Attach it again and retry.')
+    let width = 0
+    let height = 0
+    try {
+      const bmp = await createImageBitmap(file)
+      width = bmp.width
+      height = bmp.height
+      bmp.close()
+    } catch { /* dimensions unknown → caller uses defaults */ }
+    return { name: await uploadImage(file), width, height }
+  }
   let url: string
   let name: string
   if (/^https?:\/\//i.test(ref)) {

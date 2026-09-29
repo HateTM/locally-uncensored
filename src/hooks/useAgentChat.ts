@@ -2075,7 +2075,11 @@ export function useAgentChat() {
             const synthArgs =
               hintArgs && Object.keys(hintArgs).length > 0
                 ? hintArgs
-                : { prompt: extractMediaPrompt(userPromptText) }
+                : {
+                    prompt: extractMediaPrompt(userPromptText),
+                    // An attached photo is what "edit this" / "animate this" means.
+                    ...(userImages?.length ? { inputImage: 'attached' } : {}),
+                  }
             toolCalls = [{
               function: {
                 name: useVideo ? 'video_generate' : 'image_generate',
@@ -3258,6 +3262,8 @@ Creative tools, image_generate, video_generate:
 - When the user asks for an image / picture / drawing, CALL image_generate. You HAVE this tool, do NOT reply with prose about DALL-E, Midjourney, or "as a text model I can't". Just call it.
 - After image_generate runs you will be shown the generated image; LOOK at it and briefly describe what you actually see.
 - To make a video, CALL video_generate. To animate an image you just generated, call video_generate with inputImage set to that image's filename (it is in the image_generate result).
+- When the user attached a photo and wants it edited, restyled or animated, pass inputImage "attached" ("attached:2" for their second one).
+- A LoRA's trigger words and saved prompt are added to the prompt automatically, do not repeat them.
 - Emit these as REAL tool calls through the tool channel — never write the call as plain text like image_generate(prompt="…") in your answer.
 
 Other rules:
@@ -3315,6 +3321,7 @@ export function buildChatToolsSystemPrompt(basePrompt: string): string {
 - file_write, save text to a file when the user asks you to write/create/save a file
 - image_generate, create an image when the user asks for a picture/drawing/logo
 - video_generate, create a short video/animation when the user asks for one (to animate an image you just made, pass its filename as inputImage)
+To edit or animate a photo the user attached, pass inputImage "attached".
 
 Emit tool calls through the real tool channel, never as plain text like image_generate("…"). After a tool runs, give a short, natural reply about the result. For web questions, prefer web_search then web_fetch on the best result before answering. Reply in the user's language.`
   return basePrompt ? `${p}\n\n${basePrompt}` : p

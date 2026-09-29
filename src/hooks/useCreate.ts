@@ -58,6 +58,7 @@ import { buildWithFixups, type FixupDeps } from '../lib/render-fixups'
 import { useDownloadStore } from '../stores/downloadStore'
 import { useComfyInstallStore } from '../stores/comfyInstallStore'
 import { checkPromptSafety, SAFETY_BLOCK_MESSAGE } from '../lib/render/safety'
+import { applyLoraPrompts } from '../stores/loraInfoStore'
 import { resolveRunSeed } from '../lib/run-seed'
 import {
   clearTrainingSet, stageTrainingImage, startCharacterTraining,
@@ -568,7 +569,9 @@ export function useCreate() {
       const verdict = checkPromptSafety(
         `${state.prompt} ${state.negativePrompt} ${state.musicLyrics} ${state.triggerWord}`,
       )
-      if (verdict.blocked) {
+      // The saved LoRA prompts are part of what renders, so they are checked too.
+      const withLoras = applyLoraPrompts(state.prompt, state.negativePrompt, state.selectedLoras.map((l) => l.name))
+      if (verdict.blocked || checkPromptSafety(withLoras.prompt + ' ' + withLoras.negative).blocked) {
         state.setError(SAFETY_BLOCK_MESSAGE)
         return
       }
@@ -955,8 +958,15 @@ export function useCreate() {
     try {
       let outputWidth = width
       let outputHeight = height
+      // Each selected LoRA's saved prompt / learned trigger words go in front of
+      // the prompt, its saved negative after the negative (lib/lora-auto.ts).
+      // A background cutout runs no diffusion and so no LoRA.
+      const loraPrompts = isRemoveBg
+        ? { prompt, negative: negativePrompt }
+        : applyLoraPrompts(prompt, negativePrompt, selectedLoras.map((l) => l.name))
       const baseParams = {
-        prompt, negativePrompt, model: activeModel, sampler, scheduler, steps, cfgScale, width, height, seed: runSeed, batchSize,
+        prompt: loraPrompts.prompt, negativePrompt: loraPrompts.negative,
+        model: activeModel, sampler, scheduler, steps, cfgScale, width, height, seed: runSeed, batchSize,
         ...(isRemoveBg && effInputImage ? { removebg: true, inputImage: effInputImage } : {}),
         // Discord 2026-09-25 (tbjdrw: "a house becomes a tennis court"): at
         // strength 1.00 the builder read denoise >= 1 as "no img2img" and

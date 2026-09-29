@@ -27,6 +27,10 @@ export const MUTATING_TOOLS = new Set([
   'run_workflow',
   'delegate_task',
   'screenshot',
+  // Downloads into models/loras, and writes saved LoRA prompts / workflows.
+  'lora_download',
+  'lora_prompt',
+  'workflow_create',
 ])
 
 /** May this tool stay in the catalog during a read-only turn? */

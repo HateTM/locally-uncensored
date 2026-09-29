@@ -30,6 +30,8 @@ import { RETIRED_MUTATING_NAMES } from '../../lib/retired-tools'
 import { resolveMlxModel, defaultMlxImageModel } from '../../lib/mlx-model-match'
 import type { Runner } from '../agents/test-runner'
 import type { VramHandoffArgs } from '../vram-handoff'
+import { checkPromptSafety, SAFETY_BLOCK_MESSAGE } from '../../lib/render/safety'
+import { executeMediaList, executeLoraDownload, executeLoraPrompt, executeWorkflowCreate } from './media-tools'
 
 /**
  * Helper: current chat id (+ folder workspace) as a fragment to spread into
@@ -398,7 +400,7 @@ const BUILTIN_TOOLS: MCPToolDefinition[] = [
     description:
       'Generate an image from a text prompt via the local image pipeline (Apple MLX on macOS; ComfyUI elsewhere, auto-detected). Blocks up to 5 minutes. '
       + 'USE for "draw me", "make an image of", "generate a picture". '
-      + 'Pass `inputImage` (a filename from an earlier image_generate result) for image-to-image — restyle / edit an existing image at the given `denoise` strength; omit it for text-to-image. '
+      + 'Pass `inputImage` to edit a picture (image-to-image at `denoise`): an earlier result\'s filename, or "attached" for the user\'s photo. Edit models (Qwen-Image-Edit) follow "remove the car" without a mask. '
       + 'First installed image model is auto-selected (or pass `model`). '
       + 'EXPECT A PAUSE on non-Mac (ComfyUI) single-GPU machines: LU may briefly unload the chat model from VRAM to fit the image model, then reload it after — typically a 30-90s swap. This avoids out-of-memory errors; your conversation is fully preserved across the swap. '
       + 'Rate-limit yourself to 1 call per turn — generations serialize internally so parallel calls will queue, not speed up. '
@@ -409,13 +411,23 @@ const BUILTIN_TOOLS: MCPToolDefinition[] = [
         prompt: { type: 'string', description: 'Positive text description of the desired image' },
         negativePrompt: { type: 'string', description: 'Things to avoid (blurry, deformed, etc.)' },
         model: { type: 'string', description: 'Optional image model filename to use. Omit to auto-select the first installed image model.' },
-        inputImage: { type: 'string', description: 'Optional. Filename of a previously generated image (from an earlier image_generate result) to use as the base for image-to-image. Omit for text-to-image.' },
+        inputImage: { type: 'string', description: 'Picture to edit: a result filename, "attached" or "attached:N".' },
         denoise: { type: 'number', description: 'Image-to-image strength 0.05–1.0 (default 0.6). Lower keeps more of the input image, higher follows the prompt more. Only used together with inputImage.' },
         settings: mediaSettingsSchema({
           denoise: { type: 'number', description: 'Image-to-image strength 0.05 to 1.0 (only with inputImage).' },
           lora: { type: ['string', 'array'], items: { type: 'string' }, description: 'LoRA filename, or an ARRAY of filenames to stack several (chained in order). Matched against the installed LoRAs, extension optional; an unknown name is rejected with the installed list.' },
           loraStrength: { type: ['number', 'array'], items: { type: 'number' }, description: 'LoRA strength (~0 to 2). One number applies to every LoRA; an array gives one strength per LoRA in the same order.' },
+          autoLora: { type: 'boolean', description: 'false = skip the LoRAs\' automatic prompts.' },
           vae: { type: 'string', description: 'Override VAE filename.' },
+          clipSkip: { type: 'number', description: 'CLIP skip.' },
+          batchSize: { type: 'number', description: 'Images per run, 1-8.' },
+          removeBackground: { type: 'boolean', description: 'Cut out the subject of inputImage.' },
+          mask: { type: 'string', description: 'Inpaint mask for inputImage (white = repaint), like inputImage.' },
+          growMaskBy: { type: 'number', description: 'Mask feather px.' },
+          hiresScale: { type: 'number', description: 'HiRes fix factor >1 to 3, text-to-image.' },
+          hiresDenoise: { type: 'number', description: 'HiRes denoise.' },
+          hiresSteps: { type: 'number', description: 'HiRes steps.' },
+          hiresUpscaleMethod: { type: 'string', enum: ['nearest-exact', 'bilinear', 'area', 'bicubic', 'bislerp'], description: 'HiRes upscale.' },
         }),
       },
       required: ['prompt'],
@@ -442,11 +454,14 @@ const BUILTIN_TOOLS: MCPToolDefinition[] = [
         seconds: { type: 'number', description: 'Desired clip length in seconds (e.g. 4). PREFER this over frames for "an N second video". Image-to-video (SVD) effectively maxes near 3-4s; text-to-video can be longer.' },
         frames: { type: 'number', description: 'Advanced: exact frame count (rejected if beyond the model max; e.g. ~81 for Wan, ~25 for SVD). Prefer `seconds`. Omit for the model default.' },
         fps: { type: 'number', description: 'Frames per second of the output clip (e.g. 16). Omit for the model default.' },
-        inputImage: { type: 'string', description: 'Optional. Filename of a previously generated image to animate (image-to-video). Requires an installed I2V model such as SVD. Omit for text-to-video.' },
+        inputImage: { type: 'string', description: 'Picture to animate: a result filename, "attached" or "attached:N". Needs an I2V model.' },
         settings: mediaSettingsSchema({
           seconds: { type: 'number', description: 'Clip length in seconds (preferred length control).' },
           frames: { type: 'number', description: 'Exact frame count, rejected if beyond the model max.' },
           fps: { type: 'number', description: 'Frames per second of the output clip.' },
+          motionBucketId: { type: 'number', description: 'SVD motion 1-255.' },
+          lora: { type: ['string', 'array'], items: { type: 'string' }, description: 'Wan 2.2 LoRA file(s).' },
+          loraStrength: { type: ['number', 'array'], items: { type: 'number' }, description: 'Per LoRA.' },
         }),
       },
       // prompt intentionally NOT required: image-to-video can animate a still
@@ -458,7 +473,95 @@ const BUILTIN_TOOLS: MCPToolDefinition[] = [
     source: 'builtin',
   },
 
+  // What is installed, and CivitAI LoRA search. Read-only, so it runs unasked.
+  {
+    name: 'media_list',
+    description:
+      'List installed image/video models, LoRAs, VAEs, samplers, schedulers and saved workflows; `search` searches CivitAI LoRAs; `civitaiImage` reads an image\'s recipe. '
+      + 'USE FIRST when choosing a model, LoRA, sampler or preset for image_generate / video_generate, and to find a LoRA to download.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        search: { type: 'string', description: 'Search CivitAI LoRAs instead (e.g. "watercolor", "pixel art sdxl").' },
+        civitaiImage: { type: 'string', description: 'A CivitAI image link or id: returns its prompt, negative, settings and LoRAs to reproduce it.' },
+      },
+      required: [],
+    },
+    category: 'system',
+    source: 'builtin',
+  },
+  {
+    name: 'lora_download',
+    description:
+      'Download a LoRA from CivitAI into ComfyUI\'s models/loras and wait until it is ready; returns its filename and trigger words. '
+      + 'USE after media_list search with the hit\'s `id` (or pass `query` to take the top hit). PREFER a LoRA whose base model matches the image model.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'number', description: 'CivitAI model id from media_list search.' },
+        versionId: { type: 'number', description: 'CivitAI model version id (from a civitaiImage recipe).' },
+        query: { type: 'string', description: 'Search words; the top hit is downloaded. Only when no id is known.' },
+      },
+      required: [],
+    },
+    category: 'image',
+    source: 'builtin',
+  },
+
+  {
+    name: 'lora_prompt',
+    description:
+      'Save a LoRA\'s prompt and negative; every render with that LoRA then adds them automatically (else its CivitAI trigger words). '
+      + 'USE for a trigger or prompt the user gives for a LoRA, or `path` to import a JSON file ({"file": "prompt"} or [{file, prompt, negative}]). Only `lora` shows what is saved.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        lora: { type: 'string', description: 'LoRA file name (extension optional).' },
+        prompt: { type: 'string', description: 'Its prompt; only the first clause is used unless keepFullPrompt.' },
+        negative: { type: 'string', description: 'Appended to the negative.' },
+        keepFullPrompt: { type: 'boolean', description: 'Use it whole.' },
+        clear: { type: 'boolean', description: 'Remove it.' },
+        path: { type: 'string', description: 'JSON file to import.' },
+      },
+      required: [],
+    },
+    category: 'image',
+    source: 'builtin',
+  },
+
   // Workflow
+  {
+    name: 'workflow_create',
+    description:
+      'Save a workflow. kind "chain": `steps` of {tool, args} or {prompt}, args may use {{user_input}} / {{last_output}}, run later with run_workflow. '
+      + 'kind "preset": a generation preset (`settings`) for the Create tab. USE for a pipeline or setup to repeat. Same name replaces.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Workflow name.' },
+        kind: { type: 'string', enum: ['chain', 'preset'], description: 'Default chain.' },
+        description: { type: 'string', description: 'One line.' },
+        steps: {
+          type: 'array',
+          description: 'chain: in order.',
+          items: {
+            type: 'object',
+            properties: {
+              label: { type: 'string', description: 'Step name.' },
+              tool: { type: 'string', description: 'Tool to call.' },
+              args: { type: 'object', additionalProperties: true, description: 'Its arguments.' },
+              prompt: { type: 'string', description: 'Or an instruction.' },
+            },
+          },
+        },
+        settings: { type: 'object', description: 'preset: model, sampler, scheduler, steps, cfg, width, height, negativePrompt, lora, loraStrength, vae, clipSkip, hiresScale.', additionalProperties: true },
+        assign: { type: 'boolean', description: 'preset: default for its model.' },
+      },
+      required: ['name'],
+    },
+    category: 'workflow',
+    source: 'builtin',
+  },
   {
     name: 'run_workflow',
     description:
@@ -1330,10 +1433,14 @@ async function executeImageGenerate(args: ToolArgs, run?: AgentRunContext): Prom
   // model afterwards. The returned string keeps the EXACT F1 contract —
   // `Image generated: <file> (prompt: "...")\n<comfyui /view URL>` — so
   // ToolCallBlock renders it inline and useAgentChat feeds it back unchanged.
-  const rawPrompt = args.prompt || args.description || ''
+  const merged = mergeMediaArgs(args)
+  // A cutout needs no prompt; the pipeline still wants a non-empty one.
+  const rawPrompt = args.prompt || args.description || (isRemoveBackground(merged) ? 'background removal' : '')
   if (!rawPrompt) return 'Error: No prompt provided for image generation.'
   const prompt = String(rawPrompt)
-  const merged = mergeMediaArgs(args)
+  merged.prompt = prompt
+  const unsafe = blockedMediaPrompt(merged)
+  if (unsafe) return unsafe
 
   // Hard rule: on macOS, local image generation is Apple MLX only — ComfyUI
   // never runs there (see isMlxImageHost() / useCreate.ts's MLX image
@@ -1345,6 +1452,8 @@ async function executeImageGenerate(args: ToolArgs, run?: AgentRunContext): Prom
   // ComfyUI model in the tool call (or silently use the saved preference).
   // Returns null when an explicit model arg exists / nothing is installed /
   // ComfyUI is unreachable — the existing pipeline then behaves as before.
+  const staged = await stageMediaRefs(merged, run)
+  if (staged) return staged
   const { pickModelForGeneration } = await import('../model-pick')
   const picked = await pickModelForGeneration('image', merged)
   if (picked) merged.model = picked
@@ -1368,6 +1477,8 @@ async function executeVideoGenerate(args: ToolArgs, run?: AgentRunContext): Prom
   // input_image alias, and falls back to the last generated image — so the
   // "animate the image you just made" chain works even with a sloppy call.
   const merged = mergeMediaArgs(args)
+  const unsafe = blockedMediaPrompt(merged)
+  if (unsafe) return unsafe
 
   // Hard rule: on macOS, local video generation is Apple MLX only — ComfyUI
   // never runs there. Route around vram-handoff entirely (no VRAM juggling —
@@ -1380,6 +1491,8 @@ async function executeVideoGenerate(args: ToolArgs, run?: AgentRunContext): Prom
 
   // Model-Picker gate (v2.5.3) — see executeImageGenerate. T2V and I2V keep
   // separate saved preferences (disjoint capability sets).
+  const staged = await stageMediaRefs(merged, run)
+  if (staged) return staged
   const { pickModelForGeneration } = await import('../model-pick')
   const picked = await pickModelForGeneration('video', merged)
   if (picked) merged.model = picked
@@ -1760,6 +1873,46 @@ function mergeMediaArgs(args: ToolArgs): VramHandoffArgs {
   return merged
 }
 
+/**
+ * The same CSAM gate the Create tab runs before every render (useCreate.ts).
+ * The agent path reached ComfyUI without it. Adult content is not gated on a
+ * local backend; only the minor + sexual combination is refused.
+ */
+function blockedMediaPrompt(merged: VramHandoffArgs): string | null {
+  const text = [merged.prompt, merged.negativePrompt, merged.description]
+    .filter((v): v is string => typeof v === 'string')
+    .join(' ')
+  return checkPromptSafety(text).blocked ? `Error: ${SAFETY_BLOCK_MESSAGE}` : null
+}
+
+function isRemoveBackground(merged: VramHandoffArgs): boolean {
+  return merged.removeBackground === true || merged.removebg === true
+}
+
+/**
+ * Point `inputImage` / `mask` at a photo the user attached in the chat when
+ * the model named one ("attached", "attached:2", or its filename). Anything
+ * else stays as it is: a generated filename, a URL. Returns an error line for
+ * the model when the attachment cannot be read, else null.
+ */
+async function stageMediaRefs(merged: VramHandoffArgs, run?: AgentRunContext): Promise<string | null> {
+  if (merged.inputImage == null) {
+    const alt = merged.input_image ?? merged.image
+    if (typeof alt === 'string' && alt) merged.inputImage = alt
+  }
+  const conversationId = getActiveConversationId(run)
+  const { stageChatImageRef } = await import('../chat-media-input')
+  try {
+    const input = await stageChatImageRef(merged.inputImage, conversationId)
+    if (input) merged.inputImage = input
+    const mask = await stageChatImageRef(merged.mask ?? merged.maskImage, conversationId)
+    if (mask) merged.mask = mask
+  } catch (e) {
+    return `Error: could not read the attached image (${e instanceof Error ? e.message : String(e)}). Ask the user to attach it again.`
+  }
+  return null
+}
+
 function formatBytes(bytes: number): string {
   if (bytes === 0) return '0 B'
   const k = 1024
@@ -1821,12 +1974,24 @@ const EXECUTOR_MAP: Record<
   image_generate: executeImageGenerate,
   video_generate: executeVideoGenerate,
   run_workflow: executeRunWorkflow,
+  media_list: executeMediaList,
+  lora_download: executeLoraDownload,
+  lora_prompt: (args, run) => executeLoraPrompt(args, async (path) => {
+    const data = await backendCall<FsReadResult>('fs_read', { path, ...chatCtx(run) })
+    return String(data.content || '')
+  }),
+  workflow_create: (args) => executeWorkflowCreate(args, (name) => !!_registry?.getAll().some((t) => t.name === name)),
   delegate_task: buildDelegateExecutor(),
   check_tasks: buildCheckTasksExecutor(),
   message_agent: buildMessageAgentExecutor(),
 }
 
+/** The registry the built-ins were registered into; workflow_create checks
+ *  step tool names against it. */
+let _registry: ToolRegistry | null = null
+
 export function registerBuiltinTools(registry: ToolRegistry) {
+  _registry = registry
   for (const tool of BUILTIN_TOOLS) {
     const executor = EXECUTOR_MAP[tool.name]
     if (executor) {

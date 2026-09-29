@@ -44,6 +44,9 @@ const READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
   'pr_resume',
   'web_search',
   'web_fetch',
+  // Lists installed models / LoRAs / workflows and searches CivitAI. Changes
+  // nothing; downloading is lora_download's job.
+  'media_list',
 ])
 
 describe('every built-in tool is classified', () => {
