@@ -18,16 +18,11 @@ import { ICON_SM } from '../ui/icon-size'
 
 // ─── Hardware fit ───────────────────────────────────────────────────
 
-export type Fit = 'fits' | 'tight' | 'big' | 'unknown'
-
-// GGUF weights ≈ VRAM need; leave headroom for KV-cache/context. Never used
-// to BLOCK a download — purely an honest hint.
-export function computeFit(sizeGB: number | undefined, vramGb: number | null): Fit {
-  if (!sizeGB || !vramGb) return 'unknown'
-  if (sizeGB <= vramGb * 0.85) return 'fits'
-  if (sizeGB <= vramGb * 1.15) return 'tight'
-  return 'big'
-}
+// Weights + the KV cache of the engine's context, the engine's own sum
+// (lib/vram-fit.ts). Never used to BLOCK a download, purely an honest hint.
+import { computeFit, type Fit } from '../../lib/vram-fit'
+export { computeFit }
+export type { Fit }
 
 // Color lives ONLY in the tiny status dot — labels stay neutral gray so the
 // grid doesn't turn into a traffic-light wall (David, 2026-07-17 design pass).
@@ -62,7 +57,7 @@ export function computeFit(sizeGB: number | undefined, vramGb: number | null): F
 // betrifft alle vier Punkte gleich und wird hier nicht einseitig fuer einen
 // davon repariert.)
 const FIT_META: Record<Fit, { dot: string; label: string; title: string }> = {
-  fits: { dot: 'bg-emerald-500/80', label: 'Runs on your PC', title: 'Fits fully in your GPU memory. Fast.' },
+  fits: { dot: 'bg-emerald-500/80', label: 'Runs on your PC', title: 'Fits fully in your GPU memory, with room for its context. Fast.' },
   tight: { dot: 'bg-sky-500/80', label: 'Tight fit', title: 'Barely fits. Parts may spill to RAM and slow it down.' },
   big: { dot: 'bg-orange-500/80', label: 'Runs on CPU, slower', title: 'Bigger than your GPU memory, so most of it runs on CPU and RAM. It works, just slower.' },
   unknown: { dot: 'bg-gray-400 dark:bg-gray-600', label: '', title: 'Hardware not detected yet.' },
@@ -304,6 +299,7 @@ export function pickDefaultVariant(
   vramGb: number | null,
   isInstalled: (m: DiscoverModel) => boolean,
   dlState: (m: DiscoverModel) => DownloadProgress | null,
+  ctx?: number,
 ): DiscoverModel {
   const installed = variants.find(isInstalled)
   if (installed) return installed
@@ -313,7 +309,7 @@ export function pickDefaultVariant(
   })
   if (active) return active
   if (vramGb) {
-    const fitting = variants.filter(v => v.sizeGB && v.sizeGB <= vramGb * 0.85)
+    const fitting = variants.filter(v => computeFit(v.sizeGB, vramGb, ctx) === 'fits')
     if (fitting.length) return fitting.reduce((a, b) => ((a.sizeGB ?? 0) >= (b.sizeGB ?? 0) ? a : b))
   }
   return variants.reduce((a, b) => ((a.sizeGB ?? Infinity) <= (b.sizeGB ?? Infinity) ? a : b))
@@ -324,6 +320,8 @@ export function pickDefaultVariant(
 export interface ModelTileProps {
   variants: DiscoverModel[]
   vramGb: number | null
+  /** The context the LU Engine starts with; the fit hint counts its KV cache. */
+  ctx?: number
   isInstalled: (m: DiscoverModel) => boolean
   dlState: (m: DiscoverModel) => DownloadProgress | null
   onDownload: (m: DiscoverModel) => void
@@ -341,19 +339,19 @@ export interface ModelTileProps {
   highlight?: boolean
 }
 
-export function ModelTile({ variants, vramGb, isInstalled, dlState, onDownload, onInfo, onOpenUrl, onUse, canUse, isUsing, highlight }: ModelTileProps) {
+export function ModelTile({ variants, vramGb, ctx, isInstalled, dlState, onDownload, onInfo, onOpenUrl, onUse, canUse, isUsing, highlight }: ModelTileProps) {
   const [pickerOpen, setPickerOpen] = useState(false)
   const [chosen, setChosen] = useState<string | null>(null)
   const pickerRef = useRef<HTMLDivElement>(null)
 
-  const def = pickDefaultVariant(variants, vramGb, isInstalled, dlState)
+  const def = pickDefaultVariant(variants, vramGb, isInstalled, dlState, ctx)
   const sel = variants.find(v => v.name === chosen) ?? def
   const groupTitle = sel.group ?? sel.name
   const dl = dlState(sel)
   const downloading = dl?.status === 'downloading' || dl?.status === 'connecting'
   const installed = isInstalled(sel) || dl?.status === 'complete'
   const externalOnly = sel.canPull === false
-  const fit = computeFit(sel.sizeGB, vramGb)
+  const fit = computeFit(sel.sizeGB, vramGb, ctx)
   // One rule for what the button does, so no state can end up without one
   // (lib/model-tile-action.ts).
   const action = modelTileAction({
@@ -436,7 +434,7 @@ export function ModelTile({ variants, vramGb, isInstalled, dlState, onDownload, 
                 className="absolute z-30 left-0 top-full mt-1 w-56 rounded-lg lu-elevated p-1"
               >
                 {variants.map(v => {
-                  const vFit = computeFit(v.sizeGB, vramGb)
+                  const vFit = computeFit(v.sizeGB, vramGb, ctx)
                   const vInst = isInstalled(v) || dlState(v)?.status === 'complete'
                   return (
                     <button

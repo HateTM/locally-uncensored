@@ -21,6 +21,7 @@ import { useDownloadStore } from '../../stores/downloadStore'
 import { ModelGridSkeleton } from '../layout/ViewSkeletons'
 import { useProviderStore } from '../../stores/providerStore'
 import { useSettingsStore } from '../../stores/settingsStore'
+import { engineCtx } from '../../lib/vram-fit'
 import { useModelStore } from '../../stores/modelStore'
 import { getProviderIdFromModel } from '../../api/providers'
 import { activateDownloadedBundledModel } from '../../lib/bundled-download-activation'
@@ -235,6 +236,8 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
   // Provider state for model path detection
   const providers = useProviderStore(s => s.providers)
   const hfOverride = useSettingsStore(s => s.settings.hfDownloadPathOverride)
+  // The fit hints count the KV cache of the context the LU Engine starts with.
+  const fitCtx = engineCtx(useSettingsStore(s => s.settings.builtinEngine?.ctx))
   // Bug Y/a v2.5.0 — Aldrich Ironhart Discord. We need to know which provider
   // the user is actually chatting against, not just which one is enabled,
   // because both can be enabled at once and the active picker decides where
@@ -573,7 +576,7 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
   const matchesVramTier = (sizeGB?: number) => {
     if (vramTier === 'all') return true
     if (sizeGB === undefined || sizeGB === null) return true
-    if (vramTier === 'fit') return systemVRAM ? computeFit(sizeGB, systemVRAM) !== 'big' : true
+    if (vramTier === 'fit') return systemVRAM ? computeFit(sizeGB, systemVRAM, fitCtx) !== 'big' : true
     if (vramTier === 'ultra') return sizeGB <= 4
     if (vramTier === 'light') return sizeGB > 4 && sizeGB <= 10
     if (vramTier === 'middle') return sizeGB > 10 && sizeGB <= 20
@@ -828,11 +831,11 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
   const scoredGroups = showPicks
     ? chatRecommendationGroups(textGroups)
         .map(g => {
-          const rep = pickDefaultVariant(g, systemVRAM, isModelFullyInstalled, getModelDownloadState)
+          const rep = pickDefaultVariant(g, systemVRAM, isModelFullyInstalled, getModelDownloadState, fitCtx)
           let score = 0
           if (rep.hot) score += 2
           if (rep.agent) score += 1
-          const fit = computeFit(rep.sizeGB, systemVRAM)
+          const fit = computeFit(rep.sizeGB, systemVRAM, fitCtx)
           if (fit === 'fits') score += 2
           else if (fit === 'tight') score += 1
           if (!systemVRAM && rep.lightweight) score += 2
@@ -865,6 +868,7 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
       <ModelTile
         variants={group}
         vramGb={systemVRAM}
+        ctx={fitCtx}
         isInstalled={isModelFullyInstalled}
         dlState={getModelDownloadState}
         onDownload={handleTextDownload}
@@ -1107,6 +1111,7 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
                     <ModelTile
                       variants={[model]}
                       vramGb={systemVRAM}
+                      ctx={fitCtx}
                       isInstalled={isModelFullyInstalled}
                       dlState={getModelDownloadState}
                       onDownload={handleTextDownload}
@@ -1136,6 +1141,7 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
                     <ModelTile
                       variants={[model]}
                       vramGb={systemVRAM}
+                      ctx={fitCtx}
                       isInstalled={isModelFullyInstalled}
                       dlState={getModelDownloadState}
                       onDownload={handleTextDownload}
