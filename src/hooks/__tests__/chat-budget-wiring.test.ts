@@ -65,7 +65,11 @@ describe('compare caps the shared base before the fan-out', () => {
   })
 
   it('streams the budgeted array to BOTH sides, not the raw history', () => {
-    expect(compare.match(/chatStream\(modelId, sendMessages,/g)).toHaveLength(2)
+    // Both sides run through the one streamSide body (FINDINGS 17 merged the
+    // two copies), which streams the budgeted array.
+    expect(compare.match(/chatStream\(modelId, sendMessages,/g)).toHaveLength(1)
+    expect(compare).toMatch(/streamSide\('A', modelA,/)
+    expect(compare).toMatch(/streamSide\('B', modelB,/)
     expect(compare).not.toMatch(/chatStream\(modelId, chatMessages,/)
   })
 

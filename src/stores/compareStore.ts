@@ -1,12 +1,9 @@
 import { create } from 'zustand'
 import type { Message } from '../types/chat'
 import { useUIStore } from './uiStore'
+import type { CompareStats } from '../lib/compare-stats'
 
-interface ModelStats {
-  tokens: number
-  timeMs: number
-  tokensPerSec: number
-}
+type ModelStats = CompareStats
 
 interface CompareState {
   isComparing: boolean

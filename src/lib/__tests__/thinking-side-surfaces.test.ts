@@ -69,8 +69,10 @@ describe('A/B compare asks for thinking and never shows it', () => {
   const src = read('../../hooks/useABCompare.ts')
 
   it('both sides carry the tri-state, per model', () => {
-    expect(src).toContain('thinking: thinkOptFor(modelA)')
-    expect(src).toContain('thinking: thinkOptFor(modelB)')
+    // One streamSide body serves both sides, each with its own model.
+    expect(src).toContain('thinking: thinkOptFor(model)')
+    expect(src).toContain("streamSide('A', modelA,")
+    expect(src).toContain("streamSide('B', modelB,")
   })
 
   it('the switch only applies where the model has one', () => {
@@ -78,11 +80,12 @@ describe('A/B compare asks for thinking and never shows it', () => {
   })
 
   it('the live stream is split, so no raw tag ever flashes into the pane', () => {
-    expect(src.split('createThinkStreamSplitter()').length - 1).toBe(2)
+    // Once in streamSide, which both sides run through.
+    expect(src.split('createThinkStreamSplitter()').length - 1).toBe(1)
   })
 
   it('and the finished pane is settled once more', () => {
-    expect(src.split("settleThinking(fullContent, '', false).content").length - 1).toBe(2)
+    expect(src.split("settleThinking(fullContent, '', false).content").length - 1).toBe(1)
   })
 })
 
