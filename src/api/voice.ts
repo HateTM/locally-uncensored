@@ -248,7 +248,9 @@ export async function checkWhisperAvailable(): Promise<{
   }
 }
 
-export async function transcribeAudio(audioBlob: Blob): Promise<string> {
+/** `model`: the faster-whisper size from Settings (voiceStore.whisperModel);
+ *  the server switches to it, and falls back to base for anything unknown. */
+export async function transcribeAudio(audioBlob: Blob, model?: string): Promise<string> {
   if (isTauri()) {
     // Convert blob to base64 for Tauri invoke
     const buffer = await audioBlob.arrayBuffer();
@@ -268,6 +270,7 @@ export async function transcribeAudio(audioBlob: Blob): Promise<string> {
     const data: unknown = await backendCall("transcribe", {
       audioBase64,
       contentType: audioBlob.type || "audio/wav",
+      ...(model ? { model } : {}),
     });
     // The Rust side writes these for the user ("Speech-to-text needs
     // faster-whisper, which is not installed"), so keep them readable.
@@ -276,7 +279,7 @@ export async function transcribeAudio(audioBlob: Blob): Promise<string> {
     return asString(prop(data, "transcript")) ?? "";
   }
 
-  const res = await fetch("/local-api/transcribe", {
+  const res = await fetch(model ? `/local-api/transcribe?model=${encodeURIComponent(model)}` : "/local-api/transcribe", {
     method: "POST",
     headers: {
       "Content-Type": audioBlob.type || "audio/webm",

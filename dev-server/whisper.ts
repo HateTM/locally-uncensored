@@ -237,9 +237,13 @@ export function registerWhisperRoutes(routes: RouteMount, onClose: (cb: () => vo
         writeFileSync(tmpFile, audioBuffer)
 
         console.log(`[Whisper] Transcribing: ${tmpFile} (${(audioBuffer.length / 1024).toFixed(1)} KB)`)
+        // The size from Settings; whisper_server.py loads it in place of the
+        // running one and falls back to base for a name it does not offer.
+        const model = new URL(req.url ?? '', 'http://localhost').searchParams.get('model') ?? undefined
         const result = await sendWhisperCommand(
-          { action: 'transcribe', path: tmpFile.replace(/\\/g, '/') },
-          60000,
+          { action: 'transcribe', path: tmpFile.replace(/\\/g, '/'), ...(model ? { model } : {}) },
+          // A size switch loads (and on first use downloads) the new model.
+          model ? 300000 : 60000,
         )
 
         // Clean up temp file

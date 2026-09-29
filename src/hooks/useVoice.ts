@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef } from "react";
 import { useVoiceStore } from "../stores/voiceStore";
+import { piperVoiceFor } from "../lib/voice-language";
 import { useSettingsStore } from "../stores/settingsStore";
 import { useCloudAuthStore, deriveCloudAvailable } from "../stores/cloudAuthStore";
 import {
@@ -240,7 +241,7 @@ export function useVoice() {
             if (!snap || snap.size < 12000) return;
             interimBusyRef.current = true;
             try {
-              const partial = await transcribeAudio(snap);
+              const partial = await transcribeAudio(snap, useVoiceStore.getState().whisperModel);
               if (recorderRef.current?.isRecording() && partial.trim()) {
                 store.setTranscript(partial.trim());
                 onInterim(partial.trim());
@@ -286,7 +287,7 @@ export function useVoice() {
       // Final full-take transcription — more accurate than the interim chunks.
       store.setTranscribing(true);
       try {
-        const transcript = cloudVoice ? await transcribeAudioCloud(blob) : await transcribeAudio(blob);
+        const transcript = cloudVoice ? await transcribeAudioCloud(blob) : await transcribeAudio(blob, useVoiceStore.getState().whisperModel);
         store.setTranscript(transcript);
         // A silent take is not an error, but it must not be silence in the UI
         // too: the bubble says so and clears itself after six seconds.
@@ -385,7 +386,8 @@ export function useVoice() {
           }
           if (piperReady) {
             try {
-              const url = await synthesizeNeural(text, store.piperVoice);
+              // A Cyrillic reply goes to the Cyrillic voice when one is set.
+              const url = await synthesizeNeural(text, piperVoiceFor(text, store.piperVoice, store.piperVoiceCyrillic));
               if (stopped()) return;
               await playNeuralAudio(url);
               store.setTtsFallbackReason(null);

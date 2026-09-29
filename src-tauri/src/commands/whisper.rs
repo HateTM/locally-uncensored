@@ -16,6 +16,20 @@ pub struct WhisperServer {
     response_rx: Option<mpsc::Receiver<serde_json::Value>>,
     pub ready: bool,
     pub backend: Option<String>,
+    /// The faster-whisper size this server loads (LU_WHISPER_MODEL). "base"
+    /// until the user picks another in Settings (FINDINGS 16).
+    pub model: String,
+}
+
+/// The sizes Settings offers; whisper_server.py MODELS says the same.
+pub const WHISPER_MODELS: &[&str] = &["base", "small", "medium", "large-v3-turbo"];
+
+/// The size to run for a request: a known one, else the default. Anything
+/// else would reach faster-whisper as a model name to download.
+pub fn whisper_model_or_default(requested: Option<&str>) -> &'static str {
+    requested
+        .and_then(|m| WHISPER_MODELS.iter().copied().find(|k| *k == m))
+        .unwrap_or("base")
 }
 
 /// Throw away replies still sitting in the channel from an earlier, abandoned
@@ -59,7 +73,18 @@ impl WhisperServer {
             response_rx: None,
             ready: false,
             backend: None,
+            model: "base".to_string(),
         }
+    }
+
+    /// Switch the size for the next start. True when a running server has to
+    /// go, because it holds the other model.
+    pub fn select_model(&mut self, model: &str) -> bool {
+        if self.model == model {
+            return false;
+        }
+        self.model = model.to_string();
+        self.is_running()
     }
 
     pub fn start(&mut self, python_bin: &str, script_path: &str) -> Result<(), String> {
@@ -86,6 +111,7 @@ impl WhisperServer {
 
         let mut cmd = crate::python::python_command(python_bin);
         cmd.arg(script_path)
+            .env("LU_WHISPER_MODEL", &self.model)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -324,6 +350,7 @@ pub async fn transcribe(
     app: AppHandle,
     audio_base64: String,
     content_type: String,
+    model: Option<String>,
 ) -> Result<serde_json::Value, String> {
     // On the first dictation this starts the whisper server and waits for the
     // model — up to five minutes — and every transcription after that blocks for
@@ -331,7 +358,7 @@ pub async fn transcribe(
     // so the window locked up for the whole take.
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<AppState>();
-        transcribe_blocking(&app, audio_base64, content_type, &state)
+        transcribe_blocking(&app, audio_base64, content_type, model.as_deref(), &state)
     })
     .await
     .map_err(|e| format!("Transcription task failed to run: {e}"))?
@@ -341,6 +368,7 @@ fn transcribe_blocking(
     app: &AppHandle,
     audio_base64: String,
     content_type: String,
+    model: Option<&str>,
     state: &State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let audio_bytes = base64::engine::general_purpose::STANDARD
@@ -386,11 +414,22 @@ fn transcribe_blocking(
     // Self-healing, first half: this also reaps a server that died since the
     // last take, so what follows is a real start and not a send into a closed
     // pipe.
+    // A different size from Settings: the running server holds the old model,
+    // so it goes and the start below loads the new one (the start waits up to
+    // five minutes, which covers the first download; a transcribe waits 60 s).
+    let model = whisper_model_or_default(model);
+    if let Ok(mut w) = state.whisper.lock() {
+        if w.select_model(model) {
+            println!("[Whisper] switching to the {} model", model);
+            w.stop();
+        }
+    }
     ensure_whisper_running(app, state)?;
 
     let cmd = serde_json::json!({
         "action": "transcribe",
         "path": audio_path,
+        "model": model,
     });
 
     // Send to persistent whisper server
@@ -698,6 +737,24 @@ mod dead_server_tests {
         }
         assert!(saw_it, "the exited child was never noticed");
         ws.stop();
+    }
+
+    #[test]
+    fn only_the_offered_model_sizes_reach_faster_whisper() {
+        assert_eq!(whisper_model_or_default(Some("small")), "small");
+        assert_eq!(whisper_model_or_default(Some("large-v3-turbo")), "large-v3-turbo");
+        // A name faster-whisper would try to download is not passed on.
+        assert_eq!(whisper_model_or_default(Some("../../evil")), "base");
+        assert_eq!(whisper_model_or_default(None), "base");
+    }
+
+    #[test]
+    fn a_new_size_restarts_only_a_running_server() {
+        let mut ws = WhisperServer::new();
+        assert!(!ws.select_model("base"));
+        // Not running: nothing to stop, the next start loads it.
+        assert!(!ws.select_model("small"));
+        assert_eq!(ws.model, "small");
     }
 
     #[test]

@@ -4,7 +4,7 @@ import { withInstallerOutput } from '../../lib/error-text'
 import { HINWEIS_TEXT } from '../../lib/hinweis'
 import { backendCall } from '../../api/backend'
 import { useSettingsStore } from '../../stores/settingsStore'
-import { useVoiceStore } from '../../stores/voiceStore'
+import { useVoiceStore, WHISPER_MODEL_SIZES, type WhisperModelSize } from '../../stores/voiceStore'
 import { checkWhisperAvailable, checkTtsAvailable, downloadPiperVoice, listInstalledPiperVoices } from '../../api/voice'
 import { InlineToggle } from './InlineToggle'
 import { initialProbe, makeProbeReducer, needsInstall, showsHint } from './probe-install'
@@ -69,7 +69,28 @@ const PIPER_VOICES: { id: string; label: string }[] = [
   { id: 'en_US-hfc_female-medium', label: 'HFC, US, female' },
   { id: 'en_GB-alba-medium', label: 'Alba, UK, female' },
   { id: 'en_GB-northern_english_male-medium', label: 'Northern, UK, male' },
+  { id: 'de_DE-thorsten-medium', label: 'Thorsten, German, male' },
+  { id: 'de_DE-kerstin-low', label: 'Kerstin, German, female' },
 ]
+
+// A Piper voice speaks one language, and an English voice spells Russian out
+// letter by letter (FINDINGS 16). Replies written in Cyrillic go to this voice
+// (lib/voice-language.ts). All four are 63 MB, rhasspy/piper-voices voices.json.
+const CYRILLIC_VOICES: { id: string; label: string }[] = [
+  { id: 'ru_RU-irina-medium', label: 'Irina, Russian, female' },
+  { id: 'ru_RU-denis-medium', label: 'Denis, Russian, male' },
+  { id: 'ru_RU-dmitri-medium', label: 'Dmitri, Russian, male' },
+  { id: 'ru_RU-ruslan-medium', label: 'Ruslan, Russian, male' },
+]
+
+// faster-whisper sizes (whisper_server.py MODELS). Base was the only one; it
+// is the weakest usable size and noticeably worse on Russian (FINDINGS 16).
+const WHISPER_MODEL_LABELS: Record<WhisperModelSize, string> = {
+  base: 'Base, fast (150 MB)',
+  small: 'Small, better for Russian (480 MB)',
+  medium: 'Medium (1.5 GB)',
+  'large-v3-turbo': 'Large v3 Turbo, best (1.6 GB, GPU)',
+}
 
 export function SpeechSettings() {
   const appMode = useSettingsStore((s) => s.settings.appMode)
@@ -220,18 +241,22 @@ export function SpeechSettings() {
   // optimistically (so the dropdown reflects the pick) but REVERTED if the
   // download fails — otherwise piperVoice pointed at a missing model and every
   // read fell back to the Windows SAPI voice (#77, ElBiggus).
-  const handlePickVoice = async (id: string) => {
+  const handlePickVoice = async (id: string, slot: 'main' | 'cyrillic' = 'main') => {
     setVoiceError(null)
-    const prev = voiceSettings.piperVoice
-    voiceSettings.setPiperVoice(id)
-    if (installedVoices.includes(id)) return
+    const set = (v: string) => slot === 'main'
+      ? voiceSettings.setPiperVoice(v)
+      : voiceSettings.updateVoiceSettings({ piperVoiceCyrillic: v })
+    const prev = slot === 'main' ? voiceSettings.piperVoice : voiceSettings.piperVoiceCyrillic
+    set(id)
+    // "" is "no Cyrillic voice": nothing to download.
+    if (!id || installedVoices.includes(id)) return
     setVoiceBusy(true)
     try {
       await downloadPiperVoice(id)
       await refreshVoices()
       await refreshTts()
     } catch (e) {
-      voiceSettings.setPiperVoice(prev)
+      set(prev)
       setVoiceError(e instanceof Error ? e.message : String(e))
     } finally {
       setVoiceBusy(false)
@@ -300,6 +325,26 @@ export function SpeechSettings() {
         Required for the microphone. Installs faster-whisper into LU's Python; first run also downloads a small model.
       </p>
     )}
+    <div className="flex items-center justify-between gap-2">
+      <span className="t-micro text-gray-500">Recognition model</span>
+      <select
+        value={voiceSettings.whisperModel}
+        onChange={(e) => {
+          const next = WHISPER_MODEL_SIZES.find((m) => m === e.target.value)
+          if (next) voiceSettings.updateVoiceSettings({ whisperModel: next })
+        }}
+        className="max-w-[210px] px-1.5 py-0.5 rounded bg-transparent border border-white/8 t-micro text-gray-300 focus:outline-none"
+      >
+        {WHISPER_MODEL_SIZES.map((m) => (
+          <option key={m} value={m}>{WHISPER_MODEL_LABELS[m]}</option>
+        ))}
+      </select>
+    </div>
+    {voiceSettings.whisperModel !== 'base' && (
+      <p className="t-micro text-gray-500 leading-snug">
+        Downloaded on the next dictation, which then takes longer. Runs on the graphics card when faster-whisper finds CUDA, otherwise on the processor.
+      </p>
+    )}
 
     {/* Text-to-Speech, Piper neural (read responses aloud) */}
     <div className="flex items-center gap-2 text-[0.65rem] pt-1">
@@ -365,6 +410,22 @@ export function SpeechSettings() {
         className="max-w-[210px] px-1.5 py-0.5 rounded bg-transparent border border-white/8 text-[0.65rem] text-gray-300 focus:outline-none disabled:opacity-50"
       >
         {PIPER_VOICES.map((v) => (
+          <option key={v.id} value={v.id}>
+            {v.label}{installedVoices.includes(v.id) ? '' : ', download'}
+          </option>
+        ))}
+      </select>
+    </div>
+    <div className="flex items-center justify-between gap-2">
+      <span className="t-micro text-gray-500">Voice for Russian replies</span>
+      <select
+        value={voiceSettings.piperVoiceCyrillic}
+        onChange={(e) => void handlePickVoice(e.target.value, 'cyrillic')}
+        disabled={voiceBusy}
+        className="max-w-[210px] px-1.5 py-0.5 rounded bg-transparent border border-white/8 t-micro text-gray-300 focus:outline-none disabled:opacity-50"
+      >
+        <option value="">Same voice</option>
+        {CYRILLIC_VOICES.map((v) => (
           <option key={v.id} value={v.id}>
             {v.label}{installedVoices.includes(v.id) ? '' : ', download'}
           </option>
