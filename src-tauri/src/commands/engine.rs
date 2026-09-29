@@ -1463,6 +1463,40 @@ fn apply_engine_backend_dir(cmd: &mut Command, backend_dir: Option<&Path>) {
     }
 }
 
+/// A `llama-server --list-devices` run set up like the engine it speaks for:
+/// the same GPU variables and the same companion-library directory, so the
+/// devices it lists are the devices the engine will see.
+fn prepare_engine_probe(
+    cmd: &mut Command,
+    sel: &crate::commands::gpu::GpuSelection,
+    backend_dir: Option<&Path>,
+) {
+    crate::commands::gpu::apply_gpu_env(cmd, sel);
+    apply_engine_backend_dir(cmd, backend_dir);
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+}
+
+/// What the layer plan may use on the picked devices: their free memory added
+/// up, less the driver reserve for every card after the first (`plan_offload`
+/// takes the first one out itself). llama.cpp splits the layers across the
+/// devices it is given in proportion to what each has free, so the sum is the
+/// budget, and each card pays its own compute buffers.
+pub(crate) fn picked_vram_reading(
+    devices: &[super::engine_devices::EngineDevice],
+) -> Option<crate::commands::gpu::VramReading> {
+    if devices.is_empty() {
+        return None;
+    }
+    let free: u64 = devices.iter().map(|d| d.free_mib * MIB).sum();
+    let extra_reserve = VRAM_OVERHEAD_BYTES * (devices.len() as u64 - 1);
+    Some(crate::commands::gpu::VramReading {
+        bytes: free.saturating_sub(extra_reserve),
+        free: true,
+        source: "llama-server --list-devices (the picked cards)",
+    })
+}
+
 // ── Health probe ─────────────────────────────────────────────────────────────
 
 /// The slot that actually holds the conversation. llama-server distributes
@@ -2808,7 +2842,21 @@ fn start_after_stop(
     let ctx_size = effective_ctx(tuning);
     let auto_layers = tuning.gpu_layers < 0;
     let auto_ngl = if auto_layers {
-        let card = crate::commands::gpu::engine_vram_reading();
+        // With cards picked in Settings, Hardware the plan is sized against
+        // exactly those, measured by the engine itself; the spawn below pins
+        // the same ones (engine_devices.rs). Without a pick, or with one that
+        // could not be translated, the engine takes its default devices and
+        // the plan keeps the single-card reading it always had.
+        let selection = state.gpu_selection.lock().ok().map(|sel| sel.clone());
+        let card = selection
+            .as_ref()
+            .and_then(|sel| {
+                super::engine_devices::picked_devices_now(sel, &binary, &|c: &mut Command| {
+                    prepare_engine_probe(c, sel, backend_dir.as_deref())
+                })
+            })
+            .and_then(|devices| picked_vram_reading(&devices))
+            .or_else(crate::commands::gpu::engine_vram_reading);
         let header = crate::commands::gguf::read_header(model_path);
         let plan = plan_offload(&OffloadInputs {
             model_bytes: std::fs::metadata(model_path).map(|m| m.len()).unwrap_or(0),
@@ -3286,19 +3334,41 @@ fn spawn_engine_attempt(
     backend_dir: Option<&Path>,
 ) -> Result<String, StartFailure> {
     log_cpu_features_once();
+    // B2 fix (review-w2rust.md): apply_gpu_env can now shell out to
+    // nvidia-smi (GPU-UUID resolution) instead of doing zero I/O, so the
+    // lock is held only long enough to clone the small selection out --
+    // never across the detection call, which would freeze the Hardware
+    // tab's set_gpu_selection/get_gpu_selection (same mutex) for however
+    // long that subprocess I/O takes.
+    let gpu_selection = state.gpu_selection.lock().ok().map(|sel| sel.clone());
+    // The Hardware pick in the engine's own words (engine_devices.rs): the
+    // Vulkan sidecar reads none of the variables apply_gpu_env sets. Added
+    // here and not in build_server_args, so every attempt, restore and
+    // restart carries it while `args`, the idempotence key stored below,
+    // stays the request itself.
+    let pinned;
+    let launch_args: &[String] = match gpu_selection.as_ref().and_then(|sel| {
+        super::engine_devices::device_pin(sel, binary, &|c: &mut Command| prepare_engine_probe(c, sel, backend_dir))
+    }) {
+        Some(devices) => {
+            pinned = super::engine_devices::with_device(args, &devices);
+            &pinned
+        }
+        None => args,
+    };
     // The one line a support log has to carry. Everything the start depends on
     // is in the argv: model path, context size, layer count, cache types,
-    // thread count, mlock/mmap flags, the vision file and the port.
+    // thread count, mlock/mmap flags, the vision file, the devices and the port.
     tracing::info!(
         target: "engine",
         port,
         ctx = ctx.unwrap_or_default(),
         model_bytes = std::fs::metadata(model_path).map(|m| m.len()).unwrap_or(0),
-        command = %command_line(binary, args),
+        command = %command_line(binary, launch_args),
         "starting the LU Engine llama-server"
     );
     let mut cmd = Command::new(binary);
-    cmd.args(args)
+    cmd.args(launch_args)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         // llama-server writes the REASON a start fails here: a GGUF it refuses,
@@ -3308,16 +3378,12 @@ fn spawn_engine_attempt(
         // the pipe can never fill and stall the server (see commands/shell.rs).
         .stderr(Stdio::piped());
     // Forward the user's GPU pick (CUDA/HIP/OneAPI) exactly like start_ollama;
-    // no-op in the default "auto" mode. On mac this is inert (Metal).
-    // B2 fix (review-w2rust.md): apply_gpu_env can now shell out to
-    // nvidia-smi (GPU-UUID resolution) instead of doing zero I/O, so the
-    // lock is held only long enough to clone the small selection out --
-    // never across the detection call, which would freeze the Hardware
-    // tab's set_gpu_selection/get_gpu_selection (same mutex) for however
-    // long that subprocess I/O takes.
-    let gpu_selection = state.gpu_selection.lock().ok().map(|sel| sel.clone());
-    if let Some(sel) = gpu_selection {
-        crate::commands::gpu::apply_gpu_env(&mut cmd, &sel);
+    // no-op in the default "auto" mode. On mac this is inert (Metal). The
+    // Vulkan build ignores these; `--device` above is what pins it. They stay
+    // so the listing that resolved `--device` and this process see the same
+    // devices, whatever a driver does with them.
+    if let Some(sel) = gpu_selection.as_ref() {
+        crate::commands::gpu::apply_gpu_env(&mut cmd, sel);
     }
     // K1 (3.0.1): point a dynamic-ISA sidecar (Windows/Linux) at its
     // ggml-cpu-*/ggml-vulkan companion libraries. No-op on mac / a static
@@ -4224,7 +4290,24 @@ fn start_bundled_embed_blocking(
         )
     })?;
 
-    let embed_args = build_embed_args(&model_path, port);
+    // B2 fix (review-w2rust.md): apply_gpu_env can now shell out to
+    // nvidia-smi (GPU-UUID resolution) instead of doing zero I/O, so the
+    // lock is held only long enough to clone the small selection out --
+    // never across the detection call, which would freeze the Hardware
+    // tab's set_gpu_selection/get_gpu_selection (same mutex) for however
+    // long that subprocess I/O takes.
+    let gpu_selection = state.gpu_selection.lock().ok().map(|sel| sel.clone());
+    // K1 (3.0.1): this is the same dynamic-ISA binary the chat engine spawns
+    // (`spawn_engine_attempt`), so it needs the same companion-library
+    // directory; see apply_engine_backend_dir.
+    let backend_dir = resolve_engine_backend_dir(app);
+    // The same Hardware pick as the chat engine, see spawn_engine_attempt.
+    let mut embed_args = build_embed_args(&model_path, port);
+    if let Some(devices) = gpu_selection.as_ref().and_then(|sel| {
+        super::engine_devices::device_pin(sel, &binary, &|c: &mut Command| prepare_engine_probe(c, sel, backend_dir.as_deref()))
+    }) {
+        embed_args = super::engine_devices::with_device(&embed_args, &devices);
+    }
     tracing::info!(
         target: "engine",
         port,
@@ -4236,20 +4319,10 @@ fn start_bundled_embed_blocking(
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::piped());
-    // B2 fix (review-w2rust.md): apply_gpu_env can now shell out to
-    // nvidia-smi (GPU-UUID resolution) instead of doing zero I/O, so the
-    // lock is held only long enough to clone the small selection out --
-    // never across the detection call, which would freeze the Hardware
-    // tab's set_gpu_selection/get_gpu_selection (same mutex) for however
-    // long that subprocess I/O takes.
-    let gpu_selection = state.gpu_selection.lock().ok().map(|sel| sel.clone());
-    if let Some(sel) = gpu_selection {
-        crate::commands::gpu::apply_gpu_env(&mut cmd, &sel);
+    if let Some(sel) = gpu_selection.as_ref() {
+        crate::commands::gpu::apply_gpu_env(&mut cmd, sel);
     }
-    // K1 (3.0.1): this is the same dynamic-ISA binary the chat engine spawns
-    // (`spawn_engine_attempt`), so it needs the same companion-library
-    // directory; see apply_engine_backend_dir.
-    apply_engine_backend_dir(&mut cmd, resolve_engine_backend_dir(app).as_deref());
+    apply_engine_backend_dir(&mut cmd, backend_dir.as_deref());
     #[cfg(target_os = "windows")]
     cmd.creation_flags(CREATE_NO_WINDOW);
 
@@ -4716,6 +4789,40 @@ mod tests {
             ctx,
             free,
         })
+    }
+
+    fn engine_device(name: &str, free_mib: u64) -> super::super::engine_devices::EngineDevice {
+        super::super::engine_devices::EngineDevice {
+            name: name.into(),
+            description: "test card".into(),
+            total_mib: free_mib,
+            free_mib,
+        }
+    }
+
+    #[test]
+    fn the_picked_smaller_card_is_what_the_plan_is_sized_against() {
+        // The finding behind engine_devices.rs: a 24 GB and an 8 GB card, the
+        // 8 GB one picked. The old reading took the biggest card, planned a
+        // full offload of a 12B for a card that cannot hold it, and the start
+        // died into a processor-only retry. Sized against the pick, the same
+        // model gets a partial offload that fits.
+        let biggest_card = plan(TWELVE_B_IQ4, Some(TWELVE_B_BLOCKS), Some(24_564 * MIB), 8192);
+        assert_eq!(biggest_card.layers, None, "{}", biggest_card.why);
+
+        let picked = picked_vram_reading(&[engine_device("Vulkan1", 8188)]).unwrap();
+        assert!(picked.free);
+        assert_eq!(picked.bytes, CARD_8_GB);
+        let p = plan(TWELVE_B_IQ4, Some(TWELVE_B_BLOCKS), Some(picked.bytes), 8192);
+        let layers = p.layers.expect("a 12B does not fit on 8 GB whole");
+        assert!(layers > 0 && layers < TWELVE_B_BLOCKS, "{}", p.why);
+    }
+
+    #[test]
+    fn two_picked_cards_add_up_and_each_extra_card_pays_its_own_reserve() {
+        let two = picked_vram_reading(&[engine_device("Vulkan0", 8188), engine_device("Vulkan1", 12288)]).unwrap();
+        assert_eq!(two.bytes, CARD_8_GB + CARD_12_GB - VRAM_OVERHEAD_BYTES);
+        assert!(picked_vram_reading(&[]).is_none());
     }
 
     #[test]

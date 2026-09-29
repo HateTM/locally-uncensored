@@ -87,7 +87,7 @@ fn run_cmd(program: &str, args: &[&str]) -> Option<String> {
     crate::commands::shell::output_bounded(cmd, std::time::Duration::from_secs(5))
 }
 
-fn detect_nvidia() -> Vec<DetectedGpu> {
+pub(crate) fn detect_nvidia() -> Vec<DetectedGpu> {
     // `nvidia-smi --query-gpu=index,name,memory.total --format=csv,noheader,nounits`
     // is portable across Linux and Windows. Output line: "0, NVIDIA GeForce RTX 4070, 12282"
     let raw = match run_cmd(
