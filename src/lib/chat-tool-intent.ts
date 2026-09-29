@@ -127,17 +127,33 @@ const SAVE_TO_FILE_RE = /\b(save|write|export|dump|speicher\w*|schreib\w*)\b[^.?
 
 // Russian. No \b anywhere: like the umlauts above, Cyrillic letters are not
 // word characters in a JavaScript regex, so a \b next to one never matches.
-// Stems instead of whole words, because Russian inflects.
-const RU_CREATE_VERB_RE = /(сделай|сделать|создай|создать|сгенерир|нарису|изобрази|отрисуй|покажи|нужн[аоы]|хочу)/i
-const RU_IMAGE_NOUN_RE = /(картин|изображени|фото|рисун|логотип|иконк|постер|аватар|портрет|обои|арт-|иллюстрац)/i
-const RU_VIDEO_NOUN_RE = /(видео|ролик|клип|анимац|гифк)/i
-const RU_INHERENT_IMAGE_RE = /(нарисуй|нарисовать|изобрази|сгенерируй\s+(картин|изображени|фото))/i
-const RU_ANIMATE_RE = /(анимируй|анимировать|оживи)/i
+// Whole word forms with explicit edges instead, (?<![а-я]) … (?![а-я]):
+// a bare stem matched inside other words, "фото" in "фотоаппарат" and
+// "фотошоп", and "нужн[аоы]" matched "нужно" (FINDINGS 1). Only verbs that ask
+// for a picture count; "нужно", "хочу" and "покажи" do not.
+const RU_CREATE_VERB_RE = /(?<![а-я])(сделай(те)?|сделать|создай(те)?|создать|сгенерир[а-я]*|нарису[а-я]*|изобрази(те)?|отрисуй(те)?)(?![а-я])/i
+const RU_IMAGE_NOUN_RE = /(?<![а-я])(картин[а-я]*|изображени[а-я]*|фото(графи[а-я]*|к[аиуе]|чк[а-я]*)?|рисун[а-я]*|логотип[а-я]*|иконк[а-я]*|постер[а-я]*|аватар[а-я]*|портрет[а-я]*|обои|арт|иллюстраци[а-я]*)(?![а-я])/i
+const RU_VIDEO_NOUN_RE = /(?<![а-я])(видео(ролик[а-я]*)?|ролик[а-я]*|клип[а-я]*|анимаци[а-я]*|гифк[а-я]*)(?![а-я])/i
+const RU_INHERENT_IMAGE_RE = /(?<![а-я])(нарисуй(те)?|нарисовать|изобрази(те)?|сгенерируй(те)?\s+(картин|изображени|фото))/i
+const RU_ANIMATE_RE = /(?<![а-я])(анимируй(те)?|анимировать|оживи(те)?)(?![а-я])/i
 // Editing a picture the user attached: "remove the car", "убери машину".
 // Imperatives only: "what would you change here?" is a question about the
-// picture, "change the sky to night" is an edit. The Russian forms end in a
+// picture, "change the sky to night" is an edit. A general verb ("remove",
+// "add", "убери") also needs something visual as its object, because an
+// attached receipt or list gets "add up the totals", "remove duplicates",
+// "убери дубликаты" (FINDINGS 1). The verbs that only ever mean a picture
+// ("retouch", "перекрась") stand on their own. The Russian forms end in a
 // lookahead so "изменил" (past tense) is not "измени".
-const EDIT_ATTACHED_RE = /^(please\s+|pls\s+|now\s+)?(edit|retouch|inpaint|restyle|remove|replace|change|recolou?r|add|erase|turn)\b|\bmake\s+the\s+background\b|(^|[^а-яё])(измени|отредактируй|убери|удали|замени|поменяй|добавь|перекрась|вырежи|сотри|сделай\s+фон)(?![а-яё])/i
+const EDIT_VISUAL_OBJECT_EN = String.raw`\b(image|picture|photo|pic|background|sky|faces?|hair|eyes|person|people|man|woman|girl|boy|cars?|clothes|shirt|dress|colou?rs?|lighting|style|objects?|watermark|glasses|sunglasses|hat|trees?|buildings?|scene|water)\b`
+const EDIT_VISUAL_OBJECT_RU = String.raw`(?<![а-я])(фон[а-я]*|неб[оа]|лиц[оа]?|волос[а-я]*|глаз[а-я]*|человек[а-я]*|люд(ей|и|ям)|машин[а-я]*|автомобил[а-я]*|цвет[а-я]*|одежд[а-я]*|плать[а-я]*|стил[ья]|освещени[а-я]*|дерев[оья][а-я]*|здани[а-я]*|очки|шляп[а-я]*|вод[уаы]|фото[а-я]*|картинк[а-я]*|изображени[а-я]*|предмет[а-я]*|объект[а-я]*)(?![а-я])`
+const EDIT_ATTACHED_RE = new RegExp(
+  String.raw`^(please\s+|pls\s+|now\s+)?(retouch|inpaint|restyle|recolou?r)\b`
+  + String.raw`|^(please\s+|pls\s+|now\s+)?(edit|remove|replace|change|add|erase|turn)\b[^.?!]*` + EDIT_VISUAL_OBJECT_EN
+  + String.raw`|\bmake\s+the\s+background\b`
+  + String.raw`|(?<![а-я])(перекрась(те)?|отретушируй(те)?|сделай(те)?\s+фон)(?![а-я])`
+  + String.raw`|(?<![а-я])(измени(те)?|отредактируй(те)?|убери(те)?|удали(те)?|замени(те)?|поменяй(те)?|добавь(те)?|вырежи(те)?|сотри(те)?)(?![а-я])[^.?!]*` + EDIT_VISUAL_OBJECT_RU,
+  'i',
+)
 
 /**
  * Returns the capability a plain-chat message is asking for, or null if the
