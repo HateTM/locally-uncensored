@@ -36,6 +36,7 @@ import { HINWEIS_TEXT } from '../../lib/hinweis'
 import { GlowButton } from '../ui/GlowButton'
 import { Modal } from '../ui/Modal'
 import { countLabel } from '../../lib/formatters'
+import { fetchTrendingTextModels, type TrendingResult } from '../../api/discover-trending'
 import type { ModelCategory } from '../../types/models'
 import { log } from '../../lib/logger'
 import {
@@ -532,6 +533,16 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
   }
 
   const [hfSearchResults, setHfSearchResults] = useState<DiscoverModel[]>([])
+
+  // Live "Trending on Hugging Face" feed, text only. Filtered to what the LU
+  // Engine can load (api/discover-trending.ts), cached there for an hour.
+  const [trending, setTrending] = useState<TrendingResult | null>(null)
+  useEffect(() => {
+    if (!isText) return
+    let alive = true
+    fetchTrendingTextModels().then((r) => { if (alive) setTrending(r) })
+    return () => { alive = false }
+  }, [isText])
 
   const handleSearch = async () => {
     if (!search.trim() || !isText) return
@@ -1075,6 +1086,41 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
               </p>
             )}
           </div>
+
+          {/* Live feed: trending GGUF text models the LU Engine can load */}
+          {trending && trending.models.length > 0 && (
+            <div className="space-y-1.5 mt-6">
+              <div className="flex items-center gap-1.5 px-1">
+                <Sparkles size={10} className="text-gray-400" />
+                <h3 className="t-micro font-semibold uppercase tracking-[0.12em] text-gray-500">Trending on Hugging Face</h3>
+                <div className="flex-1 h-px bg-gray-200 dark:bg-white/[0.06]" />
+              </div>
+              <p className="t-micro text-gray-500 px-1">
+                Live from Hugging Face and not tested by LU. Only architectures the LU Engine can load are listed.
+                {Object.keys(trending.unsupported).length > 0 && (
+                  <> Left out, not loadable yet: {Object.entries(trending.unsupported).map(([arch, n]) => `${arch} (${n})`).join(', ')}.</>
+                )}
+              </p>
+              <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-2.5">
+                {trending.models.map((model, i) => (
+                  <motion.div key={model.url ?? model.name} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: Math.min(i, 12) * 0.025 }}>
+                    <ModelTile
+                      variants={[model]}
+                      vramGb={systemVRAM}
+                      isInstalled={isModelFullyInstalled}
+                      dlState={getModelDownloadState}
+                      onDownload={handleTextDownload}
+                      onUse={handleUseInstalled}
+                      canUse={canUseInstalled}
+                      isUsing={(m) => installedEntryFor(m)?.name === usingModel && usingModel !== null}
+                      onInfo={setInfoModel}
+                      onOpenUrl={(u) => openExternal(u)}
+                    />
+                  </motion.div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* HuggingFace Search Results */}
           {hfSearchResults.length > 0 && (
