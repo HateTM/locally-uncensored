@@ -40,6 +40,7 @@ import { STUDIO_MODELS, studioFields } from '../lib/render/studio-contract'
 import { modelLabel } from '../lib/render/preset-models'
 import { bookedVideoSeconds } from '../lib/render/video-duration'
 import { studioQuote, StudioQuoteChangedError } from '../api/cloud/studio'
+import { dataUrlToBlob } from '../lib/data-url'
 
 // B3 (review-w2ui.md, 18.09.2026): the CSAM floor above runs regardless of
 // tier, but the adult half of safety.ts (ADULT_SOFT_TERMS/ADULT_HARD_TERMS)
@@ -163,28 +164,8 @@ export function throttleMessage(err: CloudJobError): string {
     : 'Too many requests at once. Wait a moment and try again.'
 }
 
-// Decoded by hand instead of fetch(dataUrl): the webview CSP's connect-src
-// (rightly) has no data: entry, so fetching a data URL throws "Load failed"
-// and killed every source-needing op before the upload even started.
-export function dataUrlToBlob(dataUrl: string): Blob {
-  // A blob:/http(s) url here means an ImageRef broke the "url is always a data
-  // url" invariant. Parsing it as a data url silently yields a text blob the
-  // server 415s ("unsupported image format") — fail loudly at the source.
-  if (!dataUrl.startsWith('data:')) {
-    throw new Error(`dataUrlToBlob expects a data: URL, got "${dataUrl.slice(0, 16)}…"`)
-  }
-  const comma = dataUrl.indexOf(',')
-  const meta = dataUrl.slice(5, comma)
-  const data = dataUrl.slice(comma + 1)
-  const mime = meta.split(';')[0] || 'application/octet-stream'
-  if (meta.includes('base64')) {
-    const bin = atob(data)
-    const bytes = new Uint8Array(bin.length)
-    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
-    return new Blob([bytes], { type: mime })
-  }
-  return new Blob([decodeURIComponent(data)], { type: mime })
-}
+// Moved to lib/data-url.ts so the local Create path can use it too.
+export { dataUrlToBlob }
 
 // The in-flight job handle lives at module scope, matching the lifetime of the
 // generate() closure (which keeps polling across view switches). Instance refs

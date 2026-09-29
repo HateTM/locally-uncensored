@@ -10,6 +10,7 @@ import {
   getMotionModels,
   resolveLocalOpPick,
   uploadMediaFile,
+  uploadImage,
   getSamplers,
   getSchedulers,
   detectVideoBackend,
@@ -64,7 +65,8 @@ import {
   clearTrainingSet, stageTrainingImage, startCharacterTraining,
   characterTrainingStatus, cancelCharacterTraining,
 } from '../api/trainer'
-import { useCreateStore, EDIT_MAX_DENOISE } from '../stores/createStore'
+import { useCreateStore, EDIT_MAX_DENOISE, type ImageRef } from '../stores/createStore'
+import { dataUrlToBlob } from '../lib/data-url'
 import { useWorkflowStore } from '../stores/workflowStore'
 import { injectParameters } from '../api/workflows'
 import { applyNativeHiresFix } from '../api/hires-fix'
@@ -87,6 +89,26 @@ import {
  * would have thrown out of the render-polling loop and left the Create tab
  * stuck on "Generating…" with no error.
  */
+/**
+ * A Stage image (source or mask) the local render can use: one already staged
+ * in ComfyUI's input dir (`filename`), or one the cloud backend kept as a data
+ * URL only (`filename: ''`, MaskEditor / the cloud submit path).
+ *
+ * The second kind used to be dropped: switching Create from cloud to local
+ * keeps both refs, and `ref.filename ?? …` turned '' into "no image". An Edit
+ * then ran as plain text-to-image, with the mask still drawn on the canvas
+ * (FINDINGS 22).
+ */
+function hasStageImage(ref: ImageRef | null | undefined): boolean {
+  return !!ref && (!!ref.filename || ref.url.startsWith('data:'))
+}
+
+/** Upload a data-URL-only Stage image to ComfyUI and return its input name. */
+async function stageForLocal(ref: ImageRef, name: string): Promise<string> {
+  const blob = dataUrlToBlob(ref.url)
+  return uploadImage(new File([blob], `${name}.png`, { type: blob.type || 'image/png' }))
+}
+
 function historyMessages(entry: ComfyHistoryEntry | null): [string, ComfyExecutionMessage][] {
   const raw = entry?.status?.messages
   return Array.isArray(raw) ? raw : []
@@ -603,10 +625,14 @@ export function useCreate() {
     // The redesigned Create page drives its unified Stage input via `source`/`mask`
     // ImageRefs. On the local path their `.filename` IS the ComfyUI /upload/image
     // name, so they map straight onto the existing i2iImage/i2vImage handles.
-    const effInputImage = source?.filename ?? i2iImage
-    const effI2vImage = source?.filename ?? i2vImage
-    const maskFilename = mask?.filename
+    // `let`: a Stage image that only exists as a data URL is uploaded below,
+    // once ComfyUI is known to be up, and these are pointed at it.
+    let effInputImage = source?.filename ?? i2iImage
+    let effI2vImage = source?.filename ?? i2vImage
+    let maskFilename = mask?.filename
     const isRemoveBg = mode === 'image' && removebg
+    // An image Edit: img2img with a source, with or without a mask.
+    const isEdit = isI2I && !isRemoveBg && (!!effInputImage || hasStageImage(source))
 
     // ── 2.5.8 specialized local lanes. music / lipsync / motion build their
     // own core-node graphs (buildLocalOpWorkflow); extend rides the regular
@@ -875,7 +901,7 @@ export function useCreate() {
     }
     // Lane input guards — reject-and-report before anything uploads.
     if (localOp === 'lipsync') {
-      if (!source?.filename) {
+      if (!hasStageImage(source)) {
         setError('Add the portrait the character should speak from.')
         return
       }
@@ -885,7 +911,7 @@ export function useCreate() {
       }
     }
     if (localOp === 'motion') {
-      if (!source?.filename) {
+      if (!hasStageImage(source)) {
         setError('Add the character image that should perform the motion.')
         return
       }
@@ -900,7 +926,7 @@ export function useCreate() {
     // ComfyUI or silently ignores the source. The ModelChip already filters
     // the picker; this guards a stale store selection reaching submit.
     if (intent === 'animate' || intent === 'extend') {
-      if (!effI2vImage) {
+      if (!effI2vImage && !hasStageImage(source)) {
         setError(intent === 'extend'
           ? 'Pick the clip to extend first. Its last frame becomes the starting point.'
           : 'Add the image you want to animate first.')
@@ -935,6 +961,25 @@ export function useCreate() {
       setIsGenerating(false)
       setProgress(0)
       setError(comfyGuardMessage(guard))
+      return
+    }
+
+    // ComfyUI is up: stage what the cloud backend kept as data URLs only.
+    try {
+      if (source && !source.filename && hasStageImage(source)) {
+        setProgress(0, 'Uploading the source image...')
+        const staged = await stageForLocal(source, 'source')
+        effInputImage = staged
+        effI2vImage = staged
+      }
+      if (mask && !mask.filename && hasStageImage(mask)) {
+        setProgress(0, 'Uploading the mask...')
+        maskFilename = await stageForLocal(mask, 'mask')
+      }
+    } catch (e) {
+      setIsGenerating(false)
+      setProgress(0)
+      setError(`The ${source && !source.filename ? 'source image' : 'mask'} could not be sent to ComfyUI: ${e instanceof Error ? e.message : String(e)}`)
       return
     }
 
@@ -1045,7 +1090,7 @@ export function useCreate() {
           seconds: state.musicDuration,
           lyrics: state.musicLyrics,
           audioFile,
-          refImage: source?.filename || undefined,
+          refImage: (source ? effInputImage : '') || undefined,
           drivingVideo,
         })
         builderUsed = 'dynamic'
@@ -1063,6 +1108,15 @@ export function useCreate() {
           customWf = null
         } else if (!needsUnet && hasUnet && !hasCheckpoint) {
           console.warn('[useCreate] Custom workflow incompatible: model needs CheckpointLoaderSimple but workflow has UNETLoader. Using auto.')
+          customWf = null
+        } else if (isEdit && (maskFilename || !wfNodes.includes('LoadImage'))) {
+          // An Edit through a preset lost what made it an Edit: injectParameters
+          // has no mask mapping at all, and a preset without LoadImage has no
+          // slot for the source either, so the whole picture was repainted
+          // from the prompt alone (FINDINGS 22). The built-in graph carries
+          // both; the preset stays for plain generations.
+          console.warn('[useCreate] Preset cannot carry this Edit, using the built-in graph:', customWf.name)
+          setProgress(5, `Preset "${customWf.name}" has no slot for the ${maskFilename ? 'mask' : 'source image'}, using the built-in graph for this edit.`)
           customWf = null
         }
       }
@@ -1091,6 +1145,13 @@ export function useCreate() {
           // falling back to a legacy builder that would fail the same way with
           // a cryptic ComfyUI rejection.
           if (dynErr instanceof Error && dynErr.name === 'WorkflowUnavailableError') {
+            throw dynErr
+          }
+          // The legacy builders are text-to-image / text-to-video only: they
+          // carry no source image and no mask. Falling back for an Edit or an
+          // Animate rendered a new picture from the prompt alone, while the UI
+          // still showed the source and the mask (FINDINGS 22). Say what failed.
+          if (isEdit || (mode === 'video' && !!effI2vImage && (intent === 'animate' || intent === 'extend'))) {
             throw dynErr
           }
           // Fallback to legacy builders if dynamic fails
