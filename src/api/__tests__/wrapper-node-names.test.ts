@@ -76,6 +76,11 @@ const CORE_NODES = new Set([
   'LTXVConcatAVLatent', 'LTXVSeparateAVLatent', 'LTXVConditioning', 'LTXVCropGuides',
   'LTXVImgToVideoInplace', 'LTXVPreprocess', 'LTXVLatentUpsampler', 'LatentUpscaleModelLoader',
   'EmptyHunyuanLatentVideo', 'WanImageToVideo',
+  // Background removal on core nodes, the official utility_birefnet_remove_background
+  // template: nodes_bg_removal (LoadBackgroundRemovalModel, RemoveBackground),
+  // nodes_mask (InvertMask), nodes_compositing (JoinImageWithAlpha); all answer
+  // /object_info on ComfyUI 0.35 (2026-09-29).
+  'LoadBackgroundRemovalModel', 'RemoveBackground', 'InvertMask', 'JoinImageWithAlpha',
   // lora
   'LoraLoader', 'LoraLoaderModelOnly',
   // decode + image ops

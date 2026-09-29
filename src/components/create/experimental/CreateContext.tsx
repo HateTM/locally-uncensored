@@ -14,6 +14,7 @@ import { downloadBundleFiles, waitOrAbort, waitForModelsVisible, InstallCancelle
 import { ensureLocalFilename } from './loadImage'
 import { comfyStartupError, COMFY_INSTALLED_BUT_DEAD } from './comfyError'
 import { restartComfyForNewNodes } from '../../../api/comfy-restart'
+import { BIREFNET, bgRemovalReady, hasCoreBgRemoval } from '../../../api/bg-removal'
 import type { CloudQuota } from '../../../lib/render/cloud-jobs'
 
 /** Hold until nothing is rendering, so a heal never lands on a live job.
@@ -208,7 +209,8 @@ export function CreateExpProvider({ children }: { children: ReactNode }) {
       const nodes = await getAllNodeInfo(true)
       const names = new Set(Object.keys(nodes))
       setCaps({
-        rmbg: names.has('RMBG'),
+        // Core nodes with a model, or the RMBG pack (api/bg-removal.ts).
+        rmbg: bgRemovalReady(nodes),
         'inpaint-nodes': names.has('VAEEncodeForInpaint') || names.has('InpaintModelConditioning'),
         dwpose: names.has('DWPreprocessor'),
       })
@@ -350,8 +352,8 @@ export function CreateExpProvider({ children }: { children: ReactNode }) {
   // is fetched by the node itself on the first run.
   const installCapability = useCallback(async (cap: 'rmbg' | 'inpaint-nodes' | 'dwpose', onProgress?: (msg: string) => void, signal?: AbortSignal) => {
     await ensureComfyRunning(onProgress, signal)
-    const capsFrom = (names: Set<string>) => ({
-      rmbg: names.has('RMBG'),
+    const capsFrom = (names: Set<string>, nodes: Record<string, unknown>) => ({
+      rmbg: bgRemovalReady(nodes),
       'inpaint-nodes': names.has('VAEEncodeForInpaint') || names.has('InpaintModelConditioning'),
       dwpose: names.has('DWPreprocessor'),
     })
@@ -360,13 +362,45 @@ export function CreateExpProvider({ children }: { children: ReactNode }) {
       // ComfyUI is up, the install is ancient; re-probe and say so honestly.
       const nodes = await getAllNodeInfo()
       const names = new Set(Object.keys(nodes))
-      setCaps(capsFrom(names))
+      setCaps(capsFrom(names, nodes))
       if (!names.has('VAEEncodeForInpaint') && !names.has('InpaintModelConditioning')) {
         throw new Error(
           'This ComfyUI is missing its core inpaint nodes (VAEEncodeForInpaint). Update ComfyUI to a current version.',
         )
       }
       return
+    }
+    if (cap === 'rmbg') {
+      // A core with LoadBackgroundRemovalModel + RemoveBackground needs only
+      // the model file, not a cloned node pack with its pip requirements.
+      const before = await getAllNodeInfo()
+      if (hasCoreBgRemoval(before)) {
+        onProgress?.('Downloading the background removal model (424 MB)…')
+        const dl = useDownloadStore.getState()
+        dl.setMeta(BIREFNET.filename, BIREFNET.downloadUrl, BIREFNET.subfolder)
+        dl.startPolling()
+        await downloadBundleFiles([{ ...BIREFNET }], {
+          start: startModelDownload,
+          progress: getDownloadProgress,
+          onStatus: onProgress,
+          keepTrayLive: () => useDownloadStore.getState().startPolling(),
+          stop: (filename) => { void useDownloadStore.getState().cancel(filename) },
+          signal,
+        })
+        onProgress?.('Waiting for ComfyUI to list the model…')
+        for (let i = 0; i < 15; i++) {
+          clearNodeCache()
+          const nodes = await getAllNodeInfo().catch(() => null)
+          if (nodes && bgRemovalReady(nodes)) {
+            setCaps(capsFrom(new Set(Object.keys(nodes)), nodes))
+            return
+          }
+          await waitOrAbort(2000, signal)
+        }
+        throw new Error(
+          `Downloaded ${BIREFNET.filename}, but ComfyUI does not list it in models/${BIREFNET.subfolder}. Restart ComfyUI, then try again.`,
+        )
+      }
     }
     // Clone-and-pip capabilities share one flow: install the pack, restart
     // ComfyUI, poll /object_info (cache-cleared) until the node registers.
@@ -386,7 +420,7 @@ export function CreateExpProvider({ children }: { children: ReactNode }) {
         const nodes = await getAllNodeInfo()
         const names = new Set(Object.keys(nodes))
         if (names.has(nodeClass)) {
-          setCaps(capsFrom(names))
+          setCaps(capsFrom(names, nodes))
           return
         }
       } catch { /* ComfyUI still restarting — keep polling */ }

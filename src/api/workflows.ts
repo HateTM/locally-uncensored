@@ -158,6 +158,9 @@ export function autoDetectParameterMap(workflow: ComfyApiGraph): ParameterMap {
       case 'VHS_VideoCombine':
         map.fps = { nodeId, inputKey: 'frame_rate' }
         break
+      case 'CreateVideo':
+        map.fps = { nodeId, inputKey: 'fps' }
+        break
     }
   }
 
@@ -321,7 +324,7 @@ function detectWorkflowMode(workflow: ComfyApiGraph): 'image' | 'video' | 'both'
   const classTypes = apiNodes(workflow).map(([, n]) => n.class_type)
 
   const hasVideo = classTypes.some((ct) =>
-    ['EmptyHunyuanLatentVideo', 'ADE_LoadAnimateDiffModel', 'VHS_VideoCombine', 'SaveAnimatedWEBP'].includes(ct)
+    ['EmptyHunyuanLatentVideo', 'ADE_LoadAnimateDiffModel', 'VHS_VideoCombine', 'SaveAnimatedWEBP', 'CreateVideo', 'SaveVideo'].includes(ct)
   )
   const hasImage = classTypes.some((ct) =>
     ['EmptyLatentImage', 'EmptySD3LatentImage', 'SaveImage'].includes(ct)
