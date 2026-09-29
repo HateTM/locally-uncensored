@@ -18,6 +18,11 @@ export type ComfyWSEvent =
   | { type: 'progress'; data: { value: number; max: number; prompt_id: string } }
   | { type: 'executed'; data: { node: string; prompt_id: string } }
   | { type: 'execution_complete'; data: { prompt_id: string } }
+  // What ComfyUI actually sends at the end of a prompt (execution.py): success,
+  // or interrupted when it was stopped. `execution_complete` above is not an
+  // event ComfyUI emits; it stays for callers that still match on it.
+  | { type: 'execution_success'; data: { prompt_id: string } }
+  | { type: 'execution_interrupted'; data: { prompt_id: string; node_id?: string; node_type?: string } }
   // `exception_type` is on the wire (ComfyUI sends the Python class name next
   // to the message) and comfyErrorHint reads it; it was simply missing here,
   // so the one caller reached it through a cast.

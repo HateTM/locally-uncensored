@@ -1375,6 +1375,50 @@ export function useCreate() {
             removeListener()
           }
 
+          // The end of our prompt, whichever frame says so first. ComfyUI sends
+          // `execution_success` and then `executing` with `node: null`
+          // (execution.py, main.py); it never sends `execution_complete`, the
+          // only frame this used to finish on. Every Create render therefore
+          // waited for the 10 s heartbeat poll below (FINDINGS 21).
+          const finishFromHistory = () => {
+            if (completionHandled) return
+            completionHandled = true
+            cleanup()
+            useCreateStore.getState().setProgressPhase('complete')
+            setProgress(95, 'Fetching results...')
+            // Fetch history to get output files
+            getHistory(promptId).then(history => {
+              if (!history) { setError('No history found after completion.'); resolve(); return }
+              const messages = historyMessages(history)
+              const startMsg = messages.find(([t]) => t === 'execution_start')
+              const endMsg = messages.find(([t]) => t === 'execution_success')
+              const comfyTime = startMsg?.[1]?.timestamp && endMsg?.[1]?.timestamp
+                ? ((endMsg[1].timestamp - startMsg[1].timestamp) / 1000).toFixed(1) : null
+              setProgress(100, 'Complete!')
+              useCreateStore.getState().setLastGenTime(comfyTime ? `${comfyTime}s` : null)
+              const outputs = history.outputs ?? {}
+              let found = false
+              for (const nodeId of Object.keys(outputs)) {
+                // Same generic extraction as the heartbeat branch above.
+                const files: ComfyUIOutput[] = extractComfyOutputFiles(outputs[nodeId])
+                for (const file of files) {
+                  found = true
+                  addToGallery({
+                    id: uuid(), type: galleryTypeForFile(file.filename, mode),
+                    filename: file.filename, subfolder: file.subfolder ?? '', comfyType: file.type ?? 'output',
+                    prompt, negativePrompt, model: activeModel,
+                    modelType: mode === 'image' ? imageModelType : (videoModelsList.find(m => m.name === activeModel)?.type ?? 'wan'),
+                    seed: runSeed,
+                    steps, cfgScale, sampler, scheduler, width: outputWidth, height: outputHeight, batchSize,
+                    createdAt: Date.now(), builderUsed,
+                  })
+                }
+              }
+              if (!found) setError('Generation completed but no output was produced. Check ComfyUI logs.')
+              resolve()
+            }).catch(() => { resolve() })
+          }
+
           // `wsMark` was taken before the submit, so the frames ComfyUI sent
           // while this closure was being built are handed over first.
           const removeListener = comfyWS.on((event: ComfyWSEvent) => {
@@ -1389,6 +1433,7 @@ export function useCreate() {
                 const nodeId = event.data.node
                 if (nodeId === null) {
                   // null node means execution finished for this prompt
+                  finishFromHistory()
                   break
                 }
                 const classType = nodeClassMap.get(nodeId) || ''
@@ -1408,43 +1453,18 @@ export function useCreate() {
                 }
                 break
               }
+              case 'execution_success':
               case 'execution_complete': {
+                finishFromHistory()
+                break
+              }
+              case 'execution_interrupted': {
+                // Stopped inside ComfyUI (its own Cancel, or another client's
+                // /interrupt). Say so instead of waiting for the timeout.
                 if (completionHandled) break
                 completionHandled = true
                 cleanup()
-                st.setProgressPhase('complete')
-                setProgress(95, 'Fetching results...')
-                // Fetch history to get output files
-                getHistory(promptId).then(history => {
-                  if (!history) { setError('No history found after completion.'); resolve(); return }
-                  const messages = historyMessages(history)
-                  const startMsg = messages.find(([t]) => t === 'execution_start')
-                  const endMsg = messages.find(([t]) => t === 'execution_success')
-                  const comfyTime = startMsg?.[1]?.timestamp && endMsg?.[1]?.timestamp
-                    ? ((endMsg[1].timestamp - startMsg[1].timestamp) / 1000).toFixed(1) : null
-                  setProgress(100, 'Complete!')
-                  useCreateStore.getState().setLastGenTime(comfyTime ? `${comfyTime}s` : null)
-                  const outputs = history.outputs ?? {}
-                  let found = false
-                  for (const nodeId of Object.keys(outputs)) {
-                    // Same generic extraction as the heartbeat branch above.
-                    const files: ComfyUIOutput[] = extractComfyOutputFiles(outputs[nodeId])
-                    for (const file of files) {
-                      found = true
-                      addToGallery({
-                        id: uuid(), type: galleryTypeForFile(file.filename, mode),
-                        filename: file.filename, subfolder: file.subfolder ?? '', comfyType: file.type ?? 'output',
-                        prompt, negativePrompt, model: activeModel,
-                        modelType: mode === 'image' ? imageModelType : (videoModelsList.find(m => m.name === activeModel)?.type ?? 'wan'),
-                        seed: runSeed,
-                        steps, cfgScale, sampler, scheduler, width: outputWidth, height: outputHeight, batchSize,
-                        createdAt: Date.now(), builderUsed,
-                      })
-                    }
-                  }
-                  if (!found) setError('Generation completed but no output was produced. Check ComfyUI logs.')
-                  resolve()
-                }).catch(() => { resolve() })
+                reject(new Error('The render was interrupted in ComfyUI.'))
                 break
               }
               case 'execution_error': {
