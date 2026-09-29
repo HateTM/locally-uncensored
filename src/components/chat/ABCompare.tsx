@@ -105,8 +105,9 @@ export function ABCompare() {
             <span className="t-micro font-medium text-red-400">{modelA || 'Select Model A'}</span>
             {statsA && (
               <div className="flex items-center gap-2 text-[0.5rem] text-gray-500 lu-hud-num">
-                <span className="flex items-center gap-0.5"><Zap size={8} />{statsA.tokensPerSec.toFixed(1)} t/s</span>
-                <span className="flex items-center gap-0.5"><Clock size={8} />{(statsA.timeMs / 1000).toFixed(1)}s</span>
+                <span className="flex items-center gap-0.5" title={statsA.source === 'server' ? 'Generation speed reported by the backend' : 'Estimated from the first to the last chunk, model load left out'}><Zap size={8} />{statsA.source === 'server' ? '' : '≈'}{statsA.tokensPerSec.toFixed(1)} t/s</span>
+                <span className="flex items-center gap-0.5" title="Whole answer, model load included"><Clock size={8} />{(statsA.timeMs / 1000).toFixed(1)}s</span>
+                {statsA.firstTokenMs !== undefined && <span className="flex items-center gap-0.5" title="Wait before the first word: model load plus prompt processing">first {(statsA.firstTokenMs / 1000).toFixed(1)}s</span>}
                 <span className="flex items-center gap-0.5"><Hash size={8} />{statsA.tokens}</span>
               </div>
             )}
@@ -130,8 +131,9 @@ export function ABCompare() {
             <span className="t-micro font-medium text-blue-400">{modelB || 'Select Model B'}</span>
             {statsB && (
               <div className="flex items-center gap-2 text-[0.5rem] text-gray-500 lu-hud-num">
-                <span className="flex items-center gap-0.5"><Zap size={8} />{statsB.tokensPerSec.toFixed(1)} t/s</span>
-                <span className="flex items-center gap-0.5"><Clock size={8} />{(statsB.timeMs / 1000).toFixed(1)}s</span>
+                <span className="flex items-center gap-0.5" title={statsB.source === 'server' ? 'Generation speed reported by the backend' : 'Estimated from the first to the last chunk, model load left out'}><Zap size={8} />{statsB.source === 'server' ? '' : '≈'}{statsB.tokensPerSec.toFixed(1)} t/s</span>
+                <span className="flex items-center gap-0.5" title="Whole answer, model load included"><Clock size={8} />{(statsB.timeMs / 1000).toFixed(1)}s</span>
+                {statsB.firstTokenMs !== undefined && <span className="flex items-center gap-0.5" title="Wait before the first word: model load plus prompt processing">first {(statsB.firstTokenMs / 1000).toFixed(1)}s</span>}
                 <span className="flex items-center gap-0.5"><Hash size={8} />{statsB.tokens}</span>
               </div>
             )}

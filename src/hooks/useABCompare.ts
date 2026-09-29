@@ -14,6 +14,7 @@ import { v4 as uuid } from 'uuid'
 import type { ChatMessage } from '../api/providers/types'
 import type { Message } from '../types/chat'
 import { createThinkStreamSplitter } from '../lib/hermes-stream'
+import { compareStats } from '../lib/compare-stats'
 import { settleThinking } from '../lib/thinking-stripper'
 import { isThinkingCompatible } from '../lib/model-compatibility'
 import { buildSamplingRequest } from '../lib/sampling'
@@ -125,12 +126,17 @@ export function useABCompare() {
     const thinkOptFor = (model: string): boolean | undefined =>
       isThinkingCompatible(model) ? settings.thinkingEnabled === true : undefined
 
-    // Stream Model A
-    abortA.current = new AbortController()
-    const streamA = async () => {
-      const startTime = Date.now()
+    // One side of the round. Both sides used to be two copies of this body.
+    const streamSide = async (side: 'A' | 'B', model: string, abort: AbortController) => {
+      const store = () => useCompareStore.getState()
+      const add = (text: string) => (side === 'A' ? store().addContentA(text) : store().addContentB(text))
+      const startedAt = Date.now()
+      let firstChunkAt: number | null = null
       let fullContent = ''
-      let tokenCount = 0
+      let chunks = 0
+      let evalCount: number | undefined
+      let evalDurationMs: number | undefined
+      let error = ''
       // The pane has no thinking block, so reasoning is never part of what
       // is being compared: it is split out of the live stream and the
       // end-of-turn settlement catches the pre-opened shape the splitter
@@ -139,67 +145,44 @@ export function useABCompare() {
       const show = (part: { prose: string }) => {
         if (!part.prose) return
         fullContent += part.prose
-        useCompareStore.getState().addContentA(part.prose)
+        add(part.prose)
       }
       try {
-        const { provider, modelId } = getProviderForModel(modelA)
+        const { provider, modelId } = getProviderForModel(model)
         const stream = provider.chatStream(modelId, sendMessages, {
-          ...opts, thinking: thinkOptFor(modelA), signal: abortA.current!.signal,
+          ...opts, thinking: thinkOptFor(model), signal: abort.signal,
         })
         for await (const chunk of stream) {
           if (chunk.content) {
-            tokenCount++
+            if (firstChunkAt === null) firstChunkAt = Date.now()
+            chunks++
             show(splitter.feed(chunk.content))
           }
+          if (chunk.evalCount) evalCount = chunk.evalCount
+          if (chunk.evalDurationMs) evalDurationMs = chunk.evalDurationMs
         }
         show(splitter.flush())
-      } catch { /* aborted or error */ }
+      } catch (e) {
+        // A Stop is not an error. Anything else was swallowed here before, and
+        // a side whose model was missing showed an empty answer with normal
+        // looking numbers (FINDINGS 17).
+        if (!abort.signal.aborted) error = e instanceof Error ? e.message : String(e)
+      }
       fullContent = settleThinking(fullContent, '', false).content
-      const elapsed = Date.now() - startTime
-      useCompareStore.getState().finishA(fullContent, {
-        tokens: tokenCount,
-        timeMs: elapsed,
-        tokensPerSec: elapsed > 0 ? (tokenCount / elapsed) * 1000 : 0,
-      })
+      if (error) {
+        const line = `Error: ${error}`
+        add(fullContent ? `\n\n${line}` : line)
+        fullContent = fullContent ? `${fullContent}\n\n${line}` : line
+      }
+      const stats = compareStats({ startedAt, firstChunkAt, endedAt: Date.now(), chunks, evalCount, evalDurationMs })
+      if (side === 'A') store().finishA(fullContent, stats)
+      else store().finishB(fullContent, stats)
     }
 
-    // Stream Model B
+    abortA.current = new AbortController()
     abortB.current = new AbortController()
-    const streamB = async () => {
-      const startTime = Date.now()
-      let fullContent = ''
-      let tokenCount = 0
-      // The pane has no thinking block, so reasoning is never part of what
-      // is being compared: it is split out of the live stream and the
-      // end-of-turn settlement catches the pre-opened shape the splitter
-      // cannot see coming.
-      const splitter = createThinkStreamSplitter()
-      const show = (part: { prose: string }) => {
-        if (!part.prose) return
-        fullContent += part.prose
-        useCompareStore.getState().addContentB(part.prose)
-      }
-      try {
-        const { provider, modelId } = getProviderForModel(modelB)
-        const stream = provider.chatStream(modelId, sendMessages, {
-          ...opts, thinking: thinkOptFor(modelB), signal: abortB.current!.signal,
-        })
-        for await (const chunk of stream) {
-          if (chunk.content) {
-            tokenCount++
-            show(splitter.feed(chunk.content))
-          }
-        }
-        show(splitter.flush())
-      } catch { /* aborted or error */ }
-      fullContent = settleThinking(fullContent, '', false).content
-      const elapsed = Date.now() - startTime
-      useCompareStore.getState().finishB(fullContent, {
-        tokens: tokenCount,
-        timeMs: elapsed,
-        tokensPerSec: elapsed > 0 ? (tokenCount / elapsed) * 1000 : 0,
-      })
-    }
+    const streamA = () => streamSide('A', modelA, abortA.current!)
+    const streamB = () => streamSide('B', modelB, abortB.current!)
 
     // Runde 5: the round holds the local lane whenever either side touches
     // it. Two models that BOTH resolve to local would otherwise fire at the
