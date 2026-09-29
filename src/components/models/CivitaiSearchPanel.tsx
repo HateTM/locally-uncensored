@@ -9,7 +9,8 @@
  */
 import { useEffect, useState } from 'react'
 import { Search, Loader2, ExternalLink, Download, CheckCircle } from 'lucide-react'
-import { searchCivitaiModels, startModelDownload, type CivitAIModelResult } from '../../api/discover'
+import { fetchCivitaiPopular, searchCivitaiModels, startModelDownload, type CivitAIModelResult } from '../../api/discover'
+import { civitaiFamily } from '../../lib/civitai-base-models'
 import { openExternal } from '../../api/backend'
 import { useDownloadStore } from '../../stores/downloadStore'
 import { rememberLoraHit } from '../../stores/loraInfoStore'
@@ -48,11 +49,29 @@ export function CivitaiSearchPanel({ modelType, title, placeholder, search = '',
   // diimmortalis described: empty list, no console output, looks like the
   // button did nothing.
   const [searched, setSearched] = useState(false)
+  // Before anything is searched the panel shows what is popular on CivitAI,
+  // with a family badge per row: what LU can run locally, and why not.
+  const [popular, setPopular] = useState<CivitAIModelResult[]>([])
+  const [period, setPeriod] = useState<'Week' | 'Month'>('Week')
+  const [compatibleOnly, setCompatibleOnly] = useState(true)
+  const [showAdult, setShowAdult] = useState(true)
   // CivitAI mirror host (#53), civitai.red for regions where .com is blocked.
   const civitaiHost = useWorkflowStore((s) => s.civitaiHost)
   const setCivitaiHost = useWorkflowStore((s) => s.setCivitaiHost)
   const downloads = useDownloadStore((s) => s.downloads)
   const dlStore = useDownloadStore
+
+  useEffect(() => {
+    let alive = true
+    const apiKey = useWorkflowStore.getState().civitaiApiKey || undefined
+    fetchCivitaiPopular(modelType, period, apiKey, civitaiHost).then((hits) => { if (alive) setPopular(hits) })
+    return () => { alive = false }
+  }, [modelType, period, civitaiHost])
+
+  const showing = searched ? results : popular
+  const visible = showing.filter((m) =>
+    (!compatibleOnly || civitaiFamily(m.baseModel).supported) && (showAdult || !m.nsfw))
+  const hiddenCount = showing.length - visible.length
 
   const runSearch = async (text: string = query) => {
     if (!text.trim()) return
@@ -81,6 +100,9 @@ export function CivitaiSearchPanel({ modelType, title, placeholder, search = '',
 
   const download = async (model: CivitAIModelResult) => {
     if (!model.downloadUrl || !model.filename || !model.subfolder) return
+    // A family LU cannot run downloads fine and then does nothing (a foreign
+    // LoRA loads with "lora key not loaded" and no effect), so it is not offered.
+    if (!civitaiFamily(model.baseModel).supported) return
     dlStore.getState().setMeta(model.filename, model.downloadUrl, model.subfolder)
     // A LoRA's trigger words go into every later prompt that uses it.
     if (model.subfolder === 'loras') rememberLoraHit(model)
@@ -133,9 +155,26 @@ export function CivitaiSearchPanel({ modelType, title, placeholder, search = '',
         </button>
       </div>
 
-      {results.length > 0 && (
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 t-micro text-gray-500">
+        <span className="font-semibold uppercase tracking-[0.12em]">{searched ? 'Search results' : `Popular this ${period.toLowerCase()}`}</span>
+        {!searched && (['Week', 'Month'] as const).map((p) => (
+          <button key={p} onClick={() => setPeriod(p)} className={period === p ? 'text-gray-900 dark:text-white' : 'hover:text-gray-700 dark:hover:text-gray-200'}>{p}</button>
+        ))}
+        <label className="flex items-center gap-1 cursor-pointer">
+          <input type="checkbox" checked={compatibleOnly} onChange={(e) => setCompatibleOnly(e.target.checked)} />
+          Runs in LU only
+        </label>
+        <label className="flex items-center gap-1 cursor-pointer">
+          <input type="checkbox" checked={showAdult} onChange={(e) => setShowAdult(e.target.checked)} />
+          Adult
+        </label>
+        {hiddenCount > 0 && <span>{hiddenCount} hidden by these filters</span>}
+      </div>
+
+      {visible.length > 0 && (
         <div className="space-y-2 max-h-[50vh] overflow-y-auto">
-          {results.map((model) => {
+          {visible.map((model) => {
+            const fam = civitaiFamily(model.baseModel)
             const dlState = model.filename ? downloads[model.filename] : null
             const isDl = dlState?.status === 'downloading' || dlState?.status === 'connecting'
             const isDone = dlState?.status === 'complete'
@@ -150,6 +189,12 @@ export function CivitaiSearchPanel({ modelType, title, placeholder, search = '',
                     <span className="text-sm font-medium text-gray-900 dark:text-white truncate">{model.name}</span>
                     {model.sizeGB && <span className="t-micro text-gray-400 flex-shrink-0">{model.sizeGB} GB</span>}
                   </div>
+                  <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
+                    {fam.supported
+                      ? <span className="t-micro px-1.5 py-0.5 rounded bg-green-100 dark:bg-green-500/15 text-green-700 dark:text-green-400">{fam.label}</span>
+                      : <span className="t-micro px-1.5 py-0.5 rounded bg-gray-100 dark:bg-white/5 text-gray-500" title={fam.reason}>Not supported: {model.baseModel ?? 'unknown base'}</span>}
+                    {model.nsfw && <span className="t-micro px-1.5 py-0.5 rounded bg-rose-100 dark:bg-rose-500/15 text-rose-700 dark:text-rose-400">Adult</span>}
+                  </div>
                   {model.description && <p className="t-micro text-gray-500 line-clamp-1 mt-0.5">{model.description}</p>}
                   {isDl && dlState && dlState.total > 0 && (
                     <div className="mt-1.5">
@@ -163,7 +208,7 @@ export function CivitaiSearchPanel({ modelType, title, placeholder, search = '',
                     <CheckCircle size={16} className="text-green-500" />
                   ) : isDl ? (
                     <Loader2 size={16} className="animate-spin text-gray-400" />
-                  ) : model.downloadUrl ? (
+                  ) : model.downloadUrl && fam.supported ? (
                     <button onClick={() => download(model)} className="p-2 rounded-lg bg-green-100 dark:bg-green-500/15 hover:bg-green-200 dark:hover:bg-green-500/25 text-green-700 dark:text-green-400 transition-colors" title="Download" aria-label="Download">
                       <Download size={14} />
                     </button>
