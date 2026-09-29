@@ -1679,6 +1679,15 @@ export function snapWanLength(frames: number): number {
  * (wan22 shares the plain Wan UMT5 encoder, component-registry.ts confirms
  * clipType: 'wan' for both wan and wan22).
  */
+/**
+ * The negative prompt Wan 2.2 ships with (Wan-Video/Wan2.2, also the ComfyUI
+ * Wan templates and the community Wan spaces): the model was tuned against it,
+ * so an empty negative leaves quality on the table. Used only when the caller
+ * gave none. Chinese on purpose, it is the text the encoder saw in training.
+ */
+export const WAN_DEFAULT_NEGATIVE =
+  '色调艳丽, 过曝, 静态, 细节模糊不清, 字幕, 风格, 作品, 画作, 画面, 静止, 整体发灰, 最差质量, 低质量, JPEG压缩残留, 丑陋的, 残缺的, 多余的手指, 画得不好的手部, 画得不好的脸部, 畸形的, 毁容的, 形态畸形的肢体, 手指融合, 静止不动的画面, 杂乱的背景, 三条腿, 背景人很多, 倒着走'
+
 async function buildWan22Workflow(params: VideoParams, seed: number, nodes: CategorizedNodes, allNodes: NodePresence): Promise<ComfyApiGraph> {
   const workflow: ComfyApiGraph = {}
   let n = 1
@@ -1704,7 +1713,7 @@ async function buildWan22Workflow(params: VideoParams, seed: number, nodes: Cate
   workflow[clipId] = { class_type: 'CLIPLoader', inputs: { clip_name: wan22Clip, type: 'wan', device: 'default' } }
   workflow[vaeId] = { class_type: 'VAELoader', inputs: { vae_name: wan22Vae } }
   workflow[posId] = { class_type: 'CLIPTextEncode', inputs: { text: params.prompt, clip: [clipId, 0] } }
-  workflow[negId] = { class_type: 'CLIPTextEncode', inputs: { text: params.negativePrompt || '', clip: [clipId, 0] } }
+  workflow[negId] = { class_type: 'CLIPTextEncode', inputs: { text: params.negativePrompt?.trim() || WAN_DEFAULT_NEGATIVE, clip: [clipId, 0] } }
 
   // Optional LoRA chain (D#80, game-master0): video LoRAs are model-only, so
   // patch the UNET with LoraLoaderModelOnly (no clip side) before the sampling

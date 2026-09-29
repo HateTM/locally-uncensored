@@ -8,7 +8,7 @@ import { log } from "../lib/logger"
 import { useWorkflowStore } from "../stores/workflowStore"
 import { waitForModelsVisible } from "../lib/bundle-install"
 import type { DownloadProgress } from "../types/downloads"
-import { asNumber, asRecordArray, asString, isRecord, prop, propPath } from "../types/json-guards"
+import { asNumber, asRecordArray, asString, asStringArray, isRecord, prop, propPath } from "../types/json-guards"
 import type { DiscoverModel, ModelBundle } from "./model-bundles"
 import { formatCount } from '../lib/formatters'
 import { BUILTIN_BACKEND_ID } from '../lib/onboarding-backend'
@@ -1780,6 +1780,10 @@ export interface CivitAIModelResult {
   stats?: { downloads: number; likes: number }
   creator?: string
   sourceUrl: string
+  /** The base model the latest version was trained for ("SDXL 1.0", "Flux.1 D"). */
+  baseModel?: string
+  /** Trigger words of the latest version, the tokens that switch a LoRA on. */
+  trainedWords?: string[]
 }
 
 export const CIVITAI_DEFAULT_HOST = 'civitai.com'
@@ -1824,6 +1828,131 @@ export function civitaiDescriptionToText(html: string): string {
     .trim()
 }
 
+/** One entry of CivitAI's /api/v1/models answer, as a search hit. */
+function civitaiItemToResult(
+  item: Record<string, unknown>,
+  type: 'Checkpoint' | 'LORA' | 'VAE' | 'TextualInversion',
+  host: string,
+): CivitAIModelResult {
+  const version = asRecordArray(prop(item, 'modelVersions'))[0]
+  const file = asRecordArray(prop(version, 'files'))[0]
+  const thumb = asString(propPath(asRecordArray(prop(version, 'images'))[0], 'url'))
+  const downloadUrl = asString(prop(version, 'downloadUrl')) ?? asString(prop(file, 'downloadUrl'))
+  const sizeKB = asNumber(prop(file, 'sizeKB')) ?? 0
+  const itemName = asString(prop(item, 'name'))
+  const itemId = asNumber(prop(item, 'id')) ?? 0
+  const stats = prop(item, 'stats')
+  const downloadCount = asNumber(prop(stats, 'downloadCount'))
+  const creator = asString(propPath(item, 'creator', 'username'))
+
+  // Determine subfolder based on model type
+  let subfolder = 'checkpoints'
+  if (type === 'LORA') subfolder = 'loras'
+  else if (type === 'VAE') subfolder = 'vae'
+  else if (type === 'TextualInversion') subfolder = 'embeddings'
+  // Check if it's a diffusion model (FLUX, Wan, etc.). Only for a
+  // checkpoint search: the name of a LORA, a VAE or an embedding says
+  // which base model it was trained against, not what kind of file it is,
+  // so "Flux Realism LoRA" used to be written into diffusion_models, where
+  // the LoRA loader does not look and the LoRA stack in Create could never
+  // offer it.
+  const name = (itemName ?? '').toLowerCase()
+  if (type === 'Checkpoint' && (name.includes('flux') || name.includes('wan') || name.includes('hunyuan'))) {
+    subfolder = 'diffusion_models'
+  }
+
+  const filename = asString(prop(file, 'name'))
+    || `${(itemName ?? '').replace(/[^a-zA-Z0-9._-]/g, '_')}.safetensors`
+
+  const descParts: string[] = []
+  const rawDesc = civitaiDescriptionToText(asString(prop(item, 'description')) ?? '')
+  if (rawDesc) descParts.push(rawDesc.slice(0, 120))
+  if (downloadCount) descParts.push(`${formatCount(downloadCount)} downloads`)
+  if (creator) descParts.push(`by ${creator}`)
+
+  const baseModel = asString(prop(version, 'baseModel'))
+  const trainedWords = asStringArray(prop(version, 'trainedWords')).filter((w) => !!w.trim())
+
+  return {
+    id: itemId,
+    name: itemName || `Model #${itemId}`,
+    description: descParts.join(' · '),
+    type: type,
+    thumbnailUrl: thumb,
+    downloadUrl: civitaiHostSwap(downloadUrl, host),
+    filename,
+    subfolder,
+    sizeGB: sizeKB > 0 ? Math.round(sizeKB / 1024 / 1024 * 10) / 10 : undefined,
+    stats: isRecord(stats)
+      ? { downloads: downloadCount ?? 0, likes: asNumber(prop(stats, 'thumbsUpCount')) ?? 0 }
+      : undefined,
+    creator,
+    sourceUrl: `https://${host}/models/${itemId}`,
+    ...(baseModel ? { baseModel } : {}),
+    ...(trainedWords.length ? { trainedWords } : {}),
+  }
+}
+
+/**
+ * One CivitAI model by id (the number in civitai.com/models/<id>), mapped
+ * exactly like a search hit, or null when CivitAI does not answer with one.
+ */
+export async function getCivitaiModel(
+  id: number,
+  type: 'Checkpoint' | 'LORA' | 'VAE' | 'TextualInversion',
+  apiKey?: string,
+  host: string = CIVITAI_DEFAULT_HOST,
+): Promise<CivitAIModelResult | null> {
+  try {
+    const text = await fetchExternal(`https://${host}/api/v1/models/${Math.floor(id)}`, apiKey ?? null)
+    const data: unknown = JSON.parse(text)
+    return isRecord(data) && asNumber(prop(data, 'id')) ? civitaiItemToResult(data, type, host) : null
+  } catch (err) {
+    log.warn('[discover] CivitAI model lookup failed', { id, err })
+    return null
+  }
+}
+
+/**
+ * One CivitAI model VERSION by id (what an image's metadata links), mapped
+ * like a search hit so it downloads through the same path. `files` prefers the
+ * primary file: a version can also carry training data or a second format.
+ */
+export async function getCivitaiModelVersion(
+  versionId: number,
+  apiKey?: string,
+  host: string = CIVITAI_DEFAULT_HOST,
+): Promise<CivitAIModelResult | null> {
+  try {
+    const text = await fetchExternal(`https://${host}/api/v1/model-versions/${Math.floor(versionId)}`, apiKey ?? null)
+    const v: unknown = JSON.parse(text)
+    if (!isRecord(v) || !asNumber(prop(v, 'id'))) return null
+    const files = asRecordArray(prop(v, 'files'))
+    const file = files.find((f) => prop(f, 'primary') === true) ?? files[0]
+    const type = asString(propPath(v, 'model', 'type')) ?? ''
+    const modelId = asNumber(prop(v, 'modelId')) ?? 0
+    const sizeKB = asNumber(prop(file, 'sizeKB')) ?? 0
+    const baseModel = asString(prop(v, 'baseModel'))
+    const trainedWords = asStringArray(prop(v, 'trainedWords')).filter((w) => !!w.trim())
+    return {
+      id: modelId,
+      name: asString(propPath(v, 'model', 'name')) ?? asString(prop(v, 'name')) ?? `Version #${versionId}`,
+      description: '',
+      type,
+      downloadUrl: civitaiHostSwap(asString(prop(file, 'downloadUrl')) ?? asString(prop(v, 'downloadUrl')), host),
+      filename: asString(prop(file, 'name')),
+      subfolder: /lora|locon|dora/i.test(type) ? 'loras' : undefined,
+      sizeGB: sizeKB > 0 ? Math.round(sizeKB / 1024 / 1024 * 10) / 10 : undefined,
+      sourceUrl: `https://${host}/models/${modelId}?modelVersionId=${Math.floor(versionId)}`,
+      ...(baseModel ? { baseModel } : {}),
+      ...(trainedWords.length ? { trainedWords } : {}),
+    }
+  } catch (err) {
+    log.warn('[discover] CivitAI version lookup failed', { versionId, err })
+    return null
+  }
+}
+
 export async function searchCivitaiModels(
   query: string,
   type: 'Checkpoint' | 'LORA' | 'VAE' | 'TextualInversion' = 'Checkpoint',
@@ -1856,60 +1985,7 @@ export async function searchCivitaiModels(
     // the catch below.
     const items = asRecordArray(prop(data, 'items'))
 
-    return items.map((item) => {
-      const version = asRecordArray(prop(item, 'modelVersions'))[0]
-      const file = asRecordArray(prop(version, 'files'))[0]
-      const thumb = asString(propPath(asRecordArray(prop(version, 'images'))[0], 'url'))
-      const downloadUrl = asString(prop(version, 'downloadUrl')) ?? asString(prop(file, 'downloadUrl'))
-      const sizeKB = asNumber(prop(file, 'sizeKB')) ?? 0
-      const itemName = asString(prop(item, 'name'))
-      const itemId = asNumber(prop(item, 'id')) ?? 0
-      const stats = prop(item, 'stats')
-      const downloadCount = asNumber(prop(stats, 'downloadCount'))
-      const creator = asString(propPath(item, 'creator', 'username'))
-
-      // Determine subfolder based on model type
-      let subfolder = 'checkpoints'
-      if (type === 'LORA') subfolder = 'loras'
-      else if (type === 'VAE') subfolder = 'vae'
-      else if (type === 'TextualInversion') subfolder = 'embeddings'
-      // Check if it's a diffusion model (FLUX, Wan, etc.). Only for a
-      // checkpoint search: the name of a LORA, a VAE or an embedding says
-      // which base model it was trained against, not what kind of file it is,
-      // so "Flux Realism LoRA" used to be written into diffusion_models, where
-      // the LoRA loader does not look and the LoRA stack in Create could never
-      // offer it.
-      const name = (itemName ?? '').toLowerCase()
-      if (type === 'Checkpoint' && (name.includes('flux') || name.includes('wan') || name.includes('hunyuan'))) {
-        subfolder = 'diffusion_models'
-      }
-
-      const filename = asString(prop(file, 'name'))
-        || `${(itemName ?? '').replace(/[^a-zA-Z0-9._-]/g, '_')}.safetensors`
-
-      const descParts: string[] = []
-      const rawDesc = civitaiDescriptionToText(asString(prop(item, 'description')) ?? '')
-      if (rawDesc) descParts.push(rawDesc.slice(0, 120))
-      if (downloadCount) descParts.push(`${formatCount(downloadCount)} downloads`)
-      if (creator) descParts.push(`by ${creator}`)
-
-      return {
-        id: itemId,
-        name: itemName || `Model #${itemId}`,
-        description: descParts.join(' · '),
-        type: type,
-        thumbnailUrl: thumb,
-        downloadUrl: civitaiHostSwap(downloadUrl, host),
-        filename,
-        subfolder,
-        sizeGB: sizeKB > 0 ? Math.round(sizeKB / 1024 / 1024 * 10) / 10 : undefined,
-        stats: isRecord(stats)
-          ? { downloads: downloadCount ?? 0, likes: asNumber(prop(stats, 'thumbsUpCount')) ?? 0 }
-          : undefined,
-        creator,
-        sourceUrl: `https://${host}/models/${itemId}`,
-      }
-    })
+    return items.map((item) => civitaiItemToResult(item, type, host))
   } catch (err) {
     log.warn('[discover] CivitAI model search failed', { err })
     return []

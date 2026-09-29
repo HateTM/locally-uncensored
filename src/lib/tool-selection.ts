@@ -37,8 +37,15 @@ const MEDIA_KEYWORDS = [
   'image', 'picture', 'photo', 'generate image', 'draw', 'create image', 'bild', 'foto', 'zeichne',
   'logo', 'icon', 'thumbnail', 'banner', 'illustration', 'avatar', 'artwork', 'graphic', 'grafik', 'poster',
   'video', 'animate', 'animation', 'clip', 'mp4', 'make a video', 'turn into a video', 'movie', 'gif', 'animiere',
+  // Russian. Stems, because the match is a substring test and Russian
+  // inflects: 'картин' covers картинка/картинку/картину, 'рису' covers
+  // рисуй/нарисуй/рисунок. No bare 'арт' (старт, карта).
+  'картин', 'изображени', 'фото', 'рису', 'сгенерир', 'генерац', 'логотип', 'иконк', 'постер', 'баннер',
+  'иллюстрац', 'аватар', 'видео', 'анимир', 'анимац', 'клип', 'ролик',
 ]
-const WORKFLOW_KEYWORDS = ['workflow', 'run workflow', 'automate']
+/** LoRA and model housekeeping: media_list, lora_download, lora_prompt. */
+const LORA_KEYWORDS = ['lora', 'лора', 'лору', 'лоры', 'civitai', 'checkpoint', 'sampler', 'scheduler', 'сэмплер', 'trigger word', 'триггер']
+const WORKFLOW_KEYWORDS = ['workflow', 'run workflow', 'automate', 'воркфлоу', 'пресет', 'preset']
 
 // A6: the two remaining ride-alongs. pr_resume only ever fires on a PR link or
 // a "continue this PR", delegate_task only on an explicit fan-out, and both
@@ -92,7 +99,13 @@ export const CREATE_TOOLS = ['image_generate', 'video_generate', 'run_workflow']
 const GATE_KEYWORDS: Record<string, readonly string[]> = {
   image_generate: MEDIA_KEYWORDS,
   video_generate: MEDIA_KEYWORDS,
+  // The media housekeeping tools ride with any creative turn (picking a model
+  // or a LoRA is part of drawing), and with a turn that names a LoRA.
+  media_list: [...MEDIA_KEYWORDS, ...LORA_KEYWORDS],
+  lora_download: [...MEDIA_KEYWORDS, ...LORA_KEYWORDS],
+  lora_prompt: [...MEDIA_KEYWORDS, ...LORA_KEYWORDS],
   run_workflow: WORKFLOW_KEYWORDS,
+  workflow_create: WORKFLOW_KEYWORDS,
   pr_resume: PR_KEYWORDS,
   delegate_task: DELEGATE_KEYWORDS,
   // Dieselben Woerter wie delegate_task, und das ist keine Sparsamkeit,
@@ -197,11 +210,15 @@ const TOOL_GROUPS: ToolGroup[] = [
   },
   {
     keywords: MEDIA_KEYWORDS,
-    tools: ['image_generate', 'video_generate'],
+    tools: ['image_generate', 'video_generate', 'media_list'],
+  },
+  {
+    keywords: LORA_KEYWORDS,
+    tools: ['media_list', 'lora_download', 'lora_prompt'],
   },
   {
     keywords: WORKFLOW_KEYWORDS,
-    tools: ['run_workflow'],
+    tools: ['run_workflow', 'workflow_create'],
   },
 ]
 

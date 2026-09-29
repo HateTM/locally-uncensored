@@ -25,7 +25,7 @@ const offeredDefNames = AGENT_TOOL_DEFS
 // ── AGENT_TOOL_DEFS ─────────────────────────────────────────────
 
 describe('AGENT_TOOL_DEFS', () => {
-  it('contains exactly 17 tool definitions', () => {
+  it('contains exactly 21 tool definitions', () => {
     // 2.6.6 tool merge (plan section E): the twelve typed shell wrappers,
     // system_info, process_list and get_current_time folded into
     // shell_execute plus the environment block in the system prompt, so the
@@ -37,7 +37,14 @@ describe('AGENT_TOOL_DEFS', () => {
     // Katalogtext in JEDEM Prompt und eine Wahl mehr, die ein kleines Modell
     // treffen muss. Wer hier hochzaehlt, soll begruenden, warum sein Fall
     // nicht in ein vorhandenes Werkzeug passt.
-    expect(AGENT_TOOL_DEFS).toHaveLength(17)
+    //
+    // +4 for the media agent (media_list, lora_download, lora_prompt,
+    // workflow_create). Why not folded into image_generate: listing is
+    // read-only and must run unasked (auto), downloading and saving must ask
+    // (confirm), and permission is per tool, so one tool cannot be both. All
+    // four sit behind the create gate (GATE_KEYWORDS), so a coding step never
+    // carries them; only a creative or LoRA turn pays their catalogue text.
+    expect(AGENT_TOOL_DEFS).toHaveLength(21)
   })
 
   const expectedTools = [
@@ -58,6 +65,10 @@ describe('AGENT_TOOL_DEFS', () => {
     'run_workflow',
     'screenshot',
     'delegate_task',
+    'media_list',
+    'lora_download',
+    'lora_prompt',
+    'workflow_create',
   ]
 
   it.each(expectedTools)('includes the "%s" tool', (name) => {
@@ -88,8 +99,9 @@ describe('AGENT_TOOL_DEFS', () => {
     // Werkzeug, das wirklich etwas STARTET, ist delegate_task, und das bleibt
     // unter 'confirm'. Eine Rueckfrage fuer "zaehl deine eigenen Aufgaben auf"
     // waere Zeremonie, und Zeremonie stumpft die echten Rueckfragen ab.
+    // media_list only lists what is installed and searches CivitAI.
     expect(autoNames).toEqual([
-      'check_tasks', 'message_agent', 'todo_write', 'web_fetch', 'web_search',
+      'check_tasks', 'media_list', 'message_agent', 'todo_write', 'web_fetch', 'web_search',
     ])
   })
 
@@ -103,9 +115,9 @@ describe('AGENT_TOOL_DEFS', () => {
     expect(confirmNames).toEqual([
       'delegate_task',
       'file_edit', 'file_list', 'file_read', 'file_search',
-      'file_write', 'image_generate', 'pr_resume',
+      'file_write', 'image_generate', 'lora_download', 'lora_prompt', 'pr_resume',
       'run_workflow', 'screenshot', 'shell_execute',
-      'video_generate',
+      'video_generate', 'workflow_create',
     ])
   })
 })

@@ -12,6 +12,7 @@ import { Search, Loader2, ExternalLink, Download, CheckCircle } from 'lucide-rea
 import { searchCivitaiModels, startModelDownload, type CivitAIModelResult } from '../../api/discover'
 import { openExternal } from '../../api/backend'
 import { useDownloadStore } from '../../stores/downloadStore'
+import { rememberLoraHit } from '../../stores/loraInfoStore'
 import { useWorkflowStore } from '../../stores/workflowStore'
 import { CivitaiResultsSkeleton } from '../layout/ViewSkeletons'
 import { GlassCard } from '../ui/GlassCard'
@@ -81,6 +82,8 @@ export function CivitaiSearchPanel({ modelType, title, placeholder, search = '',
   const download = async (model: CivitAIModelResult) => {
     if (!model.downloadUrl || !model.filename || !model.subfolder) return
     dlStore.getState().setMeta(model.filename, model.downloadUrl, model.subfolder)
+    // A LoRA's trigger words go into every later prompt that uses it.
+    if (model.subfolder === 'loras') rememberLoraHit(model)
     await startModelDownload(model.downloadUrl, model.subfolder, model.filename)
     dlStore.getState().startPolling()
   }

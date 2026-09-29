@@ -32,7 +32,7 @@ export const STORE_KEYS = [
   'create-store', 'locally-uncensored-codex',
   'locally-uncensored-permissions', 'locally-uncensored-mcp-servers',
   'locally-uncensored-agent-mode', 'locally-uncensored-memory',
-  'locally-uncensored-agent-workflows', 'locally-uncensored-agent',
+  'locally-uncensored-agent-workflows', 'locally-uncensored-agent', 'locally-uncensored-lora-info',
   'locally-uncensored-voice', 'lu-benchmark-store', 'lu-update-checker-v2',
   'rag-store', 'workflow-store', 'lu-cloud-catalog',
   'lu_cloud_notice', 'lu_comfy_notice', 'locally-uncensored-model-health',
