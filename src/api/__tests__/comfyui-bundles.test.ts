@@ -212,17 +212,21 @@ describe('Shared File Deduplication', () => {
   })
 
   it('shared files use same URL across bundles', () => {
-    // clip_l.safetensors is used by HunyuanVideo and FramePack
-    const clipLBundles = bundles.filter(b =>
-      b.files.some(f => f.filename === 'clip_l.safetensors')
-    )
-    expect(clipLBundles.length).toBeGreaterThanOrEqual(2)
-
-    const urls = clipLBundles.flatMap(b =>
-      b.files.filter(f => f.filename === 'clip_l.safetensors').map(f => f.downloadUrl)
-    )
-    // All URLs for the same file should be identical
-    expect(new Set(urls).size).toBe(1)
+    // Was pinned to clip_l.safetensors (HunyuanVideo + FramePack). HunyuanVideo
+    // 1.5 never read CLIP-L and ships byT5 now, so the rule is checked for
+    // every file that more than one bundle carries.
+    const urlsByFile = new Map<string, Set<string>>()
+    for (const b of bundles) {
+      for (const f of b.files) {
+        if (!f.filename || !f.downloadUrl) continue
+        const set = urlsByFile.get(f.filename) ?? new Set<string>()
+        set.add(f.downloadUrl)
+        urlsByFile.set(f.filename, set)
+      }
+    }
+    const shared = [...urlsByFile.entries()].filter(([name]) => bundles.filter((b) => b.files.some((f) => f.filename === name)).length >= 2)
+    expect(shared.length).toBeGreaterThan(0)
+    for (const [name, urls] of shared) expect([name, urls.size]).toEqual([name, 1])
   })
 
   it('no CogVideoX files are offered anywhere any more', () => {

@@ -22,7 +22,7 @@ const RUNTIME_ONLY_KEYS: readonly string[] = [
   'cloudFrames', 'cloudFps',
 ]
 import type { ModelType, ClassifiedModel } from '../api/comfyui'
-import { classifyModel, hidreamSampling, isLightningMerge, LIGHTNING_SAMPLING } from '../api/comfyui'
+import { classifyModel, hidreamSampling, isLightningMerge, LIGHTNING_SAMPLING, isCfgDistilledHunyuan15, HUNYUAN15_DISTILLED_SAMPLING } from '../api/comfyui'
 import type { HiresUpscaleMethod } from '../api/hires-fix'
 import { releaseVideoBlobUrl } from '../api/mlx-video'
 import { isMlxImageHost } from '../api/mlx-image'
@@ -696,10 +696,13 @@ export const useCreateStore = create<CreateState>()(
         // Lightning/rapid merges are distilled to few steps at cfg 1 — the
         // architecture defaults (30 steps, cfg 5+) render them to mush.
         const lightning = isLightningMerge(model)
+        // The catalogue's HunyuanVideo 1.5 is CFG-distilled: cfg 1, not 6.
+        const distilled = isCfgDistilledHunyuan15(model)
+        const fast = lightning ? LIGHTNING_SAMPLING : distilled ? HUNYUAN15_DISTILLED_SAMPLING : null
         set({
           videoModel: model,
-          steps: lightning ? LIGHTNING_SAMPLING.steps : defaults.steps,
-          cfgScale: lightning ? LIGHTNING_SAMPLING.cfg : defaults.cfgScale,
+          steps: fast ? fast.steps : defaults.steps,
+          cfgScale: fast ? fast.cfg : defaults.cfgScale,
           sampler: defaults.sampler, scheduler: defaults.scheduler,
           width: defaults.width, height: defaults.height,
           ...(defaults.frames ? { frames: defaults.frames } : {}),

@@ -1,5 +1,6 @@
 import {
   classifyModel, findMatchingVAE, findMatchingCLIP, findFluxCLIPPair,
+  isHunyuanVideo15, findHunyuan15Encoders,
   findMatchingAudioEncoder, findMatchingClipVision, findFramePackCLIPPair,
 } from './comfyui'
 import type { ModelType, GenerateParams, VideoParams } from './comfyui'
@@ -109,6 +110,8 @@ export function determineStrategy(
   isVideo: boolean,
   nodes: CategorizedNodes,
   models: AvailableModels,
+  /** The model file, where the family alone does not decide the graph. */
+  modelName = '',
 ): StrategyResult {
   const hasUNET = nodes.loaders.includes('UNETLoader')
   const hasCheckpoint = nodes.loaders.includes('CheckpointLoaderSimple')
@@ -211,6 +214,12 @@ export function determineStrategy(
 
   // Wan / Hunyuan → UNET-based with video latent
   if (modelType === 'wan' || modelType === 'hunyuan') {
+    // HunyuanVideo 1 has no correct graph here (its dual CLIP-L + LLaVA
+    // encoder and 16-channel latent are not wired); running it through the
+    // Wan path rendered noise. Only 1.5, which the catalogue ships, is built.
+    if (modelType === 'hunyuan' && modelName && !isHunyuanVideo15(modelName)) {
+      return { strategy: 'unavailable', reason: 'HunyuanVideo 1 is not supported in this build. Use HunyuanVideo 1.5 from the Model Manager, or Wan, LTX or SVD.' }
+    }
     if (hasUNET && hasCLIPLoader && hasVAELoader) {
       return { strategy: 'unet_video', reason: `${modelType} model → UNETLoader + video latent` }
     }
@@ -574,7 +583,7 @@ export async function buildDynamicWorkflow(
     return buildRemoveBgWorkflow(gp, rmbgMeta)
   }
 
-  const determined = determineStrategy(type, isVideo, nodes, models)
+  const determined = determineStrategy(type, isVideo, nodes, models, params.model)
   const { reason, installHint } = determined
   let strategy = determined.strategy
   log.info(`[dynamic-workflow] Strategy: ${strategy} (${reason})`)
@@ -786,6 +795,11 @@ export async function buildDynamicWorkflow(
 
     let clip = ''
     let fluxPair: { t5: string; clipL: string } | null = null
+    // HunyuanVideo 1.5 reads two encoders through DualCLIPLoader
+    // (`hunyuan_video_15`, its template). The single CLIPLoader it got before,
+    // with type 'wan', routed Qwen2.5-VL to the Qwen-Image encoder and left
+    // byT5 out: rendered on 29.09.2026, the clip was coloured noise.
+    let hvPair: { qwen: string; byt5: string } | null = null
     if (skipClipLookup) {
       // nothing to look up
     } else if (useDualFluxClip) {
@@ -797,6 +811,13 @@ export async function buildDynamicWorkflow(
           throw new WorkflowUnavailableError(message, strategy, undefined, { missing: registrySpecsNamedIn(type, message) })
         }
         clip = ''
+      }
+    } else if (type === 'hunyuan') {
+      try {
+        hvPair = await findHunyuan15Encoders()
+      } catch (clipErr) {
+        const message = clipErr instanceof Error ? clipErr.message : 'Required text encoder not found in ComfyUI.'
+        throw new WorkflowUnavailableError(message, strategy, undefined, { missing: registrySpecsNamedIn(type, message) })
       }
     } else {
       try {
@@ -825,16 +846,21 @@ export async function buildDynamicWorkflow(
         }
       }
     }
-    const clipFromFile = !clip && !fluxPair
+    const clipFromFile = !clip && !fluxPair && !hvPair
     const vaeFromFile = needsVAELoader && !vae
 
-    if (!useDualFluxClip && !clipFromFile) assertClipTypeKnown(clipType, type, strategy, allNodes)
+    if (!useDualFluxClip && !hvPair && !clipFromFile) assertClipTypeKnown(clipType, type, strategy, allNodes)
     if (fromCheckpoint) {
       workflow[unetId] = { class_type: 'CheckpointLoaderSimple', inputs: { ckpt_name: params.model } }
     } else {
       addUnetLoader(workflow, unetId, params.model, allNodes)
     }
-    if (!clipFromFile) workflow[clipId] = useDualFluxClip && fluxPair
+    if (!clipFromFile) workflow[clipId] = hvPair
+      ? {
+          class_type: 'DualCLIPLoader',
+          inputs: { clip_name1: hvPair.qwen, clip_name2: hvPair.byt5, type: 'hunyuan_video_15', device: 'default' },
+        }
+      : useDualFluxClip && fluxPair
       ? {
           class_type: 'DualCLIPLoader',
           inputs: { clip_name1: fluxPair.t5, clip_name2: fluxPair.clipL, type: 'flux' },
@@ -1117,8 +1143,18 @@ export async function buildDynamicWorkflow(
 
   const latentId = String(n++)
 
-  if (strategy === 'unet_video') {
-    // Wan/Hunyuan video latent
+  if (strategy === 'unet_video' && type === 'hunyuan') {
+    // HunyuanVideo 1.5: 32 channels at a sixteenth. EmptyHunyuanLatentVideo
+    // writes 16 channels at an eighth, the HunyuanVideo 1 shape.
+    if (!allNodes['EmptyHunyuanVideo15Latent']) {
+      throw new WorkflowUnavailableError('HunyuanVideo 1.5 needs the EmptyHunyuanVideo15Latent node. Update ComfyUI, then try again.', strategy, undefined, { needsComfyUpdate: true })
+    }
+    workflow[latentId] = {
+      class_type: 'EmptyHunyuanVideo15Latent',
+      inputs: { width: params.width, height: params.height, length: videoParams.frames, batch_size: 1 },
+    }
+  } else if (strategy === 'unet_video') {
+    // Wan video latent
     const latentNode = nodes.latentInit.includes('EmptyHunyuanLatentVideo')
       ? 'EmptyHunyuanLatentVideo'
       : 'EmptyLatentImage'
@@ -1318,7 +1354,7 @@ export async function buildDynamicWorkflow(
     const i2vNode =
       strategy === 'unet_ltx' ? 'LTXVImgToVideo'
       : strategy === 'unet_cosmos' ? 'CosmosImageToVideoLatent'
-      : type === 'hunyuan' ? 'HunyuanImageToVideo'
+      : type === 'hunyuan' ? 'HunyuanVideo15ImageToVideo'
       : 'WanImageToVideo'
     const meta = allNodes[i2vNode]
     if (!meta) {
@@ -1398,6 +1434,12 @@ export async function buildDynamicWorkflow(
   if (auraShift !== null && allNodes['ModelSamplingAuraFlow']) {
     const id = String(n++)
     workflow[id] = { class_type: 'ModelSamplingAuraFlow', inputs: { model: [samplerModelId, 0], shift: auraShift } }
+    samplerModelId = id
+  }
+  // HunyuanVideo 1.5 samples at shift 7 (its t2v template).
+  if (strategy === 'unet_video' && type === 'hunyuan' && allNodes['ModelSamplingSD3']) {
+    const id = String(n++)
+    workflow[id] = { class_type: 'ModelSamplingSD3', inputs: { model: [samplerModelId, 0], shift: 7 } }
     samplerModelId = id
   }
   if (strategy === 'unet_hidream' && allNodes['ModelSamplingSD3']) {

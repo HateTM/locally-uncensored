@@ -742,7 +742,7 @@ export function getVideoBundles(): ModelBundle[] {
       tags: ['HunyuanVideo 1.5', '480p', 'Quality'],
       uncensored: true,
       verified: true,
-      totalSizeGB: 18.8,
+      totalSizeGB: 19.3,
       vramRequired: '12+ GB',
       workflow: 'hunyuan',
       url: 'https://huggingface.co/Comfy-Org/HunyuanVideo_1.5_repackaged',
@@ -769,11 +769,14 @@ export function getVideoBundles(): ModelBundle[] {
           filename: 'qwen_2.5_vl_7b_fp8_scaled.safetensors', subfolder: 'text_encoders', sizeGB: 8.8,
         },
         {
-          name: 'CLIP-L Text Encoder',
-          description: 'Required secondary text encoder.',
-          pulls: '', tags: ['Text Encoder', '240 MB'], updated: '',
-          downloadUrl: 'https://huggingface.co/Comfy-Org/HunyuanVideo_repackaged/resolve/main/split_files/text_encoders/clip_l.safetensors',
-          filename: 'clip_l.safetensors', subfolder: 'text_encoders', sizeGB: 0.2,
+          // HunyuanVideo 1.5 encodes with Qwen2.5-VL plus the byT5 glyph
+          // encoder (DualCLIPLoader, hunyuan_video_15). CLIP-L belonged to
+          // HunyuanVideo 1 and was never read by the 1.5 graph.
+          name: 'byT5 Glyph Text Encoder',
+          description: 'Second text encoder HunyuanVideo 1.5 reads alongside Qwen 2.5 VL.',
+          pulls: '', tags: ['Text Encoder', '420 MB'], updated: '',
+          downloadUrl: 'https://huggingface.co/Comfy-Org/HunyuanVideo_1.5_repackaged/resolve/main/split_files/text_encoders/byt5_small_glyphxl_fp16.safetensors',
+          filename: 'byt5_small_glyphxl_fp16.safetensors', subfolder: 'text_encoders', sizeGB: 0.44,
         },
       ],
     },

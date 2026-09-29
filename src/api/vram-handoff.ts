@@ -78,6 +78,8 @@ import {
   hidreamSampling,
   isLightningMerge,
   LIGHTNING_SAMPLING,
+  isCfgDistilledHunyuan15,
+  HUNYUAN15_DISTILLED_SAMPLING,
   isPromptQueued,
   type VideoBackend,
   type ModelType,
@@ -1543,10 +1545,12 @@ async function generateVideo(
     if (tFrameRej) return tFrameRej
     const t2vMax = caps?.frameRange?.max ?? Math.max(defaults.frames, 161)
     const { frames, fps } = resolveClip(args, { defFps: defaults.fps, defFrames: defaults.frames, maxFrames: t2vMax })
-    const lightning = isLightningMerge(model)
+    const fast = isLightningMerge(model) ? LIGHTNING_SAMPLING
+      : isCfgDistilledHunyuan15(model) ? HUNYUAN15_DISTILLED_SAMPLING
+      : null
     const tun = resolveTunables(args, caps, {
-      steps: lightning ? LIGHTNING_SAMPLING.steps : defaults.steps,
-      cfg: lightning ? LIGHTNING_SAMPLING.cfg : defaults.cfg,
+      steps: fast ? fast.steps : defaults.steps,
+      cfg: fast ? fast.cfg : defaults.cfg,
       sampler: defaults.sampler, scheduler: defaults.scheduler,
     })
     if (tun.reject) return `Cannot generate: ${tun.reject}`
