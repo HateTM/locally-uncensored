@@ -7,7 +7,7 @@ proposal, not a defect).
 Verified = checked against the code or by running something. Everything else
 says what it rests on.
 
-## Status (2026-09-29, master `a51fa836`)
+## Status (2026-09-29, master `67210c2`)
 
 | Section | Status | Closed by |
 |---|---|---|
@@ -21,6 +21,19 @@ says what it rests on.
 | 25. B: CivitAI `files[0]` zip | **done** | #5 |
 | 25. A: Rapid AIO / lightning defaults (agent path) | **done** | #6 |
 | 25. B/C: LoRA family mismatch (badges, no download, triggers skipped at render) | **done** | #5, #6 |
+| 9. RAG: nomic-embed-text task prefixes | **done** | #20 |
+| 16. Voice: Russian Piper voices, Whisper size selectable, CUDA when available | **done** | #21 |
+| 17. A/B Compare timings and errors | **done** | #15 |
+| 20. Mobile double-escaped code blocks | **done** | #14 |
+| 21.1 Create waits for a 10 s poll instead of the completion event | **done** | #12 |
+| 22. Edit mask dropped on three paths | **done** | #13 |
+| 23. HunyuanVideo 1.5 graph | **done** | #18 |
+| 23. LTX 2.3 and Wan 2.2 A14B on their official graphs | **done** | #19 |
+| 23. ACE-Step 1.5 sampling (AuraFlow shift) | **done** | #17 |
+| 23. Core `SaveVideo` (mp4 without VHS) and core `RemoveBackground` (BiRefNet instead of RMBG) | **done** | #23 |
+| Minor: LoRA download poll, empty LoRA stem, Node 24 Actions pins | **done** | #22 |
+
+Not a finding, a feature: every Create section with a prompt can take an example's prompt and settings from CivitAI (#24).
 
 Everything else below is still open, an idea, or a map.
 
@@ -182,7 +195,7 @@ Fix idea: compute `avgDl`, the document frequencies and the tokenized documents
 once per query (or once at index time), tokenize on `\p{L}\p{N}`, and keep it
 off the main thread. The ranking stays the same, and the cost becomes O(N · Q).
 
-## 9. RAG: nomic-embed-text is used without its task prefixes (open)
+## 9. RAG: nomic-embed-text is used without its task prefixes (done, #20)
 
 - The embedding model (`ONBOARDING_EMBED_MODEL`, and the Ollama default) is `nomic-embed-text-v1.5`.
 - Its model card requires `search_document: ` on indexed text and `search_query: ` on queries.
@@ -335,7 +348,7 @@ auto-compact, not to this trim.
 - A script-aware estimate: count Cyrillic, CJK and JSON-dense text at about 2.8 chars per token, Latin prose at 4.
 - Better: calibrate from the backend's own reported `prompt_tokens` for the last turn, which `computeContextFill` already reads for the display, and trim on that.
 
-## 16. Voice mode: English-only local voices, small CPU Whisper (open)
+## 16. Voice mode: English-only local voices, small CPU Whisper (done, #21)
 
 The stack:
 - the voice loop is Pipecat (`@pipecat-ai/client-js`). `api/voice-tool-bridge.ts` executes tools on the app side, through the same approval policy and `MUTATING_TOOLS`, with receipts against duplicate calls; that part looks solid;
@@ -350,7 +363,7 @@ Findings:
   - the model does not use the GPU even when one is there;
   - language is auto-detected, which is fine, but the size is not configurable.
 
-## 17. A/B Compare: timings measure model loading, errors vanish (open)
+## 17. A/B Compare: timings measure model loading, errors vanish (done, #15)
 
 `hooks/useABCompare.ts`, `components/chat/ABCompare.tsx`.
 
@@ -390,7 +403,7 @@ Parallel sub-agents share one llama-server context.
 
 Details are held outside the repository while the issue is open.
 
-## 20. Mobile client double-escapes code blocks (open, confirmed)
+## 20. Mobile client double-escapes code blocks (done, #14)
 
 `mobile-client/client.js`, `renderMd`.
 
@@ -419,7 +432,7 @@ version **0.37.0**. That is exactly what `install_comfyui` would install today
 
 ### Findings
 
-1. **The Create tab never sees ComfyUI's completion event and waits for a 10-second poll.** (open, confirmed in code)
+1. **The Create tab never sees ComfyUI's completion event and waits for a 10-second poll.** (done, #12)
    - `comfyui-ws.ts` declares, and `useCreate.ts:1404` handles, an event `execution_complete` that ComfyUI does not send. The server sends `execution_success` and `execution_interrupted` (`execution.py:824`, `:699`), plus `executing` with `node: null` at the end (`main.py:377`).
    - `useCreate.ts:1383` receives exactly that `node: null` frame, comments "execution finished", and does `break`.
    - Completion is therefore only picked up by the heartbeat that polls `/history` every **10 s** (`useCreate.ts:1296`–`1359`). Every Create render shows its result 0–10 s late, about 5 s on average, and logs "Completion detected via polling (WS event missed)" every time.
@@ -434,7 +447,7 @@ version **0.37.0**. That is exactly what `install_comfyui` would install today
    - The app's message says CogVideoX "needs a rebuild against the current wrapper". It no longer needs the wrapper: a standard `UNETLoader` + `CLIPLoader` + `VAELoader` + `KSampler` graph should do.
    - This is an opportunity rather than a bug, and needs a real render to confirm.
 
-## 22. Edit tab: the mask is silently dropped on three paths (open, confirmed in code)
+## 22. Edit tab: the mask is silently dropped on three paths (done, #13)
 
 Reported: "the mask does not seem to reach Edit".
 
@@ -490,12 +503,12 @@ render to confirm.
 | Z-Image | CLIPLoader `qwen_image` | CLIPLoader `lumina2` | ok: for a Qwen3-4B file both types route to `z_image.te` (`sd.py`, `QWEN3_4B` branch) |
 | Qwen-Image 2.1, Krea 2, ERNIE, Flux 2 / Klein | CLIP types `qwen_image` / `krea2` / `flux2` | same | ok |
 | Edit / inpaint (SD) | `InpaintModelConditioning` if present, else `VAEEncodeForInpaint` | Flux-Fill template: `InpaintModelConditioning` + `DifferentialDiffusion` | ok (mask loss on other paths: see 22) |
-| Remove background | custom node **RMBG** (1038lab) | **core now has** `LoadBackgroundRemovalModel` + `RemoveBackground` (BiRefNet), template `utility_birefnet_remove_background` | improvement: drop the custom-node dependency |
-| Video save | `VHS_VideoCombine` (custom) → `SaveAnimatedWEBP` → PNG frames | every template: core `CreateVideo` + `SaveVideo` (mp4, with audio) | improvement: without VHS, users get WEBP or frames although core can write mp4 |
-| **HunyuanVideo 1.5** (catalogue bundle, `verified: true`) | CLIPLoader(`qwen_2.5_vl`, type `wan`) + **`EmptyHunyuanLatentVideo`** + `HunyuanImageToVideo`; bundle ships CLIP-L | `DualCLIPLoader`(qwen_2.5_vl + **byT5**, `hunyuan_video_15`) + **`EmptyHunyuanVideo15Latent`** + `HunyuanVideo15ImageToVideo`, `ModelSamplingSD3`, optional SR stage | **likely broken**: v1 latent is 16 ch at /8, v1.5 needs 32 ch at /16 (`nodes_hunyuan.py`). Type `wan` on Qwen2.5-VL falls to `qwen_image.te`, the wrong encoder |
-| **LTX 2.3** (catalogue bundle, `verified: true`) | file placed in `diffusion_models` → UNETLoader + CLIPLoader(gemma, `ltxv`) + `EmptyLTXVLatentVideo`; `VAEDecode.vae` wired to `[unetId, 0]` | file is a full checkpoint → `CheckpointLoaderSimple` + `LTXAVTextEncoderLoader`(gemma, ckpt) + audio chain (`LTXVEmptyLatentAudio`, `LTXVConcatAVLatent`, `LTXVAudioVAEDecode`) | **likely broken**: UNETLoader has no VAE output, so `VAEDecode` gets a MODEL (`dynamic-workflow.ts` ~850: "fallback reference (won't be used for LTX)", yet `:1444` uses it). The text projection from the checkpoint is never loaded |
-| **Wan 2.2 A14B** (user-downloaded, official names `wan2.2_t2v_high_noise_14B_*`) | `classifyModel` → `wan22` → TI2V-5B graph with `wan2.2_vae` (48 ch) | two experts (high + low noise), `KSamplerAdvanced` hand-off, `wan_2.1_vae` (16 ch) | **likely broken** for any A14B file; only TI2V-5B, S2V, Animate and "rapid AIO" merges are wired. A14B is the flagship of the official templates |
-| **ACE-Step 1.5** music | CheckpointLoaderSimple + **`ModelSamplingSD3` shift 5** | `ModelSamplingAuraFlow` shift 3, 8 steps, cfg 1 (turbo) | **likely wrong output**: `supported_models.ACEStep15` has `multiplier: 1.0`. `ModelSamplingSD3` patches `multiplier=1000`; `ModelSamplingAuraFlow` keeps 1.0. ACE-Step 1.0 (SD3, shift 5) matches its template and is fine |
+| Remove background | custom node **RMBG** (1038lab) | **core now has** `LoadBackgroundRemovalModel` + `RemoveBackground` (BiRefNet), template `utility_birefnet_remove_background` | improvement: drop the custom-node dependency. **Done, #23**: core graph first, RMBG as fallback |
+| Video save | `VHS_VideoCombine` (custom) → `SaveAnimatedWEBP` → PNG frames | every template: core `CreateVideo` + `SaveVideo` (mp4, with audio) | improvement: without VHS, users get WEBP or frames although core can write mp4. **Done, #23** |
+| **HunyuanVideo 1.5** (catalogue bundle, `verified: true`) | CLIPLoader(`qwen_2.5_vl`, type `wan`) + **`EmptyHunyuanLatentVideo`** + `HunyuanImageToVideo`; bundle ships CLIP-L | `DualCLIPLoader`(qwen_2.5_vl + **byT5**, `hunyuan_video_15`) + **`EmptyHunyuanVideo15Latent`** + `HunyuanVideo15ImageToVideo`, `ModelSamplingSD3`, optional SR stage | **likely broken**: v1 latent is 16 ch at /8, v1.5 needs 32 ch at /16 (`nodes_hunyuan.py`). Type `wan` on Qwen2.5-VL falls to `qwen_image.te`, the wrong encoder. **Fixed, #18** |
+| **LTX 2.3** (catalogue bundle, `verified: true`) | file placed in `diffusion_models` → UNETLoader + CLIPLoader(gemma, `ltxv`) + `EmptyLTXVLatentVideo`; `VAEDecode.vae` wired to `[unetId, 0]` | file is a full checkpoint → `CheckpointLoaderSimple` + `LTXAVTextEncoderLoader`(gemma, ckpt) + audio chain (`LTXVEmptyLatentAudio`, `LTXVConcatAVLatent`, `LTXVAudioVAEDecode`) | **likely broken**: UNETLoader has no VAE output, so `VAEDecode` gets a MODEL (`dynamic-workflow.ts` ~850: "fallback reference (won't be used for LTX)", yet `:1444` uses it). The text projection from the checkpoint is never loaded. **Fixed, #19** |
+| **Wan 2.2 A14B** (user-downloaded, official names `wan2.2_t2v_high_noise_14B_*`) | `classifyModel` → `wan22` → TI2V-5B graph with `wan2.2_vae` (48 ch) | two experts (high + low noise), `KSamplerAdvanced` hand-off, `wan_2.1_vae` (16 ch) | **likely broken** for any A14B file; only TI2V-5B, S2V, Animate and "rapid AIO" merges are wired. A14B is the flagship of the official templates. **Fixed, #19** |
+| **ACE-Step 1.5** music | CheckpointLoaderSimple + **`ModelSamplingSD3` shift 5** | `ModelSamplingAuraFlow` shift 3, 8 steps, cfg 1 (turbo) | **likely wrong output**: `supported_models.ACEStep15` has `multiplier: 1.0`. `ModelSamplingSD3` patches `multiplier=1000`; `ModelSamplingAuraFlow` keeps 1.0. ACE-Step 1.0 (SD3, shift 5) matches its template and is fine. **Fixed, #17** |
 | ACE-Step 1.5 XL / split | not supported (checkpoint only) | UNETLoader + `DualCLIPLoader` `ace` + VAELoader | gap |
 | Music output | `SaveAudioMP3` | `SaveAudioAdvanced` | deprecated node (see 21) |
 | CogVideoX | disabled ("needs wrapper rebuild") | native in core | opportunity (see 21) |
@@ -631,9 +644,9 @@ Gaps:
 
 ## Minor
 
-- `media-tools.ts`, `executeLoraDownload`: a throw from `getDownloadProgress()` inside the poll loop fails the whole tool call instead of returning a readable error.
-- `media-tools.ts`, `civitaiRecipe`: a LoRA name with no letters or digits gives an empty stem, and `includes('')` then reports it as installed.
-- Not a finding, context: CI annotations say `actions/checkout` and `actions/setup-node` at the pinned SHAs target Node 20, which runners now force onto Node 24. They need bumping eventually.
+- `media-tools.ts`, `executeLoraDownload`: a throw from `getDownloadProgress()` inside the poll loop fails the whole tool call instead of returning a readable error. (done, #22)
+- `media-tools.ts`, `civitaiRecipe`: a LoRA name with no letters or digits gives an empty stem, and `includes('')` then reports it as installed. (done, #22)
+- Not a finding, context: CI annotations say `actions/checkout` and `actions/setup-node` at the pinned SHAs target Node 20, which runners now force onto Node 24. Bumped to Node 24 pins in #22.
 
 ## Checked and fine
 
