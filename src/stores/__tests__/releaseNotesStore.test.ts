@@ -333,17 +333,10 @@ describe('the notes table', () => {
     }
   })
 
-  it('the 3.0.3 entry names every fix of the hotfix, now that it is the shipping version', () => {
-    // Hotfix vom 28.09.2026: package.json, Cargo.toml/.lock and
-    // tauri.conf.json all moved to 3.0.3 in one commit, so THIS is now the
-    // shipping entry the earlier existence guard checks. Nothing but this
-    // sheet announces the release (no Discord post), so an anchor per fix:
-    // a later edit that drops one fails here instead of shipping quietly
-    // incomplete.
-    const shipping = JSON.parse(
-      readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../../../package.json'), 'utf8'),
-    ).version as string
-    expect(shipping).toBe('3.0.3')
+  it('the 3.0.3 entry names every fix of the hotfix', () => {
+    // Hotfix vom 28.09.2026. It shipped; since 3.1.0 it is no longer the
+    // running version, so it is read by its number, and every anchor stays.
+    const shipping = '3.0.3'
     const prose = proseOf(shipping)
     for (const anchor of [
       // Der Chat-Speicher: Ursache, Grenze, Umzug und die Rueckholung.
@@ -368,6 +361,25 @@ describe('the notes table', () => {
       // Der Agent und sein Arbeitsordner (Discord 28.09.2026).
       'the button next to agent', 'pick a folder', 'no longer says filesystem reaches files anywhere',
       'plain chat has no tool that reads your files', 'says to turn on agent',
+    ]) {
+      expect(prose, `${shipping}: nothing about "${anchor}"`).toContain(anchor)
+    }
+  })
+
+  it('the 3.1.0 entry names the media agent, the LoRA prompts and the fork channel, now that it is the shipping version', () => {
+    // package.json, Cargo.toml/.lock and tauri.conf.json all moved to 3.1.0
+    // in one commit, so THIS is the shipping entry. One anchor per change.
+    const shipping = JSON.parse(
+      readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../../../package.json'), 'utf8'),
+    ).version as string
+    expect(shipping).toBe('3.1.0')
+    const prose = proseOf(shipping)
+    for (const anchor of [
+      'attach a photo', 'background removal', 'mask inpainting',
+      'hires fix', "trigger words", 'negative prompt of your own', 'civitai.red',
+      'downloads the loras you are missing', 'chain of steps', 'russian',
+      'sexual content involving minors', 'the negative prompt wan was trained with',
+      'hatetm/locally-uncensored',
     ]) {
       expect(prose, `${shipping}: nothing about "${anchor}"`).toContain(anchor)
     }

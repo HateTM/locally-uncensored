@@ -130,6 +130,67 @@ export interface ReleaseNote {
 }
 
 export const RELEASE_NOTES: ReleaseNote[] = [
+  // 3.1.0 (29.09.2026): der Medien-Agent, die LoRA-Prompts und der
+  // CivitAI-Nachbau. package.json, Cargo.toml/Cargo.lock und tauri.conf.json
+  // stehen in einem Zug mit diesem Eintrag auf 3.1.0.
+  {
+    version: '3.1.0',
+    headline: 'The agent can now do everything the Create tab does: edit a photo you attach, use every setting, get LoRAs from CivitAI and remake a CivitAI image.',
+    lines: [
+      {
+        title: 'Attach a photo and ask for the edit.',
+        detail: 'Attach a photo in the chat and ask for the change ("remove the car", "make the background snowy", "animate this"). The agent hands the photo to the generator itself.',
+      },
+      {
+        title: 'Every Create setting is open to the agent.',
+        detail: 'Background removal, mask inpainting, HiRes fix, clip skip, batch size, SVD motion strength and Wan 2.2 video LoRAs, next to the sampler, steps, CFG, seed, size, LoRAs and VAE. A setting the model cannot do is refused with the real limit, never silently changed.',
+      },
+      {
+        title: 'LoRAs bring their prompts along.',
+        detail: 'Every render with a LoRA, from the agent and from Create, starts its prompt with the LoRA\'s trigger words, which LU learns when it downloads the LoRA. You can also save a prompt and a negative prompt of your own for a LoRA; the negative is added to the negative prompt.',
+      },
+      {
+        title: 'Remake a CivitAI image from its link.',
+        detail: 'Give the agent a civitai.com or civitai.red image link. It reads the prompt, negative prompt, sampler, steps, CFG, seed, size and LoRAs, downloads the LoRAs you are missing and renders with your models.',
+      },
+    ],
+    details: [
+      {
+        title: 'Agent',
+        items: [
+          {
+            title: 'LoRAs from CivitAI, from the chat.',
+            detail: 'The agent searches CivitAI for LoRAs, downloads one into ComfyUI\'s LoRA folder and waits until it is ready.',
+          },
+          {
+            title: 'Saved workflows.',
+            detail: 'The agent saves a chain of steps, for example "image, then animate it", to run again later, or a generation preset for the Create tab.',
+          },
+          {
+            title: 'Russian requests.',
+            detail: 'Requests for pictures, videos and edits written in Russian now reach the image and video tools.',
+          },
+          {
+            title: 'The same safety check as Create.',
+            detail: 'The agent\'s image and video renders now pass the check that refuses sexual content involving minors, as Create always did, and a LoRA\'s saved prompt is checked too.',
+          },
+        ],
+      },
+      {
+        title: 'Create',
+        items: [
+          {
+            title: 'Wan 2.2 uses Wan\'s own negative prompt.',
+            detail: 'A Wan 2.2 render with an empty negative prompt now uses the negative prompt Wan was trained with.',
+          },
+          {
+            title: 'Updates come from this fork.',
+            detail: 'This build looks for updates in the HateTM/locally-uncensored releases, signed with this fork\'s key.',
+          },
+        ],
+      },
+    ],
+  },
   // Stand 28.09.2026: package.json, src-tauri/Cargo.toml (plus Cargo.lock) und
   // src-tauri/tauri.conf.json stehen jetzt alle auf 3.0.3, in einem Zug mit
   // dem Eintrag darunter, damit kein Release still bleibt (Gedaechtnis
