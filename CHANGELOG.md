@@ -2,6 +2,52 @@
 
 All notable changes to Locally Uncensored are documented here.
 
+## [3.1.0] - 2026-09-29
+
+The agent can now do everything the Create tab does: generate and edit with
+every setting, work on a photo you attached, find and download LoRAs, and save
+workflows. LoRAs bring their own prompts, and a CivitAI image can be remade
+from its recipe. The open-model counts from 3.0.2 still hold: fourteen video
+models and seven image models in the cloud catalogue.
+
+### Added
+
+- **The agent edits and animates photos you attach.** Attach a photo and ask
+  for the edit ("remove the car", "make the background snowy", "animate this")
+  in the chat. The agent passes the photo to the generator itself.
+- **Every Create setting is open to the agent.** Background removal, mask
+  inpainting, HiRes fix, clip skip, batch size, SVD motion strength and Wan 2.2
+  video LoRAs, next to the sampler, scheduler, steps, CFG, seed, size, LoRAs
+  and VAE it already had. A setting the model cannot do is refused with the
+  real limit, never silently changed.
+- **LoRAs from CivitAI, from the chat.** The agent searches CivitAI for LoRAs,
+  downloads one into ComfyUI's LoRA folder and waits until it is ready.
+- **LoRAs bring their prompts along.** Every render with a LoRA, from the
+  agent and from the Create tab, starts its prompt with the LoRA's trigger
+  words, which LU learns when it downloads the LoRA. A prompt and a negative
+  prompt of your own can be saved per LoRA, or imported for many LoRAs at once
+  from a JSON file; a saved negative is added to the negative prompt.
+- **Remake a CivitAI image.** Give the agent a civitai.com or civitai.red
+  image link: it reads the prompt, negative prompt, sampler, steps, CFG, seed,
+  size and LoRAs, downloads the LoRAs you are missing and renders with your
+  models.
+- **Saved workflows from the chat.** The agent saves a chain of steps (for
+  example "image, then animate it") to run again later, or a generation preset
+  for the Create tab.
+- **The agent understands Russian** requests for pictures, videos and edits.
+
+### Changed
+
+- **Wan 2.2 renders use Wan's own negative prompt** when you give none.
+- **Updates come from this fork's releases** (HateTM/locally-uncensored),
+  signed with this fork's key.
+
+### Fixed
+
+- **The chat agent's renders now pass the same safety check as Create.** The
+  agent's image and video path reached ComfyUI without the check that refuses
+  sexual content involving minors, and a LoRA's saved prompt is checked too.
+
 ## [3.0.3] - 2026-09-28
 
 A hotfix for chats with many images, which could run the app out of memory,
