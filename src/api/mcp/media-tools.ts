@@ -134,7 +134,10 @@ async function civitaiRecipe(ref: string): Promise<string> {
   const { resolveModelName } = await import('../vram-handoff')
   const stem = (n: string) => n.replace(/^.*[\\/]/, '').replace(/\.[a-z0-9]+$/i, '').toLowerCase().replace(/[^a-z0-9]+/g, '')
   const loraLines = recipe.loras.map((l) => {
-    const have = installedLoras.find((f) => stem(f) === stem(l.name) || stem(f).includes(stem(l.name)))
+    // A name with no letters or digits has an empty stem, and every file
+    // "includes" the empty string: it read as installed. No stem, no match.
+    const want = stem(l.name)
+    const have = want ? installedLoras.find((f) => stem(f) === want || stem(f).includes(want)) : undefined
     return have
       ? `- ${l.name} weight ${l.weight}: installed as ${have}`
       : `- ${l.name} weight ${l.weight}: NOT installed${l.versionId ? ` (lora_download versionId ${l.versionId})` : ' (search it with media_list search)'}`
@@ -211,12 +214,23 @@ export async function executeLoraDownload(args: ToolArgs, run?: AgentRunContext,
   }
 
   const deadline = Date.now() + LORA_WAIT_MS
+  // A progress read that throws (backend busy, a dev-server restart) is one
+  // missed poll, not a failed download: the download runs on regardless. It
+  // used to throw out of the tool call and the agent saw a raw error.
+  let pollError: string | null = null
   while (Date.now() < deadline) {
     if (signal?.aborted || run?.abortSignal?.aborted) {
       return `Stopped waiting. ${filename} keeps downloading in the background; the downloads tray in the header shows its progress.`
     }
     await new Promise((r) => setTimeout(r, POLL_MS))
-    const prog = await discover.getDownloadProgress()
+    let prog: Awaited<ReturnType<typeof discover.getDownloadProgress>>
+    try {
+      prog = await discover.getDownloadProgress()
+      pollError = null
+    } catch (e) {
+      pollError = errText(e)
+      continue
+    }
     const entry = prog[started.id] ?? Object.values(prog).find((d) => d.filename === filename)
     if (entry?.status === 'error') return `Error: the download of ${filename} failed: ${entry.error ?? 'unknown error'}`
     if (entry?.status === 'complete') {
@@ -224,6 +238,9 @@ export async function executeLoraDownload(args: ToolArgs, run?: AgentRunContext,
       clearNodeCache()
       return `Downloaded ${hit.name} into models/loras as ${filename}. ${usage}`
     }
+  }
+  if (pollError) {
+    return `${filename} was started, but its progress could not be read (${pollError}). The downloads tray in the header shows whether it finished; call media_list later to see it listed.`
   }
   return `${filename} is still downloading; the downloads tray in the header shows its progress. Call media_list later to see it listed.`
 }
