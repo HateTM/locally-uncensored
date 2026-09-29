@@ -166,9 +166,13 @@ describe('the coding step carries a catalog the diet actually shrank', () => {
     // step's messages are ~732 tokens on this scale, so leaving the catalog out
     // showed under a third of the request. Same estimator the meter uses, so
     // this is the correction itself, not a proxy for it.
+    //
+    // The estimator stopped being chars / 4 (token-estimate.ts, FINDINGS 15).
+    // Against Qwen 2.5 it reads this catalog about 15 % high, so the bound is
+    // the real-token ceiling with 20 % on top, not the char ceiling / 4.
     const catalog = estimateTokens(codingWire())
     expect(catalog).toBeGreaterThan(1500)
-    expect(catalog).toBeLessThanOrEqual(CODING_CHAR_CEILING / 4 + 1)
+    expect(catalog).toBeLessThanOrEqual(Math.ceil(CODING_TOKEN_CEILING * 1.2))
   })
 
   it('the mobile catalog went on the same diet, or it drifts from here', () => {

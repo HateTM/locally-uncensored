@@ -36,8 +36,11 @@ const size = (msgs: Wire[]) => estimateMessageTokens(msgs as never)
 
 /** A history of roughly `tokens` tokens, in ordinary chat-sized turns. */
 function historyOf(tokens: number): Wire[] {
-  const perMessage = 500
-  const chars = 'x '.repeat(perMessage) // ~1000 chars, ~250 tokens
+  // ~250 tokens a turn. Every ' x' is a token of its own: chars / 4 read 500
+  // of them as 250, estimateTokens (and a real tokenizer) read them as 500,
+  // so the turn is 250 of them now and the history keeps its ~480 turns.
+  const perMessage = 250
+  const chars = 'x '.repeat(perMessage)
   const out: Wire[] = [{ role: 'system', content: 'be helpful' }]
   while (size(out) < tokens) {
     out.push({ role: 'user', content: `q${out.length} ${chars}` })

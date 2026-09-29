@@ -32,9 +32,11 @@
  * two halves. Both halves can be estimates, and — this is the part that
  * matters — BOTH of their errors point the same way:
  *
- *   - The numerator under-reads. `estimateTokens` is `chars / 4`, calibrated
- *     on English prose. Code, JSON, tool results and non-English text all
- *     tokenize denser than that, so the estimate says "less" than the truth.
+ *   - The numerator can under-read. `estimateTokens` (token-estimate.ts) was
+ *     `chars / 4` until FINDINGS 15 and said "less" than the truth for code,
+ *     JSON and non-English text. It now prices text piece by piece and leans
+ *     high (-8 % … +15 % against Qwen 2.5), but German prose and other
+ *     tokenizers still land below the truth, so the margin stays.
  *   - The denominator over-reads. A window that is not `isTrue` is a fallback
  *     guess, and the fallbacks in useActiveContextWindow (the model's
  *     advertised max, DEFAULT_CONTEXT_CAP, 8192) are all ceilings, not floors.
@@ -67,7 +69,8 @@ export type FillSource = 'built' | 'usage' | 'estimate'
  *    tail.
  *  - `usage` + estimated: anchored on a provisional usage the agent path
  *    wrote, i.e. an estimate wearing a usage's clothes.
- *  - `estimate`: chars/4 over the whole visible conversation, nothing else.
+ *  - `estimate`: estimateTokens over the whole visible conversation, nothing
+ *    else.
  */
 export const MARGIN_BUILT = 0
 export const MARGIN_USAGE_REAL = 0.03
