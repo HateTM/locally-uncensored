@@ -1784,6 +1784,8 @@ export interface CivitAIModelResult {
   baseModel?: string
   /** Trigger words of the latest version, the tokens that switch a LoRA on. */
   trainedWords?: string[]
+  /** CivitAI flags the model as mature content. */
+  nsfw?: boolean
 }
 
 export const CIVITAI_DEFAULT_HOST = 'civitai.com'
@@ -1835,7 +1837,7 @@ function civitaiItemToResult(
   host: string,
 ): CivitAIModelResult {
   const version = asRecordArray(prop(item, 'modelVersions'))[0]
-  const file = asRecordArray(prop(version, 'files'))[0]
+  const file = primaryCivitaiFile(asRecordArray(prop(version, 'files')))
   const thumb = asString(propPath(asRecordArray(prop(version, 'images'))[0], 'url'))
   const downloadUrl = asString(prop(version, 'downloadUrl')) ?? asString(prop(file, 'downloadUrl'))
   const sizeKB = asNumber(prop(file, 'sizeKB')) ?? 0
@@ -1890,7 +1892,28 @@ function civitaiItemToResult(
     sourceUrl: `https://${host}/models/${itemId}`,
     ...(baseModel ? { baseModel } : {}),
     ...(trainedWords.length ? { trainedWords } : {}),
+    // `nsfw` is CivitAI's own flag; `nsfwLevel` is its rating bitmask
+    // (1 PG, 2 PG-13, 4 R, 8 X, 16 XXX). Either one marks adult content, and
+    // the level catches the R-rated models the flag leaves unset.
+    ...(prop(item, 'nsfw') === true || ((asNumber(prop(item, 'nsfwLevel')) ?? 0) & 28) !== 0 ? { nsfw: true } : {}),
   }
+}
+
+/**
+ * The file a version's `downloadUrl` actually serves: the one CivitAI marks
+ * `primary`, else the first of type "Model".
+ *
+ * `files[0]` is not that file. Measured on the live API (2026-09-29, top 100
+ * LoRAs, nsfw=true): for three of them `files[0]` was `…workflow.zip` or
+ * `Images.zip` ("Training Data" / "Other"), two of them NSFW Wan 2.2 LoRAs.
+ * The name and size came from the zip while the bytes came from the primary
+ * `.safetensors`, so the LoRA landed in models/loras as a `.zip` that ComfyUI
+ * never lists.
+ */
+export function primaryCivitaiFile(files: Record<string, unknown>[]): Record<string, unknown> | undefined {
+  return files.find((f) => prop(f, 'primary') === true)
+    ?? files.find((f) => prop(f, 'type') === 'Model')
+    ?? files[0]
 }
 
 /**
@@ -1928,7 +1951,7 @@ export async function getCivitaiModelVersion(
     const v: unknown = JSON.parse(text)
     if (!isRecord(v) || !asNumber(prop(v, 'id'))) return null
     const files = asRecordArray(prop(v, 'files'))
-    const file = files.find((f) => prop(f, 'primary') === true) ?? files[0]
+    const file = primaryCivitaiFile(files)
     const type = asString(propPath(v, 'model', 'type')) ?? ''
     const modelId = asNumber(prop(v, 'modelId')) ?? 0
     const sizeKB = asNumber(prop(file, 'sizeKB')) ?? 0
@@ -1988,6 +2011,51 @@ export async function searchCivitaiModels(
     return items.map((item) => civitaiItemToResult(item, type, host))
   } catch (err) {
     log.warn('[discover] CivitAI model search failed', { err })
+    return []
+  }
+}
+
+/** How long one "popular on CivitAI" answer is reused. */
+export const CIVITAI_POPULAR_TTL_MS = 60 * 60 * 1000
+const civitaiPopularCache = new Map<string, { at: number; hits: CivitAIModelResult[] }>()
+
+/** Test-only: forget cached "popular" answers. */
+export function __resetCivitaiPopularCache(): void {
+  civitaiPopularCache.clear()
+}
+
+/**
+ * The most downloaded checkpoints or LoRAs of the past week or month, the
+ * live half of the CivitAI panel before anything is searched. Same mapping as
+ * a search hit (primary file, base model, trigger words, nsfw flag), same key
+ * handling, cached per type, host and period. Never throws.
+ */
+export async function fetchCivitaiPopular(
+  type: 'Checkpoint' | 'LORA',
+  period: 'Week' | 'Month',
+  apiKey?: string,
+  host: string = CIVITAI_DEFAULT_HOST,
+  now: number = Date.now(),
+): Promise<CivitAIModelResult[]> {
+  const key = `${type}|${period}|${host}|${apiKey ? 'key' : 'anon'}`
+  const cached = civitaiPopularCache.get(key)
+  if (cached && now - cached.at < CIVITAI_POPULAR_TTL_MS) return cached.hits
+  try {
+    const params = new URLSearchParams({
+      types: type,
+      sort: 'Most Downloaded',
+      period,
+      limit: '60',
+      // Same stance as the search: the panel filters on its own toggle, the
+      // API is asked for everything.
+      nsfw: 'true',
+    })
+    const text = await fetchExternal(`https://${host}/api/v1/models?${params}`, apiKey ?? null)
+    const hits = asRecordArray(prop(JSON.parse(text), 'items')).map((item) => civitaiItemToResult(item, type, host))
+    civitaiPopularCache.set(key, { at: now, hits })
+    return hits
+  } catch (err) {
+    log.warn('[discover] CivitAI popular list failed', { err })
     return []
   }
 }

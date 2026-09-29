@@ -48,6 +48,7 @@ vi.mock('../../../api/discover', () => ({
     searchCivitaiModels(query, type, key, host),
   startModelDownload: (url: string, subfolder: string, filename: string) =>
     startModelDownload(url, subfolder, filename),
+  fetchCivitaiPopular: async () => [],
 }))
 vi.mock('../../../api/comfyui', () => ({
   checkComfyConnection: vi.fn(async () => comfyLaeuft),
@@ -307,6 +308,9 @@ describe('Get new unter LoRAs', () => {
       id: 7, name: 'Pixel Art XL', sourceUrl: 'https://civitai.com/models/7',
       downloadUrl: 'https://civitai.com/api/download/models/7',
       filename: 'pixel_art_xl.safetensors', subfolder: 'loras', sizeGB: 0.16,
+      // CivitAI always names the base model; the panel only offers a download
+      // for a family LU can run (lib/civitai-base-models.ts).
+      baseModel: 'SDXL 1.0',
     }])
     render(createElement(ModelManager))
     fireEvent.click(screen.getByRole('button', { name: /^LoRAs/ }))
