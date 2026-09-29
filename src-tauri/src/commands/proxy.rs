@@ -353,6 +353,24 @@ async fn ssrf_safe_fetch(
     max_hops: usize,
     bearer: Option<&str>,
 ) -> Result<reqwest::Response, String> {
+    ssrf_safe_fetch_with_headers(url, label, timeout, max_hops, bearer, &[]).await
+}
+
+/// `ssrf_safe_fetch` with extra request headers, sent on every hop.
+///
+/// The agent's `web_fetch` (search.rs) used a plain client with
+/// `ssrf_safe_redirect_policy`: every hop was checked, but reqwest resolved the
+/// name again when it connected, so a rebinding resolver could answer a public
+/// address to the check and a loopback or LAN address to the connect. This is
+/// the pinned path; it only lacked a way to send that tool's own headers.
+pub(crate) async fn ssrf_safe_fetch_with_headers(
+    url: &str,
+    label: &str,
+    timeout: Duration,
+    max_hops: usize,
+    bearer: Option<&str>,
+    headers: &[(reqwest::header::HeaderName, &str)],
+) -> Result<reqwest::Response, String> {
     let mut current = url.to_string();
     for _ in 0..=max_hops {
         let target = current.clone();
@@ -364,6 +382,9 @@ async fn ssrf_safe_fetch(
         let host = parsed.host_str().unwrap_or("").to_string();
         let client = pinned_client(&host, &addrs, timeout)?;
         let mut request = client.get(current.clone());
+        for (name, value) in headers {
+            request = request.header(name.clone(), *value);
+        }
         // Jeder Sprung wird neu geprueft, der Bearer folgt nie einer Umleitung
         // von CivitAI weg.
         if let Some(token) =
@@ -391,6 +412,36 @@ async fn ssrf_safe_fetch(
             .to_string();
     }
     Err(format!("{}: too many redirects", label))
+}
+
+/// Append `chunk` to `buf` without letting `buf` grow past `cap`. Returns true
+/// when something had to be cut, i.e. the body was longer than the cap.
+pub(crate) fn append_capped(buf: &mut Vec<u8>, chunk: &[u8], cap: usize) -> bool {
+    let room = cap.saturating_sub(buf.len());
+    if chunk.len() > room {
+        buf.extend_from_slice(&chunk[..room]);
+        true
+    } else {
+        buf.extend_from_slice(chunk);
+        false
+    }
+}
+
+/// Read a response body up to `cap` bytes and stop there. `resp.text()` buffered
+/// the whole body before any cap applied, so a page of any size was read into
+/// memory in full. Returns the bytes and whether the body was cut.
+pub(crate) async fn read_body_capped(mut resp: reqwest::Response, cap: usize) -> Result<(Vec<u8>, bool), String> {
+    let mut buf = Vec::new();
+    while let Some(chunk) = resp
+        .chunk()
+        .await
+        .map_err(|e| format!("Read body failed: {}", os_error::english(&e)))?
+    {
+        if append_capped(&mut buf, &chunk, cap) {
+            return Ok((buf, true));
+        }
+    }
+    Ok((buf, false))
 }
 
 /// True only for private/LAN hosts a user could legitimately point a local
@@ -1452,6 +1503,25 @@ pub async fn ollama_search(query: String) -> Result<serde_json::Value, String> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn a_capped_body_stops_at_the_cap_and_says_so() {
+        let mut buf = Vec::new();
+        assert!(!append_capped(&mut buf, b"abc", 5));
+        assert!(append_capped(&mut buf, b"defgh", 5));
+        assert_eq!(buf, b"abcde");
+        // Full: nothing more gets in.
+        assert!(append_capped(&mut buf, b"x", 5));
+        assert_eq!(buf, b"abcde");
+    }
+
+    #[test]
+    fn a_body_that_fits_is_kept_whole() {
+        let mut buf = Vec::new();
+        assert!(!append_capped(&mut buf, b"hello", 5));
+        assert_eq!(buf, b"hello");
+        assert!(!append_capped(&mut buf, b"", 5));
+    }
     use super::*;
 
     fn built_headers(

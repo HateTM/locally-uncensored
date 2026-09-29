@@ -538,6 +538,10 @@ pub fn searxng_status(state: State<'_, AppState>) -> Result<serde_json::Value, S
     }))
 }
 
+/// The most of a page `web_fetch` reads. HTML runs several times the size of
+/// its readable text, and 24 000 characters of text is all that is kept.
+const WEB_FETCH_MAX_BYTES: usize = 5 * 1024 * 1024;
+
 /// Fetch a URL and return plain readable text. The agent loop calls this
 /// AFTER `web_search` to actually read a page — without it, the model
 /// only ever sees titles + snippets which is useless for anything
@@ -558,20 +562,25 @@ pub async fn web_fetch(url: String) -> Result<serde_json::Value, String> {
     let trimmed = url.trim();
     crate::commands::proxy::validate_public_url(trimmed)?;
 
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(20))
-        .redirect(crate::commands::proxy::ssrf_safe_redirect_policy(6))
-        .user_agent("Mozilla/5.0 (compatible; LocallyUncensored-Agent/1.0)")
-        .build()
-        .map_err(|e| e.to_string())?;
-
-    let resp = client
-        .get(trimmed)
-        .header("Accept", "text/html,text/plain,application/xhtml+xml;q=0.9,*/*;q=0.5")
-        .header("Accept-Language", "en,de;q=0.8")
-        .send()
-        .await
-        .map_err(|e| format!("Fetch failed: {}", os_error::english(&e)))?;
+    // Pinned per hop (proxy.rs, ssrf_safe_fetch_with_headers): the name is
+    // resolved once, checked, and connected to at exactly that address, so a
+    // rebinding resolver cannot turn a public name into 127.0.0.1 between the
+    // check and the connect. This tool runs without a prompt (`web` is `auto`)
+    // on URLs the model chooses, which is why it gets the strict path.
+    use reqwest::header::{ACCEPT, ACCEPT_LANGUAGE, USER_AGENT};
+    let resp = crate::commands::proxy::ssrf_safe_fetch_with_headers(
+        trimmed,
+        "Fetch failed",
+        std::time::Duration::from_secs(20),
+        6,
+        None,
+        &[
+            (USER_AGENT, "Mozilla/5.0 (compatible; LocallyUncensored-Agent/1.0)"),
+            (ACCEPT, "text/html,text/plain,application/xhtml+xml;q=0.9,*/*;q=0.5"),
+            (ACCEPT_LANGUAGE, "en,de;q=0.8"),
+        ],
+    )
+    .await?;
 
     let status = resp.status().as_u16();
     let final_url = resp.url().to_string();
@@ -582,10 +591,11 @@ pub async fn web_fetch(url: String) -> Result<serde_json::Value, String> {
         .unwrap_or("")
         .to_string();
 
-    let raw = resp
-        .text()
-        .await
-        .map_err(|e| format!("Read body failed: {}", e))?;
+    // At most WEB_FETCH_MAX_BYTES are read; the readable text is cut to
+    // 24 000 characters below anyway. Decoded as UTF-8 (lossy): what nearly
+    // every page is, and a stray byte costs one character, not the fetch.
+    let (bytes, cut) = crate::commands::proxy::read_body_capped(resp, WEB_FETCH_MAX_BYTES).await?;
+    let raw = String::from_utf8_lossy(&bytes).into_owned();
 
     let (title, text) = extract_readable_text(&raw, &content_type);
     let capped: String = text.chars().take(24_000).collect();
@@ -596,7 +606,7 @@ pub async fn web_fetch(url: String) -> Result<serde_json::Value, String> {
         "contentType": content_type,
         "title": title,
         "text": capped,
-        "truncated": text.chars().count() > 24_000,
+        "truncated": cut || text.chars().count() > 24_000,
     }))
 }
 
