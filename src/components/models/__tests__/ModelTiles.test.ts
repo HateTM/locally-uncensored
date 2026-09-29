@@ -5,10 +5,11 @@ import { computeFit, groupModels, pickDefaultVariant } from '../ModelTiles'
 import { contrast, over } from '../../__tests__/wcag-contrast'
 import type { DiscoverModel, DownloadProgress } from '../../../api/discover'
 
-// The fit hint is a pure function of (model size, DETECTED vram) — these
-// cases pin down what end users on different GPUs actually see, without
-// needing the hardware on a test box. Thresholds: fits ≤ 0.85×VRAM (leave
-// headroom for KV-cache/context), tight ≤ 1.15×VRAM, else big.
+// The fit hint is a pure function of (model size, DETECTED vram, engine
+// context), so these cases pin down what end users on different GPUs see
+// without the hardware on a test box. fits = weights + the KV cache of the
+// context + 1 GiB reserve fit the card, the engine's own sum (lib/vram-fit.ts);
+// tight = weights ≤ 1.15×VRAM; else big. Default context: 8K, the engine's.
 describe('computeFit — per-user hardware hint', () => {
   it('returns unknown (→ hint hidden) when hardware or size is missing', () => {
     expect(computeFit(undefined, 12)).toBe('unknown')
@@ -23,8 +24,10 @@ describe('computeFit — per-user hardware hint', () => {
     expect(computeFit(13, 8)).toBe('big')
   })
 
-  it('12 GB GPU (the dev box): 10 GB quant fits, 13 GB tight, 16 GB spills', () => {
-    expect(computeFit(10, 12)).toBe('fits')    // GLM 4.7 Flash IQ2_M
+  it('12 GB GPU (the dev box): 10 GB quant tight, 13 GB tight, 16 GB spills', () => {
+    // 10 + 1.4 cache + 1 reserve = 12.4 > 12: the engine keeps a few layers in
+    // RAM, so this is no longer "fits" (the old 85 % rule said it was).
+    expect(computeFit(10, 12)).toBe('tight')   // GLM 4.7 Flash IQ2_M
     expect(computeFit(13, 12)).toBe('tight')   // Qwen 3.6 27B Q3
     expect(computeFit(16, 12)).toBe('big')     // 27B Q4
   })
@@ -35,12 +38,21 @@ describe('computeFit — per-user hardware hint', () => {
     expect(computeFit(42, 24)).toBe('big')
   })
 
-  it('48–50 GB GPU: 23 GB Ornith green; the 42 GB 70B flips tight→green at 50', () => {
+  it('48–50 GB GPU: 23 GB Ornith and the 42 GB 70B green at 8K', () => {
     expect(computeFit(23, 48)).toBe('fits')    // Ornith 1.0 35B
-    expect(computeFit(42, 48)).toBe('tight')   // 70B Q4 — real headroom is thin
-    expect(computeFit(42, 50)).toBe('fits')    // 42 ≤ 50×0.85
-    expect(computeFit(45, 50)).toBe('tight')   // Mistral Medium 3.5
+    // 70B Q4 at 8K: ~2.6 GB of cache, 42 + 2.6 + 1 = 45.6 ≤ 48.
+    expect(computeFit(42, 48)).toBe('fits')
+    expect(computeFit(42, 50)).toBe('fits')
+    expect(computeFit(45, 50)).toBe('fits')    // Mistral Medium 3.5
     expect(computeFit(144, 50)).toBe('big')    // DeepSeek V4 Flash multi-part
+  })
+
+  it('a long context turns a fitting model tight: the cache is counted', () => {
+    // 12B Q4 (7.5 GB) on 12 GB: ~1.2 GB of cache at 8K, ~4.8 GB at 32K.
+    expect(computeFit(7.5, 12)).toBe('fits')
+    expect(computeFit(7.5, 12, 32768)).toBe('tight')
+    // The 70B that fits at 8K keeps ~10 GB of cache at 32K.
+    expect(computeFit(42, 48, 32768)).toBe('tight')
   })
 
   it('never hides or blocks — big is a hint, not a gate (see FIT_META copy)', () => {
