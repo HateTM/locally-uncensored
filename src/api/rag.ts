@@ -3,6 +3,7 @@ import type { DocumentMeta, TextChunk, RAGContext, VectorSearchResult } from "..
 import { ollamaUrl, localFetch } from "./backend"
 import { isManagedBuiltinActive, embedBaseUrl, bundledEmbedStatus, ensureBundledEmbedAlive } from "./engine"
 import { asNumber, errorText, prop } from "../types/json-guards"
+import { bm25Scores } from "../lib/bm25"
 
 /**
  * One embedding row's vector, or `[]`.
@@ -298,25 +299,6 @@ export function cosineSimilarity(a: number[], b: number[]): number {
   return Number.isFinite(score) ? score : 0
 }
 
-export function bm25Score(query: string, document: string, allDocs: string[]): number {
-  const queryTerms = query.toLowerCase().split(/\s+/)
-  const docTerms = document.toLowerCase().split(/\s+/)
-  const docLen = docTerms.length
-  const numDocs = allDocs.length || 1
-  const avgDl = allDocs.reduce((sum, d) => sum + d.split(/\s+/).length, 0) / numDocs || 200
-  const k1 = 1.2
-  const b = 0.75
-
-  let score = 0
-  for (const term of queryTerms) {
-    const tf = docTerms.filter((t) => t === term).length
-    const docsWithTerm = allDocs.filter(d => d.toLowerCase().includes(term)).length
-    const idf = Math.log((numDocs - docsWithTerm + 0.5) / (docsWithTerm + 0.5) + 1)
-    score += idf * ((tf * (k1 + 1)) / (tf + k1 * (1 - b + (b * docLen) / avgDl)))
-  }
-  return score
-}
-
 function hybridSearch(
   queryEmbedding: number[],
   query: string,
@@ -329,12 +311,10 @@ function hybridSearch(
     vectorScore: cosineSimilarity(queryEmbedding, chunk.embedding),
   }))
 
-  // Get BM25 scores (pass all docs for proper IDF calculation)
-  const allDocTexts = chunks.map(c => c.content)
-  const bm25Results = chunks.map((chunk) => ({
-    chunk,
-    bm25Score: bm25Score(query, chunk.content, allDocTexts),
-  }))
+  // BM25 over the whole chunk set in one pass (the per-chunk scorer was
+  // quadratic in the chunk count, FINDINGS 8).
+  const keyword = bm25Scores(query, chunks.map((c) => c.content))
+  const bm25Results = chunks.map((chunk, i) => ({ chunk, bm25Score: keyword[i] }))
 
   // Normalize both score sets to 0-1. Non-finite scores are dropped from the
   // max: Math.max with a single NaN returns NaN, which would turn EVERY
