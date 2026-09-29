@@ -1,0 +1,54 @@
+Hintergrund-Agenten: die reine Hälfte.
+
+Kein React, kein Store, kein Netz — nur die Regeln, nach denen eine
+delegierte Aufgabe entsteht, altert, gemeldet und verworfen wird. Sie liegen
+hier und nicht im Store, weil sie prüfbar sein müssen, ohne dass ein Fenster
+offen ist: die teuersten Fehler dieses Bereichs sind Lebensdauer-Fehler, und
+die zeigen sich in einer Rechnung, nicht in einem Screenshot.
+
+Das Vokabular ist bewusst dasselbe wie bei den Hintergrund-SHELL-Prozessen
+(api/agents/bg-tasks.ts): `running`, `cancelled`, ein `[id8] phase (dauer)`
+in der Statuszeile. Die App hat schon einen Begriff von "Hintergrundaufgabe";
+ein zweiter, leicht anderer wäre eine Zumutung für den, der beide sieht.
+/
+Wie viele Aufgaben eine Konversation behält.
+
+Der Ring ist nicht Vorsicht, sondern ein bezahlter Fehler: `codexStore`
+(CODEX_EVENT_LOG_MAX = 500) und `toolAuditStore` (AUDIT_MAX_PER_CONV = 500)
+tragen beide denselben Deckel, und der Kommentar im ersten sagt warum —
+"each terminal_output carries the UNTRUNCATED shell result … tens of
+megabytes held for as long as the app is open". Eine Aufgabe hier hält ein
+ganzes Modellgespräch samt Werkzeugausgaben. Ohne Ring wäre das derselbe
+Fehler zum dritten Mal, in einem Repo, das ihn zweimal behoben hat.
+
+40 und nicht 500: eine Aufgabe wiegt viel mehr als ein Auditeintrag, und
+niemand blättert im Panel durch 500 erledigte Delegationen.
+/
+Was von einer einzelnen Werkzeugausgabe im Gedächtnis der Aufgabe bleibt.
+
+Der Sub-Agenten-Lauf legt Werkzeugergebnisse UNGEKAPPT in sein
+Nachrichtenfeld — `registry.execute` liefert roh, und anders als die beiden
+Hauptschleifen (useCodex, useAgentChat, beide über truncateToolResult) hat
+er nie gekappt. Ein `file_read` auf ein 4-MB-Protokoll landete damit als
+4-MB-Zeichenkette in einer Store-Zeile, die niemand mehr löscht.
+
+8000 statt der 1500 der Hauptschleifen: dieses Feld ist nicht die Nutzlast
+des nächsten Aufrufs, sondern das Gedächtnis für eine mögliche Fortsetzung.
+Es darf großzügiger sein als ein Prompt — nur nicht unbegrenzt.
+/
+`'queued'` (Folgeauftrag aus bau/review-w2lane.md Runde 4): die Aufgabe
+existiert (`start()` ist gelaufen, `check_tasks` kennt sie), rechnet aber
+noch nicht, weil sie beim lokalen Motor auf einen freien Platz wartet
+(`lib/run-slot.ts`). Vorher stand hier sofort `'running'`, seit dem
+ersten Eintrag, also lange bevor der Rumpf ueberhaupt anlief. `check_tasks`
+meldete eine wartende Aufgabe damit als laufend, mit einer Uhr, die schon
+seit der Anmeldung zaehlte, nicht seit dem echten Start. Ein Agent, der
+danach pollt, sah eine Aufgabe, die "schon lange laeuft" und nichts tut.
+/
+Was eine Aufgabe an Tokens gekostet hat.
+
+── DAS IST EIN VERBRAUCHSZAEHLER, KEIN FUELLSTAND ──────────────────────────
+
+Die wichtigste Zeile dieser Datei, weil die Verwechslung teuer und
+naheliegend ist. `message.usage` (types/chat.ts:74) traegt fast dieselben
+Felder und meint etwas anderes: dort gilt "der letzte Zug gewinnt", weil

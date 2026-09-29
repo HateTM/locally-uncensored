@@ -138,9 +138,10 @@ export function sumTaskTokens(tasks: ReadonlyArray<{ tokens?: TaskTokens }>): Ta
  * Zeile traegt es aus.
  *
  * `estimate` kommt als Argument herein und wird hier NICHT importiert. Die
- * Hausschaetzung ist `estimateTokens` (lib/context-compaction.ts:22, also
- * `ceil(Zeichen/4)+1` und nicht das blosse Zeichen/4, das man erwartet). Ihr
- * Modul zieht ueber `getProviderForModel` und `useModelStore` den halben
+ * Hausschaetzung ist `estimateTokens` (lib/token-estimate.ts, ueber
+ * lib/context-compaction.ts wieder ausgeliefert; seit FINDINGS 15 nach
+ * Schrift und Stueck bepreist, nicht mehr Zeichen/4). context-compaction.ts
+ * zieht ueber `getProviderForModel` und `useModelStore` den halben
  * Anbieterbaum mit. agent-tasks.ts haengt bis heute an genau einem Import, und
  * das soll so bleiben, weil es die reine Haelfte dieses Bereichs ist. Eine
  * zweite eigene Schaetzformel hier waere schlimmer als der Import: dann gaebe

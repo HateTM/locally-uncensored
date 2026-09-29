@@ -5,7 +5,7 @@
  * - Keep the last N messages intact (recent context matters most)
  * - Summarize older messages into compact one-liners
  * - Tool call + result pairs become: "Used tool_name('args') → result_snippet"
- * - Token estimation via heuristic: text.length / 4
+ * - Token estimation piece by piece, by script (token-estimate.ts)
  */
 
 import { getModelContextCached } from '../api/ollama'
@@ -13,15 +13,13 @@ import { getProviderForModel, getProviderIdFromModel } from '../api/providers'
 import { useModelStore } from '../stores/modelStore'
 import { truncateToolResult } from './truncate-tool-result'
 import type { OllamaChatMessage } from '../types/agent-mode'
+import { estimateTokens } from './token-estimate'
 
 // ── Token Estimation ────────────────────────────────────────────
 
-/**
- * Rough token estimate. Ollama models typically tokenize ~4 chars per token.
- */
-export function estimateTokens(text: string): number {
-  return Math.ceil(text.length / 4) + 1
-}
+// estimateTokens lives in token-estimate.ts (pure, no provider imports) and
+// is re-exported here, where its callers have always imported it from.
+export { estimateTokens }
 
 /**
  * Estimate total tokens in a message array.
