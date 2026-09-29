@@ -166,6 +166,8 @@ export function categorizeNodes(allNodes: Record<string, NodeMetadata>): Categor
     // Video savers
     SaveAnimatedWEBP: 'videoSavers',
     VHS_VideoCombine: 'videoSavers',
+    // Core mp4 writer (CreateVideo → SaveVideo), what the official templates use.
+    SaveVideo: 'videoSavers',
     // AnimateDiff / Motion
     ADE_LoadAnimateDiffModel: 'motion',
     ADE_ApplyAnimateDiffModelSimple: 'motion',

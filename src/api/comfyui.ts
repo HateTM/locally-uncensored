@@ -8,7 +8,7 @@ import { resolveRunSeed } from '../lib/run-seed'
 // dynamischer Import, der nur den Zyklus comfyui ↔ dynamic-workflow
 // verdeckt hat. Beide sind reine Graph-Bausteine und wohnen jetzt in
 // comfyui-graph.ts, das nichts importiert.
-import { videoDecodeNode, promptFilenamePrefix } from './comfyui-graph'
+import { videoDecodeNode, promptFilenamePrefix, addVideoSaveNodes } from './comfyui-graph'
 import type { ComfyApiGraph, ComfyApiNode, ComfyHistoryEntry } from '../types/comfy-graph'
 import type { ComfyModelSource } from '../types/models'
 import { isRecord, asString, asRecordArray } from '../types/json-guards'
@@ -696,6 +696,14 @@ export async function getComfyVersion(): Promise<string | null> {
 }
 
 // Check if a specific node exists in ComfyUI (lightweight, single node check)
+/** Which video save nodes this ComfyUI has, for addVideoSaveNodes. */
+async function videoSaverPresence(): Promise<(classType: string) => boolean> {
+  const names = ['CreateVideo', 'SaveVideo', 'VHS_VideoCombine', 'SaveAnimatedWEBP']
+  const present = await Promise.all(names.map((c) => nodeExists(c)))
+  const found = new Set(names.filter((_, i) => present[i]))
+  return (c) => found.has(c)
+}
+
 async function nodeExists(nodeName: string): Promise<boolean> {
   try {
     const res = await localFetch(comfyuiUrl(`/object_info/${nodeName}`), { timeoutMs: COMFY_LIST_TIMEOUT_MS })
@@ -2476,8 +2484,6 @@ export async function buildWanVideoWorkflow(params: VideoParams): Promise<ComfyA
   // Pre-check required nodes
   const hasLatent = await nodeExists('EmptyHunyuanLatentVideo')
   if (!hasLatent) throw new Error('EmptyHunyuanLatentVideo node not found. Update ComfyUI to latest version.')
-  const hasSaveWEBP = await nodeExists('SaveAnimatedWEBP')
-
   const vae = await findMatchingVAE('wan')
   const clip = await findMatchingCLIP('wan')
   const hasTiledDecode = await nodeExists('VAEDecodeTiled')
@@ -2500,22 +2506,9 @@ export async function buildWanVideoWorkflow(params: VideoParams): Promise<ComfyA
     '8': videoDecodeNode(['7', 0], ['3', 0], hasTiledDecode),
   }
 
-  // Use SaveAnimatedWEBP if available, otherwise fall back to SaveImage (frame
-  // sequence). Prompt-based prefix (David 2026-06-11) — the dynamic builder got
-  // this in c40d13f, this legacy T2V path still wrote locally_uncensored_vid.
-  const vidPrefix = promptFilenamePrefix(params.prompt, true)
-  if (hasSaveWEBP) {
-    workflow['9'] = {
-      class_type: 'SaveAnimatedWEBP',
-      inputs: { images: ['8', 0], filename_prefix: vidPrefix, fps: params.fps, lossless: false, quality: 90, method: 'default' },
-    }
-  } else {
-    workflow['9'] = {
-      class_type: 'SaveImage',
-      inputs: { images: ['8', 0], filename_prefix: vidPrefix },
-    }
-  }
-
+  // Prompt-based prefix (David 2026-06-11). Core mp4 first, like every other
+  // video path (comfyui-graph.ts addVideoSaveNodes).
+  addVideoSaveNodes(workflow, 9, ['8', 0], params.fps, promptFilenamePrefix(params.prompt, true), await videoSaverPresence())
   return workflow
 }
 
@@ -2527,7 +2520,6 @@ export async function buildAnimateDiffWorkflow(params: VideoParams): Promise<Com
   const motionModel = await findAnimateDiffModel()
 
   // AnimateDiff: batch_size=1, motion model handles temporal dimension
-  const hasVHS = await nodeExists('VHS_VideoCombine')
   const hasTiledDecode = await nodeExists('VAEDecodeTiled')
 
   const workflow: ComfyApiGraph = {
@@ -2549,26 +2541,7 @@ export async function buildAnimateDiffWorkflow(params: VideoParams): Promise<Com
     '9': videoDecodeNode(['8', 0], ['1', 2], hasTiledDecode),
   }
 
-  // Use VHS_VideoCombine if available (produces MP4), otherwise SaveAnimatedWEBP, otherwise SaveImage
-  if (hasVHS) {
-    workflow['10'] = {
-      class_type: 'VHS_VideoCombine',
-      inputs: { images: ['9', 0], frame_rate: params.fps, loop_count: 0, filename_prefix: 'locally_uncensored_vid', format: 'video/h264-mp4', pingpong: false, save_output: true },
-    }
-  } else {
-    const hasSaveWEBP = await nodeExists('SaveAnimatedWEBP')
-    if (hasSaveWEBP) {
-      workflow['10'] = {
-        class_type: 'SaveAnimatedWEBP',
-        inputs: { images: ['9', 0], filename_prefix: 'locally_uncensored_vid', fps: params.fps, lossless: false, quality: 90, method: 'default' },
-      }
-    } else {
-      workflow['10'] = {
-        class_type: 'SaveImage',
-        inputs: { images: ['9', 0], filename_prefix: 'locally_uncensored_vid' },
-      }
-    }
-  }
+  addVideoSaveNodes(workflow, 10, ['9', 0], params.fps, 'locally_uncensored_vid', await videoSaverPresence())
 
   return workflow
 }

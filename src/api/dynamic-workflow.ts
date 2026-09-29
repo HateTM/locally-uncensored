@@ -7,6 +7,7 @@ import type { ModelType, GenerateParams, VideoParams } from './comfyui'
 import { log } from '../lib/logger'
 import { resolveRunSeed } from '../lib/run-seed'
 import { nodeComboOptions, readComboOptions } from './comfyui-enum'
+import { BIREFNET, coreBgRemovalModel, hasCoreBgRemoval } from './bg-removal'
 import { COMPONENT_REGISTRY, type ComponentSpec } from './component-registry'
 import { MissingComponentsError, resolveFamilyParts, type SniffedFamily } from './family-components'
 import {
@@ -57,7 +58,7 @@ function specDefault(spec: ComfyInputValue | undefined): ComfyInputValue | undef
 // promptFilenamePrefix und videoDecodeNode wohnen in comfyui-graph.ts (siehe
 // dort). Re-Export, damit bestehende Importpfade unverändert bleiben.
 export { promptFilenamePrefix, videoDecodeNode } from './comfyui-graph'
-import { promptFilenamePrefix, videoDecodeNode } from './comfyui-graph'
+import { promptFilenamePrefix, videoDecodeNode, addVideoSaveNodes } from './comfyui-graph'
 
 // ─── Strategy Detection ───
 
@@ -432,13 +433,16 @@ function registrySpecsNamedIn(type: ModelType, message: string): ComponentSpec[]
 export async function checkVideoOutputCapability(): Promise<{ mp4Capable: boolean; webpOnly: boolean; missingNodes: string[] }> {
   const allNodes = await getAllNodeInfo()
   const cats = categorizeNodes(allNodes)
+  // The core writes mp4 itself (CreateVideo + SaveVideo); VHS is only the
+  // fallback for a core too old to have them.
+  const hasCore = !!allNodes['CreateVideo'] && !!allNodes['SaveVideo']
   const hasVHS = cats.videoSavers.includes('VHS_VideoCombine')
   const hasWebp = cats.videoSavers.includes('SaveAnimatedWEBP')
   const missing: string[] = []
-  if (!hasVHS) missing.push('VHS_VideoCombine (ComfyUI-VideoHelperSuite)')
+  if (!hasCore && !hasVHS) missing.push('CreateVideo + SaveVideo (update ComfyUI) or VHS_VideoCombine (ComfyUI-VideoHelperSuite)')
   return {
-    mp4Capable: hasVHS,
-    webpOnly: !hasVHS && hasWebp,
+    mp4Capable: hasCore || hasVHS,
+    webpOnly: !hasCore && !hasVHS && hasWebp,
     missingNodes: missing,
   }
 }
@@ -580,15 +584,23 @@ export async function buildDynamicWorkflow(
   // 400 ("Value not in list"). Gated upstream by caps.rmbg.
   const gp = params as GenerateParams
   if (!isVideo && gp.removebg && gp.inputImage) {
+    // Core nodes first (bg-removal.ts): the official BiRefNet template graph.
+    const coreModel = hasCoreBgRemoval(allNodes) ? coreBgRemovalModel(allNodes) : null
+    if (coreModel) return buildCoreRemoveBgWorkflow(gp, coreModel)
     const rmbgMeta = allNodes['RMBG']
-    if (!rmbgMeta) {
+    if (rmbgMeta) return buildRemoveBgWorkflow(gp, rmbgMeta)
+    if (hasCoreBgRemoval(allNodes)) {
       throw new WorkflowUnavailableError(
-        'The background-removal node (ComfyUI-RMBG) is not installed in ComfyUI. Install it from the Remove Background tab, then try again.',
+        `Background removal needs its model (${BIREFNET.filename}, 424 MB, models/${BIREFNET.subfolder}). Download it from the Remove Background tab, then try again.`,
         'unavailable',
-        { pack: 'ComfyUI-RMBG', url: 'https://github.com/1038lab/ComfyUI-RMBG' },
       )
     }
-    return buildRemoveBgWorkflow(gp, rmbgMeta)
+    throw new WorkflowUnavailableError(
+      'This ComfyUI has no background removal nodes. Update ComfyUI (Settings, AI Backends), or install ComfyUI-RMBG from the Remove Background tab.',
+      'unavailable',
+      { pack: 'ComfyUI-RMBG', url: 'https://github.com/1038lab/ComfyUI-RMBG' },
+      { needsComfyUpdate: true },
+    )
   }
 
   const determined = determineStrategy(type, isVideo, nodes, models, params.model)
@@ -647,13 +659,13 @@ export async function buildDynamicWorkflow(
   // ─── Wrapper Strategies (custom node pipelines — completely different node chains) ───
 
   if (strategy === 'svd') {
-    return buildSVDWorkflow(params as VideoParams, seed, nodes)
+    return buildSVDWorkflow(params as VideoParams, seed, nodes, allNodes)
   }
   if (strategy === 'wan22') {
     return await buildWan22Workflow(params as VideoParams, seed, nodes, allNodes)
   }
   if (strategy === 'framepack') {
-    return await buildFramePackWorkflow(params as VideoParams, seed, nodes)
+    return await buildFramePackWorkflow(params as VideoParams, seed, nodes, allNodes)
   }
   if (strategy === 'ltx2') {
     return await buildLtx2Workflow(params as VideoParams, seed, allNodes, { inCheckpoints, inUnets })
@@ -1506,47 +1518,11 @@ export async function buildDynamicWorkflow(
 
   // ─── Phase 6: Output ───
 
-  const saveId = String(n++)
-
   if (isVideo) {
-    // Video output: prefer VHS > SaveAnimatedWEBP > SaveImage
-    const vidPrefix = promptFilenamePrefix(params.prompt, true)
-    if (nodes.videoSavers.includes('VHS_VideoCombine')) {
-      workflow[saveId] = {
-        class_type: 'VHS_VideoCombine',
-        inputs: {
-          images: [decodeId, 0],
-          frame_rate: videoParams.fps,
-          loop_count: 0,
-          filename_prefix: vidPrefix,
-          format: 'video/h264-mp4',
-          pingpong: false,
-          save_output: true,
-        },
-      }
-    } else if (nodes.videoSavers.includes('SaveAnimatedWEBP')) {
-      workflow[saveId] = {
-        class_type: 'SaveAnimatedWEBP',
-        inputs: {
-          images: [decodeId, 0],
-          filename_prefix: vidPrefix,
-          fps: videoParams.fps,
-          lossless: false,
-          quality: 90,
-          method: 'default',
-        },
-      }
-    } else {
-      workflow[saveId] = {
-        class_type: 'SaveImage',
-        inputs: {
-          images: [decodeId, 0],
-          filename_prefix: vidPrefix,
-        },
-      }
-    }
+    // Core CreateVideo + SaveVideo (mp4), then VHS > SaveAnimatedWEBP > frames.
+    addVideoSaveNodes(workflow, n, [decodeId, 0], videoParams.fps, promptFilenamePrefix(params.prompt, true), (c) => !!allNodes[c])
   } else {
-    workflow[saveId] = {
+    workflow[String(n++)] = {
       class_type: 'SaveImage',
       inputs: {
         images: [decodeId, 0],
@@ -1569,6 +1545,22 @@ export async function buildDynamicWorkflow(
 // (`rmbgMeta`) so the graph stays valid across RMBG versions instead of pinning
 // input names/enums we'd have to guess. The `background` widget is nudged toward
 // a transparent/alpha option so the result is a real RGBA cutout, not a matte.
+/**
+ * The official utility_birefnet_remove_background graph: RemoveBackground gives
+ * the foreground mask, InvertMask + JoinImageWithAlpha turn it into the alpha
+ * channel (JoinImageWithAlpha takes 1 - alpha), SaveImage writes the PNG.
+ */
+function buildCoreRemoveBgWorkflow(params: GenerateParams, model: string): ComfyApiGraph {
+  return {
+    '1': { class_type: 'LoadImage', inputs: { image: params.inputImage } },
+    '2': { class_type: 'LoadBackgroundRemovalModel', inputs: { bg_removal_name: model } },
+    '3': { class_type: 'RemoveBackground', inputs: { bg_removal_model: ['2', 0], image: ['1', 0] } },
+    '4': { class_type: 'InvertMask', inputs: { mask: ['3', 0] } },
+    '5': { class_type: 'JoinImageWithAlpha', inputs: { image: ['1', 0], alpha: ['4', 0] } },
+    '6': { class_type: 'SaveImage', inputs: { images: ['5', 0], filename_prefix: promptFilenamePrefix(params.prompt, false) } },
+  }
+}
+
 function buildRemoveBgWorkflow(params: GenerateParams, rmbgMeta: NodeMetadata): ComfyApiGraph {
   const workflow: ComfyApiGraph = {}
   workflow['1'] = { class_type: 'LoadImage', inputs: { image: params.inputImage } }
@@ -1628,26 +1620,8 @@ function rmbgWidgetDefault(
 }
 
 
-function addVideoOutput(workflow: ComfyApiGraph, n: number, decodeId: string, fps: number, nodes: CategorizedNodes, prompt?: string): number {
-  const saveId = String(n++)
-  const prefix = promptFilenamePrefix(prompt, true)
-  if (nodes.videoSavers.includes('VHS_VideoCombine')) {
-    workflow[saveId] = {
-      class_type: 'VHS_VideoCombine',
-      inputs: { images: [decodeId, 0], frame_rate: fps, loop_count: 0, filename_prefix: prefix, format: 'video/h264-mp4', pingpong: false, save_output: true },
-    }
-  } else if (nodes.videoSavers.includes('SaveAnimatedWEBP')) {
-    workflow[saveId] = {
-      class_type: 'SaveAnimatedWEBP',
-      inputs: { images: [decodeId, 0], filename_prefix: prefix, fps, lossless: false, quality: 90, method: 'default' },
-    }
-  } else {
-    workflow[saveId] = {
-      class_type: 'SaveImage',
-      inputs: { images: [decodeId, 0], filename_prefix: prefix },
-    }
-  }
-  return n
+function addVideoOutput(workflow: ComfyApiGraph, n: number, decodeId: string, fps: number, allNodes: NodePresence, prompt?: string): number {
+  return addVideoSaveNodes(workflow, n, [decodeId, 0], fps, promptFilenamePrefix(prompt, true), (c) => !!allNodes[c])
 }
 
 // buildCogVideoWorkflow deleted 2026-07-24 (D#88). It emitted CogVideoXCLIPLoader,
@@ -1657,7 +1631,7 @@ function addVideoOutput(workflow: ComfyApiGraph, n: number, decodeId: string, fp
 // known-wrong graph around invites someone to just reopen the gate. Git history
 // has it if the lane is ever rebuilt, which needs a real generate to land.
 
-function buildSVDWorkflow(params: VideoParams, seed: number, nodes: CategorizedNodes): ComfyApiGraph {
+function buildSVDWorkflow(params: VideoParams, seed: number, nodes: CategorizedNodes, allNodes: NodePresence): ComfyApiGraph {
   const workflow: ComfyApiGraph = {}
   let n = 1
 
@@ -1698,7 +1672,7 @@ function buildSVDWorkflow(params: VideoParams, seed: number, nodes: CategorizedN
   }
   workflow[decodeId] = videoDecodeNode([samplerId, 0], [loaderId, 2], nodes.decoders.includes('VAEDecodeTiled'))
 
-  addVideoOutput(workflow, n, decodeId, params.fps, nodes, params.prompt)
+  addVideoOutput(workflow, n, decodeId, params.fps, allNodes, params.prompt)
   return workflow
 }
 
@@ -1819,7 +1793,7 @@ async function buildWan22Workflow(params: VideoParams, seed: number, nodes: Cate
   const decodeId = String(n++)
   workflow[decodeId] = videoDecodeNode([samplerId, 0], [vaeId, 0], nodes.decoders.includes('VAEDecodeTiled'))
 
-  addVideoOutput(workflow, n, decodeId, params.fps, nodes, params.prompt)
+  addVideoOutput(workflow, n, decodeId, params.fps, allNodes, params.prompt)
   return workflow
 }
 
@@ -2157,7 +2131,7 @@ async function buildWan22MoeWorkflow(
   }
   const decodeId = id()
   workflow[decodeId] = videoDecodeNode([secondId, 0], [vaeId, 0], nodes.decoders.includes('VAEDecodeTiled'))
-  addVideoOutput(workflow, n, decodeId, params.fps, nodes, params.prompt)
+  addVideoOutput(workflow, n, decodeId, params.fps, allNodes, params.prompt)
   return workflow
 }
 
@@ -2586,7 +2560,7 @@ export async function buildLocalOpWorkflow(params: LocalOpParams): Promise<Comfy
   }
 }
 
-async function buildFramePackWorkflow(params: VideoParams, seed: number, nodes: CategorizedNodes): Promise<ComfyApiGraph> {
+async function buildFramePackWorkflow(params: VideoParams, seed: number, nodes: CategorizedNodes, allNodes: NodePresence): Promise<ComfyApiGraph> {
   const workflow: ComfyApiGraph = {}
   let n = 1
 
@@ -2669,7 +2643,7 @@ async function buildFramePackWorkflow(params: VideoParams, seed: number, nodes: 
   }
   workflow[decodeId] = videoDecodeNode([samplerId, 0], [vaeId, 0], nodes.decoders.includes('VAEDecodeTiled'))
 
-  addVideoOutput(workflow, n, decodeId, params.fps, nodes, params.prompt)
+  addVideoOutput(workflow, n, decodeId, params.fps, allNodes, params.prompt)
   return workflow
 }
 

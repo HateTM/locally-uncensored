@@ -17,7 +17,7 @@
  * Namen, damit kein Aufrufer und kein Test seinen Importpfad ändern muss.
  */
 
-import type { ComfyApiNode, ComfyLinkRef } from '../types/comfy-graph'
+import type { ComfyApiGraph, ComfyApiNode, ComfyLinkRef } from '../types/comfy-graph'
 
 // ─── Output filename slug (David 2026-06-11) ───
 //
@@ -74,4 +74,46 @@ export function videoDecodeNode(
         },
       }
     : { class_type: 'VAEDecode', inputs: { samples: samplesRef, vae: vaeRef } }
+}
+
+/**
+ * The video output chain. Core CreateVideo + SaveVideo first: every official
+ * Comfy-Org video template writes its mp4 that way, and the nodes ship with
+ * ComfyUI itself. ComfyUI-VideoHelperSuite (VHS_VideoCombine) was the only mp4
+ * path LU knew, so a ComfyUI without that custom pack got an animated .webp or
+ * loose frames although the core could write mp4 (FINDINGS 23). VHS, animated
+ * WEBP and single frames stay as fallbacks, in that order, for older cores.
+ *
+ * Writes into `workflow` from `firstId` on and returns the next free id.
+ */
+export function addVideoSaveNodes(
+  workflow: ComfyApiGraph,
+  firstId: number,
+  images: ComfyLinkRef,
+  fps: number,
+  prefix: string,
+  has: (classType: string) => boolean,
+): number {
+  let n = firstId
+  if (has('CreateVideo') && has('SaveVideo')) {
+    const createId = String(n++)
+    workflow[createId] = { class_type: 'CreateVideo', inputs: { images, fps } }
+    workflow[String(n++)] = {
+      class_type: 'SaveVideo',
+      inputs: { video: [createId, 0], filename_prefix: prefix, format: 'auto', codec: 'auto' },
+    }
+  } else if (has('VHS_VideoCombine')) {
+    workflow[String(n++)] = {
+      class_type: 'VHS_VideoCombine',
+      inputs: { images, frame_rate: fps, loop_count: 0, filename_prefix: prefix, format: 'video/h264-mp4', pingpong: false, save_output: true },
+    }
+  } else if (has('SaveAnimatedWEBP')) {
+    workflow[String(n++)] = {
+      class_type: 'SaveAnimatedWEBP',
+      inputs: { images, filename_prefix: prefix, fps, lossless: false, quality: 90, method: 'default' },
+    }
+  } else {
+    workflow[String(n++)] = { class_type: 'SaveImage', inputs: { images, filename_prefix: prefix } }
+  }
+  return n
 }
