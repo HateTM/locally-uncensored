@@ -817,11 +817,13 @@ export function useChat() {
       const chunks = ragState.getConversationChunks(convId)
       if (chunks.length > 0) {
         try {
-          const { context: ragContext, scoredChunks } = await retrieveContext(
+          const { context: ragContext, scoredChunks, reembedded } = await retrieveContext(
             content,
             chunks,
             ragState.embeddingModel
           )
+          // Chunks indexed before the nomic task prefixes, re-embedded once.
+          ragState.replaceChunks(reembedded)
 
           // Store scored chunks for display in RAGPanel
           ragState.setLastRetrievedChunks(scoredChunks)

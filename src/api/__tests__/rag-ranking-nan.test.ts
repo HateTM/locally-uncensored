@@ -28,7 +28,7 @@ import { cosineSimilarity, retrieveContext } from '../rag'
 import type { TextChunk } from '../../types/rag'
 
 function chunk(id: string, content: string, embedding: number[]): TextChunk {
-  return { id, documentId: 'doc1', content, embedding, index: Number(id) } as TextChunk
+  return { id, documentId: 'doc1', content, embedding, index: Number(id), taskPrefixed: true } as TextChunk
 }
 
 describe('cosineSimilarity', () => {

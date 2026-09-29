@@ -903,7 +903,8 @@ export function useAgentChat() {
       const chunks = ragState.getConversationChunks(convId)
       if (chunks.length > 0) {
         try {
-          const { context: ragContext } = await retrieveContext(userContent, chunks, ragState.embeddingModel)
+          const { context: ragContext, reembedded } = await retrieveContext(userContent, chunks, ragState.embeddingModel)
+          ragState.replaceChunks(reembedded)
           // Same builder plain chat uses (lib/rag-prompt.ts), so the two
           // surfaces cannot drift apart. It rides at the END of the prompt,
           // behind persona and memory, because retrieval changes every turn and

@@ -162,10 +162,24 @@ export function chunkText(
     .filter((c) => c.length > 20)
 }
 
-export async function generateEmbeddings(
-  texts: string[],
-  model = "nomic-embed-text"
-): Promise<number[][]> {
+/**
+ * What an embedding is for. nomic-embed-text v1.5, the model LU installs and
+ * the Ollama default, is trained with task prefixes and its model card makes
+ * them mandatory: `search_document: ` on indexed text, `search_query: ` on the
+ * question. Sent raw, retrieval runs below the model's quality (FINDINGS 9).
+ */
+export type EmbedTask = "document" | "query"
+export const NOMIC_TASK_PREFIX: Record<EmbedTask, string> = {
+  document: "search_document: ",
+  query: "search_query: ",
+}
+
+/** Which server embeds, and whether it runs nomic (the only model here that
+ *  wants the prefixes; a bge/e5/gte GGUF gets the text unchanged). */
+async function pickEmbedBackend(model: string): Promise<{ builtin: boolean; nomic: boolean }> {
+  // The bundled engine loads the GGUF LU installed (nomic) unless the user
+  // put another embedding GGUF there; its model_path says which.
+  const builtinIsNomic = (path: string | null | undefined) => !path || /nomic/i.test(path)
   // P5: when the app-managed built-in engine is the active backend, embed
   // against the bundled `llama-server --embeddings` (OpenAI `/v1/embeddings`)
   // so Document-Chat/RAG works with zero Ollama. The bundled embed server also
@@ -180,19 +194,45 @@ export async function generateEmbeddings(
     // the next line dies on a bare transport error and the panel shows
     // `proxy_localhost: error sending request`, which names the pipe instead
     // of the missing part (measured on the Windows box, 2026-08-15).
-    if (!(await bundledEmbedStatus().then((s) => s.running).catch(() => false))) {
+    const status = await bundledEmbedStatus().catch(() => null)
+    if (!status?.running) {
       throw new Error(
         "No embedding model is installed for the LU Engine. Open Document Chat and use the install card to download it (84 MB), then drop the file again."
       )
     }
-    return embedViaBuiltin(texts, model)
+    return { builtin: true, nomic: builtinIsNomic(status.model_path) }
   }
   try {
-    if ((await bundledEmbedStatus()).running) {
-      return embedViaBuiltin(texts, model)
-    }
+    const status = await bundledEmbedStatus()
+    if (status.running) return { builtin: true, nomic: builtinIsNomic(status.model_path) }
   } catch { /* engine command unavailable — fall through to Ollama */ }
-  return embedViaOllama(texts, model)
+  return { builtin: false, nomic: /nomic/i.test(model) }
+}
+
+/**
+ * Embeddings for a retrieval task. `prefixed` says whether the task prefix
+ * went in, so stored chunks can record it and a query is only ever compared
+ * with chunks embedded the same way.
+ */
+export async function embedForTask(
+  texts: string[],
+  task: EmbedTask,
+  model = "nomic-embed-text"
+): Promise<{ vectors: number[][]; prefixed: boolean }> {
+  const backend = await pickEmbedBackend(model)
+  const input = backend.nomic ? texts.map((t) => NOMIC_TASK_PREFIX[task] + t) : texts
+  const vectors = backend.builtin ? await embedViaBuiltin(input, model) : await embedViaOllama(input, model)
+  return { vectors, prefixed: backend.nomic }
+}
+
+/** Raw embeddings, no task prefix: for symmetric comparisons (memory dedup,
+ *  tool routing), where both sides are embedded the same way. */
+export async function generateEmbeddings(
+  texts: string[],
+  model = "nomic-embed-text"
+): Promise<number[][]> {
+  const backend = await pickEmbedBackend(model)
+  return backend.builtin ? embedViaBuiltin(texts, model) : embedViaOllama(texts, model)
 }
 
 /** OpenAI `/v1/embeddings` against the bundled embeddings server (P5). */
@@ -353,7 +393,7 @@ export async function indexDocument(
 ): Promise<{ meta: DocumentMeta; chunks: TextChunk[] }> {
   const text = await extractText(file)
   const rawChunks = chunkText(text)
-  const embeddings = await generateEmbeddings(rawChunks, embeddingModel)
+  const { vectors: embeddings, prefixed } = await embedForTask(rawChunks, "document", embeddingModel)
 
   const docId = uuid()
   const chunks: TextChunk[] = rawChunks.map((content, index) => ({
@@ -367,6 +407,7 @@ export async function indexDocument(
     // TypeError. Empty is the failure state the ranking is built to absorb.
     embedding: embeddings[index] ?? [],
     index,
+    ...(prefixed ? { taskPrefixed: true } : {}),
   }))
 
   const meta: DocumentMeta = {
@@ -384,6 +425,9 @@ export async function indexDocument(
 export interface RetrieveResult {
   context: RAGContext
   scoredChunks: VectorSearchResult[]
+  /** Chunks indexed before the task prefixes, re-embedded as documents for
+   *  this query. The caller stores them so it happens once per document. */
+  reembedded: TextChunk[]
 }
 
 export async function retrieveContext(
@@ -392,9 +436,23 @@ export async function retrieveContext(
   embeddingModel = "nomic-embed-text",
   topK = 5
 ): Promise<RetrieveResult> {
-  const [queryEmb] = await generateEmbeddings([query], embeddingModel)
+  const { vectors: [queryEmb], prefixed } = await embedForTask([query], "query", embeddingModel)
+  // A prefixed query against chunks indexed raw (before FINDINGS 9) compares
+  // two different spaces. Their text is stored, so they are re-embedded as
+  // documents here, once, instead of asking the user to drop the files again.
+  let reembedded: TextChunk[] = []
+  if (prefixed) {
+    const stale = chunks.filter((c) => !c.taskPrefixed)
+    if (stale.length > 0) {
+      const { vectors } = await embedForTask(stale.map((c) => c.content), "document", embeddingModel)
+      reembedded = stale.map((c, i) => ({ ...c, embedding: vectors[i] ?? [], taskPrefixed: true }))
+      const fresh = new Map(reembedded.map((c) => [c.id, c]))
+      chunks = chunks.map((c) => fresh.get(c.id) ?? c)
+    }
+  }
   const results = hybridSearch(queryEmb, query, chunks, topK)
   return {
+    reembedded,
     context: {
       chunks: results.map((r) => r.chunk),
       query,
