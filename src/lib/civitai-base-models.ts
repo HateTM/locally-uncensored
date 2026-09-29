@@ -70,3 +70,22 @@ export function civitaiFamily(baseModel: string | undefined): CivitaiFamily {
   if (hit) return { supported: true, ...hit }
   return { supported: false, reason: REASONS[b] ?? `LU has no local pipeline for ${b}` }
 }
+
+/**
+ * Whether a LoRA trained for `baseModel` (CivitAI's tag) fits a model of LU
+ * family `modelType`. Only a CERTAIN mismatch says no: both sides known, the
+ * LoRA's base mapped to a supported family, and that family not the model's.
+ *
+ * Everything else says yes, because refusing it would be a guess:
+ *   - no model family ('unknown', or none passed): nothing to compare with;
+ *   - no base model recorded (a LoRA LU did not download from CivitAI);
+ *   - a base LU has no pipeline for. Wan 2.2 A14B LoRAs are the case that
+ *     matters: the "Rapid AIO" merges classify as 'wan' and run exactly
+ *     those LoRAs, so "unsupported" must not read as "does not fit".
+ */
+export function loraFitsModel(baseModel: string | undefined, modelType: ModelType | undefined): boolean {
+  if (!modelType || modelType === 'unknown') return true
+  const family = civitaiFamily(baseModel)
+  if (!family.supported) return true
+  return family.family === modelType
+}

@@ -76,8 +76,11 @@ import {
   snapToVideoGrid,
   MODEL_TYPE_DEFAULTS,
   hidreamSampling,
+  isLightningMerge,
+  LIGHTNING_SAMPLING,
   isPromptQueued,
   type VideoBackend,
+  type ModelType,
 } from './comfyui'
 import type { ModelCapabilities } from './comfyui-nodes'
 import { getActiveAgentModel } from './agent-context'
@@ -1294,7 +1297,7 @@ async function generateImage(
     }
     const edit = resolveImageEditOptions(a, !!inputImage)
     if (edit.reject) return `Cannot generate: ${edit.reject}`
-    const loras = edit.removebg ? { prompt, negative: '', note: '' } : await resolveLoraAutomation(prompt, a)
+    const loras = edit.removebg ? { prompt, negative: '', note: '' } : await resolveLoraAutomation(prompt, a, type, model)
     if (checkPromptSafety(`${loras.prompt} ${loras.negative}`).blocked) return `Cannot generate: ${SAFETY_BLOCK_MESSAGE}`
     let maskImage: string | undefined
     if (edit.mask) maskImage = (await resolveInputImage(edit.mask)).name
@@ -1427,7 +1430,7 @@ async function generateVideo(
       const snapped = snapToVideoGrid(clampInt(av.width, base.width, 64, 2048), clampInt(av.height, base.height, 64, 2048))
       const seed = (typeof av.seed === 'number' && Number.isFinite(av.seed)) ? Math.floor(av.seed) : -1
 
-      const loras = await resolveLoraAutomation(prompt, av)
+      const loras = await resolveLoraAutomation(prompt, av, 'wan22', model)
       if (checkPromptSafety(`${loras.prompt} ${loras.negative}`).blocked) return `Cannot generate: ${SAFETY_BLOCK_MESSAGE}`
       const workflow = await buildDynamicWorkflow(
         {
@@ -1487,7 +1490,10 @@ async function generateVideo(
       if (frameRej) return frameRej
       const i2vMax = caps?.frameRange?.max ?? (type === 'framepack' ? FRAMEPACK_MAX_FRAMES : 25)
       const { frames, fps } = resolveClip(args, { defFps, defFrames: type === 'framepack' ? 49 : 25, maxFrames: i2vMax })
-      const tun = resolveTunables(args, caps, { steps: type === 'framepack' ? 25 : 20, cfg: 3, sampler: 'euler', scheduler: 'normal' })
+      const i2vDefs = isLightningMerge(model)
+        ? { steps: LIGHTNING_SAMPLING.steps, cfg: LIGHTNING_SAMPLING.cfg }
+        : { steps: type === 'framepack' ? 25 : 20, cfg: 3 }
+      const tun = resolveTunables(args, caps, { ...i2vDefs, sampler: 'euler', scheduler: 'normal' })
       if (tun.reject) return `Cannot generate: ${tun.reject}`
       const av = args as Record<string, unknown>
       // Resolution from the SOURCE aspect ratio (David 2026-06-11: portrait
@@ -1537,7 +1543,12 @@ async function generateVideo(
     if (tFrameRej) return tFrameRej
     const t2vMax = caps?.frameRange?.max ?? Math.max(defaults.frames, 161)
     const { frames, fps } = resolveClip(args, { defFps: defaults.fps, defFrames: defaults.frames, maxFrames: t2vMax })
-    const tun = resolveTunables(args, caps, { steps: defaults.steps, cfg: defaults.cfg, sampler: defaults.sampler, scheduler: defaults.scheduler })
+    const lightning = isLightningMerge(model)
+    const tun = resolveTunables(args, caps, {
+      steps: lightning ? LIGHTNING_SAMPLING.steps : defaults.steps,
+      cfg: lightning ? LIGHTNING_SAMPLING.cfg : defaults.cfg,
+      sampler: defaults.sampler, scheduler: defaults.scheduler,
+    })
     if (tun.reject) return `Cannot generate: ${tun.reject}`
     const av = args as Record<string, unknown>
     const snapped = snapToVideoGrid(clampInt(av.width, defaults.width, 64, 2048), clampInt(av.height, defaults.height, 64, 2048))
@@ -1935,19 +1946,23 @@ function requestedLoras(a: Record<string, unknown>): string[] {
  * off. Never throws: a failure here must not cost the render.
  */
 async function resolveLoraAutomation(
-  prompt: string, a: Record<string, unknown>,
+  prompt: string, a: Record<string, unknown>, modelType?: ModelType, model?: string,
 ): Promise<{ prompt: string; negative: string; note: string }> {
   const negative = typeof a.negativePrompt === 'string' ? a.negativePrompt : ''
   const loras = requestedLoras(a)
   if (a.autoLora === false || loras.length === 0) return { prompt, negative, note: '' }
   try {
-    const { applyLoraPrompts } = await import('../stores/loraInfoStore')
-    const next = applyLoraPrompts(prompt, negative, loras)
+    const { applyLoraPrompts, loraMismatchNote } = await import('../stores/loraInfoStore')
+    // A LoRA CivitAI says was trained for another family contributes nothing
+    // and is named to the model, which can then pick a fitting one.
+    const next = applyLoraPrompts(prompt, negative, loras, modelType)
     const changed = [
       next.prompt !== prompt ? `prompt "${next.prompt}"` : '',
       next.negative !== negative ? `negative "${next.negative}"` : '',
     ].filter(Boolean)
-    return { ...next, note: changed.length ? `\nLoRA prompts applied: ${changed.join(', ')}.` : '' }
+    const mismatch = loraMismatchNote(next.mismatched, model ?? 'this model')
+    const note = (changed.length ? `\nLoRA prompts applied: ${changed.join(', ')}.` : '') + (mismatch ? `\n${mismatch}` : '')
+    return { prompt: next.prompt, negative: next.negative, note }
   } catch (e) {
     log.warn('vram_handoff.lora_prompt_failed', { err: String(e) })
     return { prompt, negative, note: '' }
