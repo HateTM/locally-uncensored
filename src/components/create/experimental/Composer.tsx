@@ -27,6 +27,7 @@ import { noPromptHint, shouldShowLaneHint } from './laneHint'
 import { needsMaskFor } from './maskGate'
 import { ModelChip } from './ModelChip'
 import { PromptHistory } from './PromptHistory'
+import { CivitaiExamplesButton } from './CivitaiExamples'
 import { SpecialControls } from './SpecialIntentControls'
 import { CreditsMeter } from './CreditsMeter'
 import { Button } from '../ui/Button'
@@ -379,6 +380,7 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
               </button>
             )}
             {needPrompt && <PromptHistory onPick={setPrompt} />}
+            {needPrompt && <CivitaiExamplesButton />}
             <div className="flex-1" />
             {/* The backend axis moved to the global header switch (2.5.7) —
                 the Composer just reflects it via the CreditsMeter. */}
