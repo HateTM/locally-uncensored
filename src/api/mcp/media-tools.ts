@@ -78,7 +78,8 @@ export async function executeMediaList(args: ToolArgs): Promise<string> {
       lines.push(list('Samplers', nodes.getSamplerOptions(info)))
       lines.push(list('Schedulers', nodes.getSchedulerOptions(info)))
       const has = (n: string) => n in info
-      lines.push(`Background removal (RMBG): ${has('RMBG') ? 'installed' : 'not installed'}. `
+      const { bgRemovalStatus } = await import('../bg-removal')
+      lines.push(`Background removal: ${bgRemovalStatus(info)}. `
         + `Inpaint: ${has('VAEEncodeForInpaint') ? 'available' : 'not available'}.`)
     }
   }

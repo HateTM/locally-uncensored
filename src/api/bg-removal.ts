@@ -31,6 +31,21 @@ export function coreBgRemovalModel(allNodes: NodePresence): string | null {
   return models.find((m) => /birefnet/i.test(m)) ?? models[0] ?? null
 }
 
+/**
+ * One line for the agent's media_list. It used to ask only for RMBG, so a core
+ * with BiRefNet read as "not installed" and the agent told the user to install
+ * a pack the app no longer needs.
+ */
+export function bgRemovalStatus(allNodes: NodePresence): string {
+  const model = hasCoreBgRemoval(allNodes) ? coreBgRemovalModel(allNodes) : null
+  if (model) return `ready (ComfyUI core, ${model})`
+  if (allNodes['RMBG']) return 'ready (ComfyUI-RMBG)'
+  if (hasCoreBgRemoval(allNodes)) {
+    return `needs its model (${BIREFNET.filename}, 424 MB), downloaded from the Remove Background tab`
+  }
+  return 'not available (update ComfyUI, or install ComfyUI-RMBG from the Remove Background tab)'
+}
+
 /** A cutout can run now: core nodes with a model, or the RMBG pack. */
 export function bgRemovalReady(allNodes: NodePresence): boolean {
   return (hasCoreBgRemoval(allNodes) && coreBgRemovalModel(allNodes) !== null) || !!allNodes['RMBG']
