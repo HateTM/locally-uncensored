@@ -1048,46 +1048,67 @@ import {
   // iframe overlay in `_openHtmlPreview`.
   var COLLAPSE_THRESHOLD = 4;
 
+  // Code blocks are cut out of the RAW text and escaped once. The old version
+  // escaped the whole text first and cut the blocks out of that, then
+  // escaped them again: HTML in a block read `&lt;div&gt;` on screen, and
+  // Copy and Preview got the entities instead of the code. The inline rules
+  // (`code`, **bold**) also ran over the finished block HTML, so `**` inside
+  // a code block turned bold. Inline rules now see only prose.
   function renderMd(text){
+    var src = String(text == null ? '' : text);
+    var re = /```(\w*)\n?([\s\S]*?)```/g;
+    var out = '';
+    var last = 0;
+    var m;
+    while ((m = re.exec(src)) !== null) {
+      out += renderInline(src.slice(last, m.index)) + codeBlockHtml(m[1], m[2]);
+      last = re.lastIndex;
+    }
+    return out + renderInline(src.slice(last));
+  }
+
+  function renderInline(text){
     var s = H(text);
-    s = s.replace(/```(\w*)\n?([\s\S]*?)```/g, function(_, lang, code){
-      var rawCode = code.replace(/\n$/, ''); // trim trailing newline
-      var rawHtmlEscaped = H(rawCode);
-      var lines = rawCode.split('\n');
-      var lineCount = lines.length;
-      var langLabel = (lang || 'code').toLowerCase();
-      var key = djb2(langLabel + '\n' + rawCode);
-      // Cache the original source so the Preview button can read it back.
-      codeBlockSource[key] = { lang: langLabel, code: rawCode };
-      var isLong = lineCount > COLLAPSE_THRESHOLD;
-      var expanded = !isLong || codeBlockOpen[key] === true;
-      var displayCode = expanded
-        ? rawHtmlEscaped
-        : H(lines.slice(0, COLLAPSE_THRESHOLD).join('\n'));
-      var htmlPreview = isHtmlSnippet(langLabel, rawCode);
-      var previewBtn = htmlPreview
-        ? '<button class="cb-action" onclick="window._openHtmlPreview(\''+key+'\')" aria-label="Preview HTML"><span class="material-symbols-outlined">'+svgIcon('eye')+'</span><span class="cb-action-label">Preview</span></button>'
-        : '';
-      var toggleBtn = isLong
-        ? '<button class="cb-toggle" onclick="window._toggleCodeBlock(\''+key+'\')"><span class="material-symbols-outlined cb-chev">'+svgIcon('expand_more')+'</span>'+(expanded?'Collapse':('Show all '+lineCount+' lines'))+'</button>'
-        : '';
-      return ''+
-        '<div class="cb-wrap'+(expanded?' open':'')+'" data-cb-id="'+key+'">'+
-          '<div class="cb-head">'+
-            '<span class="cb-lang">'+H(langLabel)+'</span>'+
-            '<div class="cb-actions">'+
-              previewBtn +
-              '<button class="cb-action" onclick="window._copyCodeKey(\''+key+'\')" aria-label="Copy"><span class="material-symbols-outlined">'+svgIcon('content_copy')+'</span><span class="cb-action-label">Copy</span></button>'+
-            '</div>'+
-          '</div>'+
-          '<pre class="cb-pre"><code>'+displayCode+'</code></pre>'+
-          toggleBtn +
-        '</div>';
-    });
     s = s.replace(/`([^`]+)`/g,'<code>$1</code>');
     s = s.replace(/\*\*(.+?)\*\*/g,'<b>$1</b>');
     return s;
   }
+
+  function codeBlockHtml(lang, code){
+    var rawCode = code.replace(/\n$/, ''); // trim trailing newline
+    var rawHtmlEscaped = H(rawCode);
+    var lines = rawCode.split('\n');
+    var lineCount = lines.length;
+    var langLabel = (lang || 'code').toLowerCase();
+    var key = djb2(langLabel + '\n' + rawCode);
+    // Cache the original source so the Preview button can read it back.
+    codeBlockSource[key] = { lang: langLabel, code: rawCode };
+    var isLong = lineCount > COLLAPSE_THRESHOLD;
+    var expanded = !isLong || codeBlockOpen[key] === true;
+    var displayCode = expanded
+      ? rawHtmlEscaped
+      : H(lines.slice(0, COLLAPSE_THRESHOLD).join('\n'));
+    var htmlPreview = isHtmlSnippet(langLabel, rawCode);
+    var previewBtn = htmlPreview
+      ? '<button class="cb-action" onclick="window._openHtmlPreview(\''+key+'\')" aria-label="Preview HTML"><span class="material-symbols-outlined">'+svgIcon('eye')+'</span><span class="cb-action-label">Preview</span></button>'
+      : '';
+    var toggleBtn = isLong
+      ? '<button class="cb-toggle" onclick="window._toggleCodeBlock(\''+key+'\')"><span class="material-symbols-outlined cb-chev">'+svgIcon('expand_more')+'</span>'+(expanded?'Collapse':('Show all '+lineCount+' lines'))+'</button>'
+      : '';
+    return ''+
+      '<div class="cb-wrap'+(expanded?' open':'')+'" data-cb-id="'+key+'">'+
+        '<div class="cb-head">'+
+          '<span class="cb-lang">'+H(langLabel)+'</span>'+
+          '<div class="cb-actions">'+
+            previewBtn +
+            '<button class="cb-action" onclick="window._copyCodeKey(\''+key+'\')" aria-label="Copy"><span class="material-symbols-outlined">'+svgIcon('content_copy')+'</span><span class="cb-action-label">Copy</span></button>'+
+          '</div>'+
+        '</div>'+
+        '<pre class="cb-pre"><code>'+displayCode+'</code></pre>'+
+        toggleBtn +
+      '</div>';
+  }
+
 
   // Toggle handler for the "Show all N lines" / "Collapse" button.
   window._toggleCodeBlock = function(key){
