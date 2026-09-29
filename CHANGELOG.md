@@ -2,6 +2,74 @@
 
 All notable changes to Locally Uncensored are documented here.
 
+## [3.2.0] - 2026-09-29
+
+Every Create section with a prompt can start from a CivitAI example. Video is
+written as mp4 and backgrounds are cut out on ComfyUI's own nodes, the big
+video models run on their official graphs, and Discover lists live models from
+Hugging Face and CivitAI. The open-model counts from 3.0.2 still hold:
+fourteen video models and seven image models in the cloud catalogue.
+
+### Added
+
+- **Examples from CivitAI in every section with a prompt.** Image, Edit,
+  Video, Animate and Extend have an Examples button next to the prompt. It
+  shows CivitAI images or videos with their generation data, from civitai.com
+  or civitai.red, filtered by sort, period, content level and the family of
+  your model. Use this example copies the prompt, negative prompt and
+  settings, with the installed LoRAs; a missing LoRA downloads with one click.
+- **Live models in Discover.** A "Trending on Hugging Face" section lists new
+  GGUF text models the LU Engine can load, and a popular CivitAI list shows
+  checkpoints and LoRAs with their model family and an Adult badge.
+- **Voice mode speaks Russian.** A reply written in Russian is read by a
+  Russian Piper voice of your choice, and two German voices join the list.
+  The Whisper size is selectable (base, small, medium, large-v3-turbo) and
+  runs on the GPU when there is one.
+
+### Changed
+
+- **Video is saved as mp4 without VideoHelperSuite.** Every video render
+  writes mp4 through ComfyUI's own CreateVideo and SaveVideo nodes, like the
+  official templates. The offer to install VHS only appears on a ComfyUI too
+  old to write mp4 itself.
+- **Background removal on ComfyUI's own nodes.** Remove Background runs the
+  official BiRefNet graph and only needs the 424 MB model, downloaded from
+  the tab; ComfyUI-RMBG stays as the fallback.
+- **The fit hint in Discover counts the context.** "Runs on your PC" now adds
+  the KV cache of the engine's context to the model size, as the LU Engine
+  does when it starts.
+- **Lightning and Rapid AIO merges** sample at 6 steps and CFG 1 on the
+  agent's video paths too, as they already did in Create.
+- **Context trimming counts Russian and JSON correctly.** The token estimate
+  follows how text is split into tokens, so a Russian chat or a long tool
+  result is trimmed before the model's window is full.
+
+### Fixed
+
+- **HunyuanVideo 1.5, LTX 2.3 and Wan 2.2 A14B** render on their official
+  graphs; HunyuanVideo 1.5 gave coloured noise and the other two did not run
+  as built. ACE-Step 1.5 music samples like its own templates.
+- **An Edit keeps its mask and source** with a workflow preset, after a
+  builder error and after switching from cloud to local; before, the whole
+  picture was repainted from the prompt.
+- **Create shows a result as soon as ComfyUI finishes**, instead of up to
+  ten seconds later.
+- **The GPU you pick in Hardware reaches the LU Engine** on machines with
+  more than one card.
+- **Document chat retrieves better** with nomic-embed-text, which now gets
+  its task prefixes; existing documents are re-embedded once, by themselves.
+- **Search in a large document no longer freezes the app.**
+- **A/B Compare** measures generation instead of model loading, and a side
+  that fails says why.
+- **The mobile client shows code blocks as code**, and Copy and Preview get
+  the code itself.
+- **A CivitAI download no longer lands under a .zip name** ComfyUI never
+  lists; LoRAs made for another model family add no trigger words.
+- **The safety check that refuses sexual content involving minors reads
+  Russian**, and Russian requests only reach the image tools when they ask
+  for a picture.
+- **The agent's web fetch connects only to the address it checked.**
+
 ## [3.1.0] - 2026-09-29
 
 The agent can now do everything the Create tab does: generate and edit with
