@@ -1,6 +1,6 @@
 import {
   classifyModel, findMatchingVAE, findMatchingCLIP, findFluxCLIPPair,
-  isHunyuanVideo15, findHunyuan15Encoders,
+  isHunyuanVideo15, findHunyuan15Encoders, isLtx2, wan22Expert,
   findMatchingAudioEncoder, findMatchingClipVision, findFramePackCLIPPair,
 } from './comfyui'
 import type { ModelType, GenerateParams, VideoParams } from './comfyui'
@@ -79,7 +79,9 @@ export type WorkflowStrategy =
   | 'unet_sd15'       // SD 1.5 unet in diffusion_models: CLIPLoader(stable_diffusion) + ft-mse VAE
   | 'unet_video'      // Wan/Hunyuan: UNETLoader + CLIPLoader + VAELoader + EmptyHunyuanLatentVideo
   | 'wan22'           // Wan 2.2 TI2V-5B: UNET + CLIP + Wan 2.2 VAE + Wan22ImageToVideoLatent (unified T2V/I2V)
-  | 'unet_ltx'        // LTX Video: UNETLoader + CLIPLoader + EmptyLTXVLatentVideo
+  | 'unet_ltx'        // LTX-Video 0.9: UNETLoader / checkpoint + CLIPLoader(ltxv, T5) + EmptyLTXVLatentVideo
+  | 'ltx2'            // LTX-2 / 2.3: checkpoint + LTXAVTextEncoderLoader(Gemma) + audio VAE, distilled sigmas, optional x2 stage
+  | 'wan22_moe'       // Wan 2.2 A14B: high-noise + low-noise UNETs, KSamplerAdvanced hand-off, wan_2.1_vae
   | 'unet_mochi'      // Mochi: UNETLoader + CLIPLoader + VAELoader + EmptyMochiLatentVideo
   | 'unet_cosmos'     // Cosmos: UNETLoader + CLIPLoader(oldt5) + VAELoader + EmptyCosmosLatentVideo
   | 'svd'             // SVD: ImageOnlyCheckpointLoader + SVD_img2vid_Conditioning
@@ -194,6 +196,9 @@ export function determineStrategy(
 
   // LTX Video → UNET + LTXVLatentVideo (no separate VAE needed)
   if (modelType === 'ltx') {
+    if (modelName && isLtx2(modelName)) {
+      return { strategy: 'ltx2', reason: 'LTX-2 → checkpoint + Gemma + audio/video latent (official video_ltx2_3 template)' }
+    }
     if (hasUNET && hasCLIPLoader) {
       return { strategy: 'unet_ltx', reason: 'LTX Video → UNETLoader + EmptyLTXVLatentVideo' }
     }
@@ -219,6 +224,9 @@ export function determineStrategy(
     // Wan path rendered noise. Only 1.5, which the catalogue ships, is built.
     if (modelType === 'hunyuan' && modelName && !isHunyuanVideo15(modelName)) {
       return { strategy: 'unavailable', reason: 'HunyuanVideo 1 is not supported in this build. Use HunyuanVideo 1.5 from the Model Manager, or Wan, LTX or SVD.' }
+    }
+    if (modelType === 'wan' && modelName && wan22Expert(modelName) && hasUNET && hasCLIPLoader && hasVAELoader) {
+      return { strategy: 'wan22_moe', reason: 'Wan 2.2 A14B → high-noise + low-noise experts (official video_wan2_2_14B template)' }
     }
     if (hasUNET && hasCLIPLoader && hasVAELoader) {
       return { strategy: 'unet_video', reason: `${modelType} model → UNETLoader + video latent` }
@@ -647,6 +655,12 @@ export async function buildDynamicWorkflow(
   if (strategy === 'framepack') {
     return await buildFramePackWorkflow(params as VideoParams, seed, nodes)
   }
+  if (strategy === 'ltx2') {
+    return await buildLtx2Workflow(params as VideoParams, seed, allNodes, { inCheckpoints, inUnets })
+  }
+  if (strategy === 'wan22_moe') {
+    return await buildWan22MoeWorkflow(params as VideoParams, seed, nodes, allNodes, listedUnets)
+  }
 
   // ─── Standard Strategies (UNET/Checkpoint → CLIP → Latent → KSampler → VAEDecode) ───
 
@@ -834,7 +848,10 @@ export async function buildDynamicWorkflow(
     // VAE is only loaded for strategies with a separate VAELoader — LTX bakes it
     // into the pipeline, so a missing VAE there is fine. Validate (same
     // no-silent-fallback rule) only when it will actually be used.
-    const needsVAELoader = strategy !== 'unet_ltx'
+    // LTX-Video 0.9 ships as a checkpoint whose VAE is output 2 (its template);
+    // a bare unet needs the separate VAE like every other family. The old
+    // "LTX bakes it in" shortcut wired VAEDecode to the MODEL output.
+    const needsVAELoader = true
     let vae = ''
     if (needsVAELoader && !(fromCheckpoint && parts?.vae)) {
       try {
@@ -878,7 +895,7 @@ export async function buildDynamicWorkflow(
         inputs: { vae_name: vae },
       }
     } else {
-      vaeId = unetId // fallback reference (won't be used for LTX)
+      vaeId = unetId // the checkpoint's own VAE (slot 2, vaeFromFile)
     }
 
     modelNodeId = unetId
@@ -1802,6 +1819,344 @@ async function buildWan22Workflow(params: VideoParams, seed: number, nodes: Cate
   const decodeId = String(n++)
   workflow[decodeId] = videoDecodeNode([samplerId, 0], [vaeId, 0], nodes.decoders.includes('VAEDecodeTiled'))
 
+  addVideoOutput(workflow, n, decodeId, params.fps, nodes, params.prompt)
+  return workflow
+}
+
+/** The negative prompt of the official LTX-2.3 templates. */
+export const LTX2_DEFAULT_NEGATIVE = 'pc game, console game, video game, cartoon, childish, ugly'
+/** ManualSigmas of the official LTX-2.3 templates: the full distilled
+ *  schedule for the first pass, its tail for the x2 refine pass. */
+export const LTX2_SIGMAS = '1.0, 0.99375, 0.9875, 0.98125, 0.975, 0.909375, 0.725, 0.421875, 0.0'
+export const LTX2_REFINE_SIGMAS = '0.85, 0.7250, 0.4219, 0.0'
+
+/**
+ * LTX-2 / LTX-2.3, rebuilt from the official video_ltx2_3_t2v / _i2v templates
+ * (Comfy-Org/workflow_templates dd9769b, FINDINGS 23). What the app built
+ * before could not run: the checkpoint went through UNETLoader, which has no
+ * VAE output, so VAEDecode got a MODEL, and the Gemma projection that lives in
+ * the checkpoint was never loaded.
+ *
+ * The graph, node for node the template's:
+ *   - CheckpointLoaderSimple (MODEL + video VAE), LTXVAudioVAELoader and
+ *     LTXAVTextEncoderLoader(Gemma, checkpoint) all read the same checkpoint,
+ *     so it has to sit in models/checkpoints.
+ *   - Video and audio latents are sampled together (LTXVConcatAVLatent), and
+ *     the clip comes out with its sound (CreateVideo + SaveVideo).
+ *   - CFGGuider at cfg 1 with ManualSigmas: the distilled schedule. A dev
+ *     checkpoint gets the template's distilled LoRA at 0.5 and needs it.
+ *   - With the spatial upscaler installed, the template's two passes: half
+ *     size first, LTXVLatentUpsampler x2, then the short refine schedule with
+ *     LTXVCropGuides. Without it, one pass at the full size on the full
+ *     schedule.
+ *   - Image-to-video: LTXVPreprocess(18) and LTXVImgToVideoInplace, strength
+ *     0.7 on the first pass and 1.0 on the refine pass.
+ *
+ * Left out on purpose: the template's optional prompt enhancer
+ * (TextGenerateLTX2Prompt with the abliterated Gemma LoRA, switched off in
+ * the i2v template) and its image resize chain, which ImageScale to the
+ * target size covers for every size up to the 1536 cap it enforces.
+ */
+async function buildLtx2Workflow(
+  params: VideoParams,
+  seed: number,
+  allNodes: NodePresence,
+  where: { inCheckpoints: boolean; inUnets: boolean },
+): Promise<ComfyApiGraph> {
+  const ckpt = params.model
+  if (!where.inCheckpoints && where.inUnets) {
+    throw new WorkflowUnavailableError(
+      `${ckpt} sits in models/diffusion_models, but LTX-2 is a full checkpoint: its VAE, audio VAE and text projection are read from the same file. Move it to models/checkpoints, restart ComfyUI, then try again.`,
+      'ltx2',
+    )
+  }
+  requireNodes(allNodes, [
+    'LTXAVTextEncoderLoader', 'LTXVAudioVAELoader', 'LTXVEmptyLatentAudio', 'LTXVConcatAVLatent',
+    'LTXVSeparateAVLatent', 'LTXVAudioVAEDecode', 'LTXVConditioning', 'EmptyLTXVLatentVideo',
+    'CFGGuider', 'SamplerCustomAdvanced', 'ManualSigmas', 'KSamplerSelect', 'RandomNoise',
+  ], 'LTX-2')
+
+  const gemma = nodeComboOptions(allNodes, 'LTXAVTextEncoderLoader', 'text_encoder').find((c) => /gemma/i.test(c))
+    ?? await findMatchingCLIP('ltx', ckpt).catch((err: unknown) => {
+      throw new WorkflowUnavailableError(err instanceof Error ? err.message : 'LTX-2 needs the Gemma 3 12B text encoder.', 'ltx2')
+    })
+
+  // A dev checkpoint samples on the distilled schedule only with the
+  // template's distilled LoRA; without it the 8 sigmas under-cook the clip.
+  let distillLora: string | null = null
+  if (!/distill/i.test(ckpt)) {
+    distillLora = nodeComboOptions(allNodes, 'LoraLoaderModelOnly', 'lora_name')
+      .find((l) => /ltx[-_]?2/i.test(l) && /distill/i.test(l)) ?? null
+    if (!distillLora) {
+      throw new WorkflowUnavailableError(
+        `${ckpt} is the LTX-2 dev checkpoint. Its official graph adds the distilled LoRA (ltx_2.3_22b_distilled_1.1_lora_dynamic_fro09_avg_rank_111_bf16.safetensors, models/loras). Download it, or use the distilled checkpoint.`,
+        'ltx2',
+      )
+    }
+  }
+  const upscaler = allNodes['LTXVLatentUpsampler'] && allNodes['LatentUpscaleModelLoader'] && allNodes['LTXVCropGuides']
+    ? nodeComboOptions(allNodes, 'LatentUpscaleModelLoader', 'model_name').find((m) => /ltx[-_]?2.*spatial|spatial.*ltx/i.test(m)) ?? null
+    : null
+  const twoPass = upscaler !== null
+  const isI2V = !!params.inputImage
+  if (isI2V) requireNodes(allNodes, ['LTXVPreprocess', 'LTXVImgToVideoInplace'], 'LTX-2 image-to-video')
+
+  // The latent is a 32nd of the frame; the first pass runs at half size, so
+  // the final size snaps to 64 there. Length is 8k+1 (temporal stride 8).
+  const grid = twoPass ? 64 : 32
+  const snap = (v: number | undefined, def: number) => Math.max(grid, Math.round(((v && v > 0) ? v : def) / grid) * grid)
+  const width = snap(params.width, 768)
+  const height = snap(params.height, 512)
+  const f = Number.isFinite(params.frames) && params.frames > 0 ? Math.round(params.frames) : 97
+  const length = Math.max(1, Math.round((f - 1) / 8)) * 8 + 1
+  const fps = params.fps > 0 ? params.fps : 24
+
+  const workflow: ComfyApiGraph = {}
+  let n = 1
+  const id = () => String(n++)
+
+  const ckptId = id()
+  workflow[ckptId] = { class_type: 'CheckpointLoaderSimple', inputs: { ckpt_name: ckpt } }
+  const audioVaeId = id()
+  workflow[audioVaeId] = { class_type: 'LTXVAudioVAELoader', inputs: { ckpt_name: ckpt } }
+  const clipId = id()
+  workflow[clipId] = { class_type: 'LTXAVTextEncoderLoader', inputs: { text_encoder: gemma, ckpt_name: ckpt, device: 'default' } }
+
+  let modelSrc = ckptId
+  const loras = [...(distillLora ? [distillLora] : []), ...normalizeLoraList(params.lora)]
+  const userStrengths = normalizeLoraStrengths(params.loraStrength, normalizeLoraList(params.lora).length)
+  const strengths = [...(distillLora ? [0.5] : []), ...userStrengths]
+  loras.forEach((lora, i) => {
+    const loraId = id()
+    workflow[loraId] = { class_type: 'LoraLoaderModelOnly', inputs: { model: [modelSrc, 0], lora_name: lora, strength_model: strengths[i] } }
+    modelSrc = loraId
+  })
+
+  const posId = id()
+  workflow[posId] = { class_type: 'CLIPTextEncode', inputs: { clip: [clipId, 0], text: params.prompt } }
+  const negId = id()
+  workflow[negId] = { class_type: 'CLIPTextEncode', inputs: { clip: [clipId, 0], text: params.negativePrompt?.trim() || LTX2_DEFAULT_NEGATIVE } }
+  const condId = id()
+  workflow[condId] = { class_type: 'LTXVConditioning', inputs: { positive: [posId, 0], negative: [negId, 0], frame_rate: fps } }
+
+  let imageRef: [string, number] | null = null
+  if (isI2V) {
+    const loadId = id()
+    workflow[loadId] = { class_type: 'LoadImage', inputs: { image: params.inputImage } }
+    const scaleId = id()
+    workflow[scaleId] = { class_type: 'ImageScale', inputs: { image: [loadId, 0], upscale_method: 'lanczos', width, height, crop: 'center' } }
+    const prepId = id()
+    workflow[prepId] = { class_type: 'LTXVPreprocess', inputs: { image: [scaleId, 0], img_compression: 18 } }
+    imageRef = [prepId, 0]
+  }
+
+  // Pass 1 (half size when a refine pass follows).
+  const videoLatentId = id()
+  workflow[videoLatentId] = {
+    class_type: 'EmptyLTXVLatentVideo',
+    inputs: { width: twoPass ? width / 2 : width, height: twoPass ? height / 2 : height, length, batch_size: 1 },
+  }
+  let videoLatent: [string, number] = [videoLatentId, 0]
+  if (imageRef) {
+    const inplaceId = id()
+    workflow[inplaceId] = {
+      class_type: 'LTXVImgToVideoInplace',
+      inputs: { vae: [ckptId, 2], image: imageRef, latent: videoLatent, strength: twoPass ? 0.7 : 1.0, bypass: false },
+    }
+    videoLatent = [inplaceId, 0]
+  }
+  const audioLatentId = id()
+  workflow[audioLatentId] = { class_type: 'LTXVEmptyLatentAudio', inputs: { audio_vae: [audioVaeId, 0], frames_number: length, frame_rate: fps, batch_size: 1 } }
+  const avId = id()
+  workflow[avId] = { class_type: 'LTXVConcatAVLatent', inputs: { video_latent: videoLatent, audio_latent: [audioLatentId, 0] } }
+
+  const sample = (guider: [string, number], sigmas: string, latent: [string, number], noiseSeed: number): string => {
+    const noiseId = id()
+    workflow[noiseId] = { class_type: 'RandomNoise', inputs: { noise_seed: noiseSeed } }
+    const samplerSelId = id()
+    workflow[samplerSelId] = { class_type: 'KSamplerSelect', inputs: { sampler_name: 'euler' } }
+    const sigmasId = id()
+    workflow[sigmasId] = { class_type: 'ManualSigmas', inputs: { sigmas } }
+    const samplerId = id()
+    workflow[samplerId] = {
+      class_type: 'SamplerCustomAdvanced',
+      inputs: { noise: [noiseId, 0], guider, sampler: [samplerSelId, 0], sigmas: [sigmasId, 0], latent_image: latent },
+    }
+    const sepId = id()
+    workflow[sepId] = { class_type: 'LTXVSeparateAVLatent', inputs: { av_latent: [samplerId, 0] } }
+    return sepId
+  }
+
+  const guiderId = id()
+  workflow[guiderId] = { class_type: 'CFGGuider', inputs: { model: [modelSrc, 0], positive: [condId, 0], negative: [condId, 1], cfg: 1 } }
+  let finalSep = sample([guiderId, 0], LTX2_SIGMAS, [avId, 0], seed)
+
+  if (twoPass) {
+    // Pass 2: the template's x2 latent upscale and short refine schedule.
+    const upModelId = id()
+    workflow[upModelId] = { class_type: 'LatentUpscaleModelLoader', inputs: { model_name: upscaler } }
+    const upId = id()
+    workflow[upId] = { class_type: 'LTXVLatentUpsampler', inputs: { samples: [finalSep, 0], upscale_model: [upModelId, 0], vae: [ckptId, 2] } }
+    let refineLatent: [string, number] = [upId, 0]
+    if (imageRef) {
+      const inplaceId = id()
+      workflow[inplaceId] = {
+        class_type: 'LTXVImgToVideoInplace',
+        inputs: { vae: [ckptId, 2], image: imageRef, latent: refineLatent, strength: 1.0, bypass: false },
+      }
+      refineLatent = [inplaceId, 0]
+    }
+    const av2Id = id()
+    workflow[av2Id] = { class_type: 'LTXVConcatAVLatent', inputs: { video_latent: refineLatent, audio_latent: [finalSep, 1] } }
+    const cropId = id()
+    workflow[cropId] = { class_type: 'LTXVCropGuides', inputs: { positive: [condId, 0], negative: [condId, 1], latent: [finalSep, 0] } }
+    const guider2Id = id()
+    workflow[guider2Id] = { class_type: 'CFGGuider', inputs: { model: [modelSrc, 0], positive: [cropId, 0], negative: [cropId, 1], cfg: 1 } }
+    finalSep = sample([guider2Id, 0], LTX2_REFINE_SIGMAS, [av2Id, 0], seed + 1)
+  }
+
+  const decodeId = id()
+  workflow[decodeId] = allNodes['VAEDecodeTiled']
+    ? { class_type: 'VAEDecodeTiled', inputs: { samples: [finalSep, 0], vae: [ckptId, 2], tile_size: 768, overlap: 64, temporal_size: 4096, temporal_overlap: 4 } }
+    : { class_type: 'VAEDecode', inputs: { samples: [finalSep, 0], vae: [ckptId, 2] } }
+  const audioId = id()
+  workflow[audioId] = { class_type: 'LTXVAudioVAEDecode', inputs: { samples: [finalSep, 1], audio_vae: [audioVaeId, 0] } }
+  addVideoWithAudioOutput(workflow, n, decodeId, fps, [audioId, 0], allNodes, params.prompt)
+  return workflow
+}
+
+/**
+ * Wan 2.2 A14B, rebuilt from the official video_wan2_2_14B_t2v / _i2v
+ * templates. A14B is two models: the high-noise expert lays out the clip over
+ * the first half of the steps, the low-noise expert finishes it
+ * (KSamplerAdvanced with return_with_leftover_noise, then add_noise off from
+ * the same step). Both are Wan 2.1 architecture: umt5 encoder, wan_2.1_vae,
+ * ModelSamplingSD3 at shift 5. The app sent them down the TI2V-5B graph
+ * (Wan 2.2 VAE, 48 channels) before, which cannot run a 14B expert.
+ *
+ * The user picks either expert, the partner is found by name. The template's
+ * lightx2v 4-step LoRAs are not added; a user who adds them sets 4 steps /
+ * cfg 1 like the template's switch does.
+ */
+async function buildWan22MoeWorkflow(
+  params: VideoParams,
+  seed: number,
+  nodes: CategorizedNodes,
+  allNodes: NodePresence,
+  listedUnets: string[],
+): Promise<ComfyApiGraph> {
+  const side = wan22Expert(params.model)
+  const lower = params.model.toLowerCase()
+  const isI2VModel = lower.includes('i2v')
+  if (params.inputImage && !isI2VModel) {
+    throw new WorkflowUnavailableError('This is the Wan 2.2 text-to-video expert, it cannot animate an image. Pick the i2v pair (wan2.2_i2v_high_noise / low_noise).', 'wan22_moe')
+  }
+  if (!params.inputImage && isI2VModel) {
+    throw new WorkflowUnavailableError('This is the Wan 2.2 image-to-video expert, it needs a source image. Use Animate, or pick the t2v pair for text-to-video.', 'wan22_moe')
+  }
+  const partnerLower = lower.replace(/(high|low)([_-]?)noise/, (_m, _s: string, sep: string) => `${side === 'high' ? 'low' : 'high'}${sep}noise`)
+  const partner = listedUnets.find((u) => u.toLowerCase() === partnerLower)
+  if (!partner) {
+    throw new WorkflowUnavailableError(
+      `Wan 2.2 A14B needs both experts, and ${params.model} is only the ${side}-noise half. Download its ${side === 'high' ? 'low' : 'high'}-noise partner into models/diffusion_models (the same file name with "${side === 'high' ? 'low' : 'high'}_noise").`,
+      'wan22_moe',
+    )
+  }
+  const [high, low] = side === 'high' ? [params.model, partner] : [partner, params.model]
+  requireNodes(allNodes, ['KSamplerAdvanced', 'ModelSamplingSD3', isI2VModel ? 'WanImageToVideo' : 'EmptyHunyuanLatentVideo'], 'Wan 2.2 A14B')
+
+  let clip: string
+  let vae: string
+  try {
+    ;[clip, vae] = await Promise.all([findMatchingCLIP('wan', params.model), findMatchingVAE('wan')])
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Wan 2.2 A14B needs the umt5 text encoder and wan_2.1_vae.'
+    throw new WorkflowUnavailableError(message, 'wan22_moe', undefined, { missing: registrySpecsNamedIn('wan', message) })
+  }
+
+  // Wan 2.1 latent grid: 16 px spatial, 4k+1 frames.
+  const snap16 = (v: number | undefined, def: number) => Math.max(64, Math.round(((v && v > 0) ? v : def) / 16) * 16)
+  const width = snap16(params.width, 640)
+  const height = snap16(params.height, 640)
+  const length = snapWanLength(params.frames || 81)
+  const steps = Math.max(2, Math.round(params.steps || 20))
+  const handoff = Math.max(1, Math.floor(steps / 2))
+
+  const workflow: ComfyApiGraph = {}
+  let n = 1
+  const id = () => String(n++)
+  const highId = id()
+  addUnetLoader(workflow, highId, high, allNodes)
+  const lowId = id()
+  addUnetLoader(workflow, lowId, low, allNodes)
+  const clipId = id()
+  workflow[clipId] = { class_type: 'CLIPLoader', inputs: { clip_name: clip, type: 'wan', device: 'default' } }
+  const vaeId = id()
+  workflow[vaeId] = { class_type: 'VAELoader', inputs: { vae_name: vae } }
+
+  // User LoRAs are model-only video LoRAs; they go on both experts.
+  const loras = normalizeLoraList(params.lora)
+  const loraStrengths = normalizeLoraStrengths(params.loraStrength, loras.length)
+  const patch = (src: string): string => {
+    let cur = src
+    loras.forEach((lora, i) => {
+      const loraId = id()
+      workflow[loraId] = { class_type: 'LoraLoaderModelOnly', inputs: { model: [cur, 0], lora_name: lora, strength_model: loraStrengths[i] } }
+      cur = loraId
+    })
+    const shiftId = id()
+    workflow[shiftId] = { class_type: 'ModelSamplingSD3', inputs: { model: [cur, 0], shift: 5 } }
+    return shiftId
+  }
+  const highModel = patch(highId)
+  const lowModel = patch(lowId)
+
+  const posId = id()
+  workflow[posId] = { class_type: 'CLIPTextEncode', inputs: { clip: [clipId, 0], text: params.prompt } }
+  const negId = id()
+  workflow[negId] = { class_type: 'CLIPTextEncode', inputs: { clip: [clipId, 0], text: params.negativePrompt?.trim() || WAN_DEFAULT_NEGATIVE } }
+
+  let positive: [string, number] = [posId, 0]
+  let negative: [string, number] = [negId, 0]
+  let latent: [string, number]
+  if (isI2VModel) {
+    const loadId = id()
+    workflow[loadId] = { class_type: 'LoadImage', inputs: { image: params.inputImage } }
+    const scaleId = id()
+    workflow[scaleId] = { class_type: 'ImageScale', inputs: { image: [loadId, 0], upscale_method: 'lanczos', width, height, crop: 'center' } }
+    const i2vId = id()
+    workflow[i2vId] = {
+      class_type: 'WanImageToVideo',
+      inputs: { positive, negative, vae: [vaeId, 0], start_image: [scaleId, 0], width, height, length, batch_size: 1 },
+    }
+    positive = [i2vId, 0]
+    negative = [i2vId, 1]
+    latent = [i2vId, 2]
+  } else {
+    const latentId = id()
+    workflow[latentId] = { class_type: 'EmptyHunyuanLatentVideo', inputs: { width, height, length, batch_size: 1 } }
+    latent = [latentId, 0]
+  }
+
+  const common = { positive, negative, steps, cfg: params.cfgScale, sampler_name: params.sampler || 'euler', scheduler: params.scheduler || 'simple' }
+  const firstId = id()
+  workflow[firstId] = {
+    class_type: 'KSamplerAdvanced',
+    inputs: {
+      ...common, model: [highModel, 0], latent_image: latent, add_noise: 'enable', noise_seed: seed,
+      start_at_step: 0, end_at_step: handoff, return_with_leftover_noise: 'enable',
+    },
+  }
+  const secondId = id()
+  workflow[secondId] = {
+    class_type: 'KSamplerAdvanced',
+    inputs: {
+      ...common, model: [lowModel, 0], latent_image: [firstId, 0], add_noise: 'disable', noise_seed: 0,
+      start_at_step: handoff, end_at_step: 10000, return_with_leftover_noise: 'disable',
+    },
+  }
+  const decodeId = id()
+  workflow[decodeId] = videoDecodeNode([secondId, 0], [vaeId, 0], nodes.decoders.includes('VAEDecodeTiled'))
   addVideoOutput(workflow, n, decodeId, params.fps, nodes, params.prompt)
   return workflow
 }

@@ -12,8 +12,9 @@
  *
  * Deliberately conservative. A family is only mapped when LU's graph for it
  * matches ComfyUI's; the families whose local graph does not currently match
- * (FINDINGS 23: Wan 2.2 A14B, LTX, HunyuanVideo) are listed as unsupported
- * with that reason instead of being offered as compatible.
+ * (FINDINGS 23: HunyuanVideo 1, LTX-Video 0.9) are listed as unsupported with
+ * that reason instead of being offered as compatible. Wan 2.2 A14B and LTX-2
+ * joined once their graphs were rebuilt from the official templates.
  */
 import type { ModelType } from '../api/comfyui'
 
@@ -44,18 +45,17 @@ add('chroma', 'Chroma', ['Chroma'])
 add('hidream', 'HiDream', ['HiDream'])
 add('sd3', 'SD 3.5', ['SD 3', 'SD 3.5', 'SD 3.5 Large', 'SD 3.5 Large Turbo', 'SD 3.5 Medium'])
 add('lumina2', 'Lumina 2', ['Lumina'])
-add('wan', 'Wan 2.1', ['Wan Video', 'Wan Video 1.3B t2v', 'Wan Video 14B t2v', 'Wan Video 14B i2v 480p', 'Wan Video 14B i2v 720p'])
+// Wan 2.2 A14B experts are Wan 2.1 architecture and classify as 'wan'
+// (comfyui.ts isWan22Big), so their LoRAs fit that family.
+add('wan', 'Wan 2.1', ['Wan Video', 'Wan Video 1.3B t2v', 'Wan Video 14B t2v', 'Wan Video 14B i2v 480p', 'Wan Video 14B i2v 720p', 'Wan Video 2.2 I2V-A14B', 'Wan Video 2.2 T2V-A14B'])
 add('wan22', 'Wan 2.2 TI2V-5B', ['Wan Video 2.2 TI2V-5B'])
+add('ltx', 'LTX-2', ['LTXV2', 'LTXV 2.3'])
 add('svd', 'SVD', ['SVD', 'SVD XT'])
 add('mochi', 'Mochi', ['Mochi'])
 
 const REASONS: Record<string, string> = {
-  'Wan Video 2.2 I2V-A14B': 'Wan 2.2 A14B (high/low noise) has no local pipeline in LU yet',
-  'Wan Video 2.2 T2V-A14B': 'Wan 2.2 A14B (high/low noise) has no local pipeline in LU yet',
-  'LTXV': 'LTX Video is not wired correctly in LU yet',
-  'LTXV2': 'LTX Video is not wired correctly in LU yet',
-  'LTXV 2.3': 'LTX Video is not wired correctly in LU yet',
-  'LTXV 2.5': 'LTX Video is not wired correctly in LU yet',
+  'LTXV': 'LTX-Video 0.9 runs on a simplified graph in LU, not its official one',
+  'LTXV 2.5': 'LTX Video 2.5 has no local pipeline in LU yet',
   'Hunyuan Video': 'HunyuanVideo is not wired correctly in LU yet',
   'CogVideoX': 'CogVideoX is switched off in LU',
   'Pony V7': 'Pony V7 is AuraFlow-based, not SDXL, and LU has no AuraFlow pipeline',

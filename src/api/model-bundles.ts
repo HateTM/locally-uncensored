@@ -795,7 +795,10 @@ export function getVideoBundles(): ModelBundle[] {
           description: 'Main video model · distilled for fast inference.',
           pulls: '', tags: ['Model', '~22 GB'], updated: 'New',
           downloadUrl: 'https://huggingface.co/Lightricks/LTX-2.3-fp8/resolve/main/ltx-2.3-22b-distilled-fp8.safetensors',
-          filename: 'ltx-2.3-22b-distilled-fp8.safetensors', subfolder: 'diffusion_models', sizeGB: 27.5,
+          // A full checkpoint: the graph reads its VAE, audio VAE and text
+          // projection from this same file, so it lives in models/checkpoints
+          // (official video_ltx2_3 templates, FINDINGS 23).
+          filename: 'ltx-2.3-22b-distilled-fp8.safetensors', subfolder: 'checkpoints', sizeGB: 27.5,
         },
         {
           name: 'Gemma 3 12B Text Encoder (FP8)',
