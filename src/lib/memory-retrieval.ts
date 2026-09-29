@@ -13,7 +13,7 @@
  *
  * Signals (weights sum to 1.0):
  *   - semantic  0.60 — cosineSimilarity(queryVec, memoryVec)
- *   - keyword   0.25 — bm25Score over (title + description + content)
+ *   - keyword   0.25 — bm25Scores over (title + description + content)
  *   - recency   0.15 — newer memories rank higher (exponential half-life)
  *   plus a small additive type boost for `user` / `feedback` (most actionable).
  *
@@ -25,7 +25,8 @@
  */
 
 import type { MemoryFile, MemoryType } from "../types/agent-mode"
-import { cosineSimilarity, bm25Score } from "../api/rag"
+import { cosineSimilarity } from "../api/rag"
+import { bm25Scores } from "./bm25"
 
 // ── Tunable weights & thresholds (NAMED CONSTANTS) ────────────────
 // NOTE: these are first-pass values. They need live MV3/MV4 validation
@@ -171,7 +172,7 @@ export function scoreMemoriesBlended(
       ? cosineSimilarity(queryVec, c.vector)
       : 0,
   )
-  const rawKeyword = pool.map((_, i) => bm25Score(query, docTexts[i], docTexts))
+  const rawKeyword = bm25Scores(query, docTexts)
   const rawRecency = pool.map((c) => recencyScore(c.memory.updatedAt, now))
 
   // ── Normalize each signal to 0..1 across the candidate set ─────
