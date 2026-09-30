@@ -1,4 +1,5 @@
 import { useState, useCallback } from "react"
+import { frameFlush } from '../lib/frame-flush'
 import { sendWindowFor } from '../lib/send-window'
 import { markCannotThink } from '../lib/model-compatibility'
 import { v4 as uuid } from "uuid"
@@ -140,7 +141,7 @@ async function runGroupTurn(convId: string, model: string, allModels: string[], 
   let thinkingAcc = ''
   let inThink = false
   let discardBuf = ''
-  let frameScheduled = false
+  const frames = frameFlush()
   let groupFinish: string | undefined
   // A model's own lines are untagged; a "[other-model]" tag in its OWN reply is
   // it speaking for someone else, which v1 must not show.
@@ -216,17 +217,16 @@ async function runGroupTurn(convId: string, model: string, allModels: string[], 
           }
         }
       }
-      if ((chunk.content || (chunk.thinking && keepThinking)) && !frameScheduled) {
-        frameScheduled = true
-        requestAnimationFrame(() => {
+      if (chunk.content || (chunk.thinking && keepThinking)) {
+        frames.schedule(() => {
           useChatStore.getState().updateMessageContent(convId, assistantMessage.id, stripImpersonatedSpeakers(stripNonCanonicalTags(contentAcc), others))
           if (keepThinking && thinkingAcc) {
             useChatStore.getState().updateMessageThinking(convId, assistantMessage.id, thinkingAcc)
           }
-          frameScheduled = false
         })
       }
       if (chunk.done) {
+        frames.close()
         if (chunk.finishReason) groupFinish = chunk.finishReason
         // Same settlement as every other path (2.6.7 Denk-Audit): the state
         // machine above only fires on a literal `<think>`, and a Qwen3
@@ -253,6 +253,7 @@ async function runGroupTurn(convId: string, model: string, allModels: string[], 
         }
       }
     }
+    frames.close()
     if (!abort.signal.aborted && !contentAcc.trim()) {
       // Empty turn: say WHY, length-aware, not a flat "didn't return an answer".
       // The bubble already labels the speaker, so no model prefix here.
@@ -263,6 +264,7 @@ async function runGroupTurn(convId: string, model: string, allModels: string[], 
       )
     }
   } catch (err) {
+    frames.close()
     if ((err as Error).name !== 'AbortError') {
       syncOllamaHealthFromError(err)
       // Bug B3 round 2: a group round on a strict template used to paste the
@@ -1064,6 +1066,8 @@ export function useChat() {
     // above. `convId` is fixed at this point: the `if (!convId)` branch above
     // already resolved it to a real string.
     const run: ChatRun = { convId, content: "", thinking: "", isThinking: false, discardedThinkBuf: "" }
+    // Before the try, so the catch can close it (lib/frame-flush).
+    const frames = frameFlush()
 
     try {
       // ── Multi-Provider: resolve provider for active model ──
@@ -1177,7 +1181,6 @@ export function useChat() {
 
       const stream = createStreamWithFallback()
 
-      let frameScheduled = false
       let firstChunk = true
       // Thinking visibility is driven by the toggle. When OFF, we still
       // have to parse <think>…</think> so the state-machine closes
@@ -1258,9 +1261,8 @@ export function useChat() {
         // the reasoning-only phase too (cloud reasoners stream all their
         // thinking before the first answer token; previously the flush only
         // ran on content chunks and the chat sat in dead air).
-        if ((chunk.content || (chunk.thinking && keepThinking)) && !frameScheduled) {
-          frameScheduled = true
-          requestAnimationFrame(() => {
+        if (chunk.content || (chunk.thinking && keepThinking)) {
+          frames.schedule(() => {
             const cId = run.convId
             const mId = assistantMessage.id
             // Always strip non-canonical thinking markers (Gemma channel
@@ -1273,11 +1275,11 @@ export function useChat() {
             if (keepThinking && run.thinking) {
               useChatStore.getState().updateMessageThinking(cId, mId, run.thinking)
             }
-            frameScheduled = false
           })
         }
 
         if (chunk.done) {
+          frames.close()
           if (chunk.finishReason) {
             finishReason = chunk.finishReason
             useChatStore.getState().updateMessageFinishReason(run.convId, assistantMessage.id, chunk.finishReason)
@@ -1317,6 +1319,9 @@ export function useChat() {
           }
         }
       }
+      // A stream can end without a done chunk; the lines below write the
+      // bubble directly and a late frame must not land on top of them.
+      frames.close()
 
       // Thought-only completion: the model reasoned and then STOPPED without
       // a single visible token (gemma4 primed by remembered tool results does
@@ -1362,6 +1367,7 @@ export function useChat() {
         }
       }
     } catch (err) {
+      frames.close()
       if ((err as Error).name !== "AbortError") {
         // Bug C — translate Ollama provider errors into health-store
         // updates so the header chip + top banner light up reactively.

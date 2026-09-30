@@ -1,4 +1,5 @@
 import { useRef, useState, useCallback, useEffect } from 'react'
+import { frameFlush } from '../lib/frame-flush'
 import { markCannotThink } from '../lib/model-compatibility'
 import {
   type ApprovalEntry,
@@ -1163,21 +1164,19 @@ export function useAgentChat() {
     runState.thinking = ''
     runState.blocks = []
 
-    let frameScheduled = false
+    // Closed at the final write and in the catch, so a late frame never lands
+    // on the closing line or the error (lib/frame-flush).
+    const frames = frameFlush()
 
     function scheduleUIUpdate() {
-      if (!frameScheduled) {
-        frameScheduled = true
-        requestAnimationFrame(() => {
-          const cId = convId!
-          const mId = assistantMessage.id
-          useChatStore.getState().updateMessageContent(cId, mId, runState.content)
-          if (runState.thinking) {
-            useChatStore.getState().updateMessageThinking(cId, mId, runState.thinking)
-          }
-          frameScheduled = false
-        })
-      }
+      frames.schedule(() => {
+        const cId = convId!
+        const mId = assistantMessage.id
+        useChatStore.getState().updateMessageContent(cId, mId, runState.content)
+        if (runState.thinking) {
+          useChatStore.getState().updateMessageThinking(cId, mId, runState.thinking)
+        }
+      })
     }
 
     // Phase 6: lock in the start-of-turn timestamp so the in-turn cache
@@ -2800,12 +2799,14 @@ export function useAgentChat() {
       }
 
       // Final store update
+      frames.close()
       useChatStore.getState().updateMessageContent(convId!, assistantMessage.id, runState.content)
       if (runState.thinking) {
         useChatStore.getState().updateMessageThinking(convId!, assistantMessage.id, runState.thinking)
       }
 
     } catch (err) {
+      frames.close()
       if ((err as Error).name !== 'AbortError') {
         const errorMsg = errorText(err) || 'Connection failed'
         // Bug B3 round 2: a refusal that produced nothing at all (the model's
