@@ -610,7 +610,7 @@ export function tauriMockInit(opts: TauriMockOptions) {
         return Promise.resolve({ content: key ? files[key] : '', encoding: 'utf8' })
       }
       case 'fs_write':
-        record('__E2E_TOOL_CALLS__', { cmd, path: m?.path })
+        record('__E2E_TOOL_CALLS__', { cmd, path: m?.path, content: m?.content })
         return Promise.resolve({ ok: true, path: m?.path })
       case 'fs_list':
         record('__E2E_TOOL_CALLS__', { cmd, path: m?.path })

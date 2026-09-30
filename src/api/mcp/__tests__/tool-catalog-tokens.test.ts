@@ -108,10 +108,16 @@ const fullWire = () => JSON.stringify(wireTools(codingCatalog()))
  *
  * Der codierende Zug ist der, den jeder Refactor bezahlt, und er bleibt
  * gleich. Das ist der Grund, warum das Tor existiert.
+ *
+ * ── 30.09.2026: file_edit bekommt `edits` und `replace_all` ───────────────
+ * Kundenfall swift_maple90: jede Aenderung an derselben Datei war ein eigener
+ * Roundtrip mit vollem Kontext. `edits` buendelt sie in einen Aufruf. Die
+ * Beschreibung ist dafuer gekuerzt, der codierende Zug bleibt unter 7600;
+ * der volle Katalog steht bei 17.946 Zeichen, Deckel gemessen plus Rand.
  */
 const CODING_CHAR_CEILING = 7600
 const CODING_TOKEN_CEILING = 1730
-const FULL_CHAR_CEILING = 17880
+const FULL_CHAR_CEILING = 17980
 const FULL_TOKEN_CEILING = 4090
 
 describe('the coding step carries a catalog the diet actually shrank', () => {

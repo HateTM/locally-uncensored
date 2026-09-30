@@ -306,3 +306,34 @@ test('the plan the model writes shows up above the composer and tracks progress'
   const calls = await toolCalls(page)
   expect(calls.filter((c) => c.cmd === 'todo_write')).toEqual([])
 })
+
+test('file_edit: several edits in one call, one of them with the indentation off, land in one write', async ({ page }) => {
+  // 01.10.2026: every failed edit on a paid model was "read again, retry",
+  // two more full-context round trips. The model here sends two changes in one
+  // call, and copies the first with an indentation the file does not have.
+  await bootAgentMode(page, [
+    {
+      text: 'patching',
+      toolCalls: [{
+        name: 'file_edit',
+        args: {
+          path: 'big.ts',
+          edits: [
+            { old_string: '    line 10\n    line 11', new_string: '    LINE TEN\n    LINE ELEVEN' },
+            { old_string: 'line 150', new_string: 'LINE 150' },
+          ],
+        },
+      }],
+    },
+    { text: 'EDITS_DONE' },
+  ])
+
+  await instruct(page, 'rename line 10, 11 and 150 in big.ts')
+  await expect(page.getByRole('main').getByText('EDITS_DONE')).toBeVisible({ timeout: 30_000 })
+
+  const writes = (await toolCalls(page)).filter((c) => c.cmd === 'fs_write')
+  expect(writes).toHaveLength(1)
+  const content = String(writes[0].raw.content)
+  expect(content).toContain('line 9\nLINE TEN\nLINE ELEVEN\nline 12')
+  expect(content).toContain('line 149\nLINE 150\nline 151')
+})

@@ -163,7 +163,7 @@ Work in batches. Every step resends the whole conversation, so each round trip c
 
 Rules:
 - Always read a file before modifying it
-- To CHANGE part of an existing file, use file_edit (replace a UNIQUE old_string with new_string), it is far cheaper and safer than rewriting the whole file with file_write, and never truncates a large file. Use file_write only to CREATE a new file or fully replace one. If file_edit reports the old_string is missing or not unique, read the file and retry with more surrounding lines.
+- To CHANGE part of an existing file, use file_edit (replace a UNIQUE old_string with new_string), it is far cheaper and safer than rewriting the whole file with file_write, and never truncates a large file. Use file_write only to CREATE a new file or fully replace one. Several changes to the same file go into ONE file_edit call as \`edits\`. If file_edit reports the old_string is missing or not unique, read the file and retry with more surrounding lines.
 - PATHS: use paths relative to the working directory shown below (e.g. \`package.json\`, \`src/app.ts\`, \`.\` for the current folder). Never start a path with \`/\` or a drive letter (\`C:\\\`), that escapes the workspace and fails.
 - Chain tool calls: after each tool result, if there is another step left, IMMEDIATELY call the next tool
 - If a command fails, diagnose and retry with a different approach, don't hand back to the user unless truly stuck

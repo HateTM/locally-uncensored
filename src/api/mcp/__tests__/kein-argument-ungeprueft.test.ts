@@ -68,7 +68,7 @@ const PFLICHT: Record<string, Record<string, string>> = {
   web_fetch: { url: 'https://example.com/a' },
   file_read: { path: 'a.ts' },
   file_write: { path: 'a.ts', content: 'neu' },
-  file_edit: { path: 'a.ts', old_string: 'alt', new_string: 'neu' },
+  file_edit: { path: 'a.ts' },
   file_list: { path: '.' },
   file_search: { path: '.', pattern: 'alt' },
   pr_resume: { url: 'https://github.com/o/r/pull/1' },
@@ -185,6 +185,18 @@ describe('die Pruefung sperrt nicht aus, was gemeint sein kann', () => {
     const call = backendCalls.find((c) => c.cmd === 'fs_write')
     expect(call?.body.content).toBe('')
     expect(call?.body.path).toBe('leer.txt')
+  })
+
+  // file_edit verlangt im Katalog nur `path`, weil `edits` die beiden Felder
+  // ersetzen kann. Ohne beides darf trotzdem nichts geschrieben werden.
+  it.each([
+    [{ path: 'a.ts', new_string: 'neu' }, 'old_string'],
+    [{ path: 'a.ts', old_string: 'alt' }, 'new_string'],
+    [{ path: 'a.ts', edits: [{ old_string: 'alt' }] }, 'new_string'],
+  ])('file_edit %j schreibt nichts und nennt %s', async (args, fehlt) => {
+    const out = await registry.execute('file_edit', args)
+    expect(out).toContain(fehlt)
+    expect(befehle()).not.toContain('fs_write')
   })
 
   it('new_string: "" loescht weiterhin Text', async () => {

@@ -20,7 +20,7 @@ import {
   buildCheckTasksExecutor,
   buildMessageAgentExecutor,
 } from '../agents/agent-task-tools'
-import { applyUniqueEdit } from '../../lib/surgical-edit'
+import { applyEdits, editsFromArgs, type EditSpec } from '../../lib/surgical-edit'
 import { sliceFileReadResult } from '../../lib/file-read-window'
 import { writeTodos, summarizeTodos } from '../../stores/todoStore'
 import { isMlxImageHost, generateMlxImageDataUrl, listMlxImageModels, type MlxImageModel } from '../mlx-image'
@@ -266,17 +266,30 @@ const BUILTIN_TOOLS: MCPToolDefinition[] = [
   {
     name: 'file_edit',
     description:
-      'Make a SURGICAL edit to an existing file: replace old_string with new_string. PREFER it over file_write for any change to a file that exists. '
-      + 'old_string must match EXACTLY ONCE: copy the exact text including indentation from a prior file_read and take enough surrounding lines to be unique. '
-      + 'It FAILS with no change when old_string is missing or matches twice; then read the file and retry with more context.',
+      'Edit an existing file, PREFER over file_write: replace old_string, copied from file_read with enough context to match ONE place, with new_string. '
+      + 'Several changes to one file: ONE call with `edits`. No match or several: nothing changes.',
     inputSchema: {
       type: 'object',
       properties: {
-        path: { type: 'string', description: 'Path to the existing file (absolute preferred)' },
-        old_string: { type: 'string', description: 'Exact text to find — must occur exactly once in the file' },
-        new_string: { type: 'string', description: 'Replacement text' },
+        path: { type: 'string', description: 'Existing file' },
+        old_string: { type: 'string', description: 'Text to find' },
+        new_string: { type: 'string', description: 'Replacement' },
+        replace_all: { type: 'boolean', description: 'Replace every match' },
+        edits: {
+          type: 'array',
+          description: 'In order, all or nothing',
+          items: {
+            type: 'object',
+            properties: {
+              old_string: { type: 'string', description: 'Text to find' },
+              new_string: { type: 'string', description: 'Replacement' },
+              replace_all: { type: 'boolean', description: 'Every match' },
+            },
+            required: ['old_string', 'new_string'],
+          },
+        },
       },
-      required: ['path', 'old_string', 'new_string'],
+      required: ['path'],
     },
     category: 'filesystem',
     source: 'builtin',
@@ -673,16 +686,15 @@ async function executeFileEdit(args: ToolArgs, run?: AgentRunContext): Promise<s
   const bad = missingArgs('file_edit', args, 'path')
   if (bad) return bad
   const path = argString(args, 'path')
-  const oldString = argString(args, 'old_string')
-  if (!oldString) return 'Error: file_edit requires a non-empty old_string. To create a new file use file_write.'
+  const edits = editsFromArgs(args)
+  if (edits.some((e) => !e.old_string)) return 'Error: file_edit requires a non-empty old_string. To create a new file use file_write.'
   // `new_string` wie `content` bei file_write: '' ist ein gültiger Auftrag
   // (Text löschen), ein fehlendes Feld nicht. `argString` zog beides zu ''
   // zusammen — ein vergessenes Argument löschte damit still den Fundtext.
-  if (typeof args.new_string !== 'string') {
+  if (edits.some((e) => e.new_string === undefined)) {
     return 'file_edit: `new_string` is required — the replacement text. '
       + 'Pass "" to delete old_string. Nothing was changed; call file_edit again with it set.'
   }
-  const newString = args.new_string
 
   // Read the CURRENT content (workspace-aware). file_edit only edits an
   // existing text file — for a new file the model must use file_write.
@@ -695,8 +707,9 @@ async function executeFileEdit(args: ToolArgs, run?: AgentRunContext): Promise<s
   if (data.encoding === 'binary' || data.encoding === 'base64') return `Error: file_edit cannot edit a binary file (${path}).`
   const content = typeof data.content === 'string' ? data.content : ''
 
-  const res = applyUniqueEdit(content, oldString, newString)
+  const res = applyEdits(content, edits as EditSpec[])
   if (!res.ok) {
+    const which = res.failedIndex !== undefined ? ` (edit ${res.failedIndex + 1} of ${edits.length}, nothing was applied)` : ''
     switch (res.reason) {
       // Über DIESEN Pfad nicht mehr erreichbar (`old_string` wird oben geprüft,
       // bevor gelesen wird); der Zweig bleibt, weil `EditFailReason` ein
@@ -706,16 +719,18 @@ async function executeFileEdit(args: ToolArgs, run?: AgentRunContext): Promise<s
       case 'noop':
         return 'Error: old_string and new_string are identical, nothing to change.'
       case 'not_found':
-        return `Error: old_string was not found in ${path}. Read the file and copy the exact text (including indentation) you want to replace.`
+        return `Error: old_string was not found in ${path}${which}. Read the file and copy the exact text you want to replace.`
       case 'not_unique':
-        return `Error: old_string matches ${res.matches} places in ${path}. Add surrounding lines so it uniquely identifies ONE location, then retry.`
+        return `Error: old_string matches ${res.matches} places in ${path}${which}. Add surrounding lines so it identifies ONE location, or set replace_all, then retry.`
       default:
         return 'Error: file_edit failed.'
     }
   }
 
   const w = await backendCall<FsWriteResult>('fs_write', { path, content: res.content, ...chatCtx(run) })
-  if (w.status === 'saved' && w.path) return `Edited ${w.path} (1 replacement).`
+  const n = res.replacements ?? 1
+  const note = res.fuzzyCount ? ` ${res.fuzzyCount === 1 ? 'One edit' : `${res.fuzzyCount} edits`} matched with indentation ignored; re-read before editing the same lines again.` : ''
+  if (w.status === 'saved' && w.path) return `Edited ${w.path} (${n} replacement${n === 1 ? '' : 's'}).${note}`
   if (w.status === 'unchanged' && w.path) return `No change written to ${w.path} (content already matched).`
   return JSON.stringify(w)
 }
