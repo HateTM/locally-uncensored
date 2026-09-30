@@ -538,28 +538,42 @@ const SMALL_MODEL_EMBEDDING_THRESHOLD = 6
 export function toolSelectionOpts(
   smallModelMode: boolean,
   embed?: EmbeddingFn,
-): { embed?: EmbeddingFn; embeddingThreshold?: number; topN?: number; maxTools?: number } {
+  pin?: string[],
+): { embed?: EmbeddingFn; embeddingThreshold?: number; topN?: number; maxTools?: number; pin?: string[] } {
+  const pins = pin && pin.length > 0 ? { pin } : {}
   return smallModelMode
     ? {
         embed,
         topN: SMALL_MODEL_TOP_N,
         embeddingThreshold: SMALL_MODEL_EMBEDDING_THRESHOLD,
         maxTools: SMALL_MODEL_MAX_TOOLS,
+        ...pins,
       }
-    : { embed }
+    : { embed, ...pins }
 }
 
 export async function selectRelevantToolsAsync(
   userMessage: string,
   allTools: MCPToolDefinition[],
   permissions: PermissionMap,
-  opts?: { embed?: EmbeddingFn; embeddingThreshold?: number; topN?: number; maxTools?: number },
+  opts?: { embed?: EmbeddingFn; embeddingThreshold?: number; topN?: number; maxTools?: number; pin?: string[] },
 ): Promise<MCPToolDefinition[]> {
   const threshold = opts?.embeddingThreshold ?? EMBEDDING_ROUTING_THRESHOLD
   const available = allTools.filter((t) => permissions[t.category] !== 'blocked')
-  const pinned = mentionedToolNames(userMessage, available)
+  // `pin`: the tools an agent skill's recipe calls (lib/agent-skills.ts). They
+  // are ADDED when the keyword/embedding pick missed them, and pinned past the
+  // Small-Model cap, because a recipe that names a tool the list lacks is how
+  // a 9B model ends up searching LoRAs to edit a photo. A blocked tool stays
+  // out: `available` already dropped it.
+  const forced = available.filter((t) => opts?.pin?.includes(t.name))
+  const pinned = [...new Set([...mentionedToolNames(userMessage, available), ...forced.map((t) => t.name)])]
+  const withForced = (list: MCPToolDefinition[]): MCPToolDefinition[] => {
+    if (forced.length === 0) return list
+    const have = new Set(list.map((t) => t.name))
+    return [...list, ...forced.filter((t) => !have.has(t.name))]
+  }
   if (!opts?.embed || available.length <= threshold) {
-    return applyMaxTools(selectRelevantTools(userMessage, allTools, permissions), opts?.maxTools, undefined, pinned)
+    return applyMaxTools(withForced(selectRelevantTools(userMessage, allTools, permissions)), opts?.maxTools, undefined, pinned)
   }
   try {
     const semanticNames = await selectToolsByEmbedding(
@@ -576,8 +590,8 @@ export async function selectRelevantToolsAsync(
     // maxTools is unset → `selected` (and its original order) is returned
     // byte-identical, so big-model behaviour is unchanged. Verbatim-named
     // tools are pinned past the cap on both paths.
-    return applyMaxTools(selected, opts.maxTools, semanticNames, pinned)
+    return applyMaxTools(withForced(selected), opts.maxTools, semanticNames, pinned)
   } catch {
-    return applyMaxTools(selectRelevantTools(userMessage, allTools, permissions), opts?.maxTools, undefined, pinned)
+    return applyMaxTools(withForced(selectRelevantTools(userMessage, allTools, permissions)), opts?.maxTools, undefined, pinned)
   }
 }

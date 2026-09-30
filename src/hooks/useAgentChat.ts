@@ -60,6 +60,7 @@ import { useAgentWorkflowStore } from '../stores/agentWorkflowStore'
 import { WorkflowEngine, describeWorkflowCompletion, describeWorkflowStepFailure } from '../lib/workflow-engine'
 import type { AgentBlock, AgentToolCall } from '../types/agent-mode'
 import { selectRelevantToolsAsync, toolSelectionOpts, ALWAYS_INCLUDE } from '../lib/tool-selection'
+import { matchSkills, renderSkillSection, skillTools } from '../lib/agent-skills'
 import { renderToolRoster, renderToolNames } from '../lib/tool-roster'
 import { MUTATING_TOOLS, allowedInReadOnlyTurn } from '../lib/mutating-tools'
 import { resolveApprovalLevel } from '../lib/agent-approval-policy'
@@ -964,6 +965,20 @@ export function useAgentChat() {
     const toolMatchesCurated = (name: string) =>
       (!curated || curated.includes(name)) && !(opts?.readOnly && !allowedInReadOnlyTurn(name))
 
+    // Agent skills (lib/agent-skills.ts): a recipe for the task this message
+    // asks for goes into the system prompt, and the tools it names are pinned
+    // into the tool list past the Small-Model cap. "A picture in the
+    // conversation" counts one attached earlier too: "edit the attached photo"
+    // usually comes in a later message than the photo.
+    const conversationHasImages = (userImages?.length ?? 0) > 0
+      || (conv?.messages ?? []).some((m) => m.role === 'user' && (m.images?.length ?? 0) > 0)
+    // A skill whose recipe needs a tool this turn cannot offer (plain chat's
+    // five, a read-only turn) would tell the model to call something missing.
+    const turnSkills = matchSkills(userContent, { hasImages: conversationHasImages })
+      .filter((k) => k.tools.every(toolMatchesCurated))
+    const skillPin = skillTools(turnSkills).filter(toolMatchesCurated)
+    if (turnSkills.length > 0) log.info('agent.skills', { skills: turnSkills.map((k) => k.id), pin: skillPin })
+
     // ── Die Werkzeugliste fuer den Rueckfallweg ─────────────────────────────
     //
     // Hier stand `toolRegistry.toHermesToolDefs(permissions)` — also der ganze
@@ -992,7 +1007,7 @@ export function useAgentChat() {
           userContent,
           toolRegistry.getAll().filter((t) => toolMatchesCurated(t.name)),
           permissions,
-          toolSelectionOpts(!!settings.smallModelMode, (texts) => generateEmbeddings(texts)),
+          toolSelectionOpts(!!settings.smallModelMode, (texts) => generateEmbeddings(texts), skillPin),
         )
       : []
     // Small-Model Mode (Knob 2): swap the ~3000-char agent prompt for a lean
@@ -1029,6 +1044,7 @@ export function useAgentChat() {
     // Standing goal (/goal) — same section Code injects, so the objective
     // survives a switch between the two surfaces.
     agentSystemPrompt += renderGoalSection(useAgentGoalStore.getState().getGoal(convId))
+    agentSystemPrompt += renderSkillSection(turnSkills)
 
     // Multi-Repo (Sprint C #8): when the agent workspace has extra paths,
     // append a "Workspaces" section so the model can reference them by
@@ -1561,7 +1577,7 @@ export function useAgentChat() {
             lastUserMsg,
             toolRegistry.getAll().filter((t) => toolMatchesCurated(t.name)),
             permissions,
-            toolSelectionOpts(!!settings.smallModelMode, (texts) => generateEmbeddings(texts)),
+            toolSelectionOpts(!!settings.smallModelMode, (texts) => generateEmbeddings(texts), skillPin),
           )
           const tools: ToolDefinition[] = relevantDefs.map(t => ({
             type: 'function' as const,

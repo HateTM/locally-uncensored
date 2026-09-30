@@ -341,3 +341,16 @@ describe('external (MCP) tools are always offered', () => {
     expect(toolNames(out)).toContain('list_directory')
   })
 })
+
+describe('pin: an agent skill\'s tools reach the Small-Model list', () => {
+  it('a pinned tool the keyword pick missed is added, and survives the cap', async () => {
+    const { selectRelevantToolsAsync, SMALL_MODEL_MAX_TOOLS, ALWAYS_INCLUDE } = await import('../tool-selection')
+    const mk = (name: string, category = 'file') => ({ name, description: name, inputSchema: { type: 'object', properties: {} }, category }) as never
+    const all = [...ALWAYS_INCLUDE.map((n) => mk(n)), mk('web_search', 'web'), mk('web_fetch', 'web'), mk('shell_execute', 'terminal'), mk('image_generate', 'system')]
+    const perms = { file: 'auto', web: 'auto', terminal: 'auto', system: 'auto' } as never
+    const out = await selectRelevantToolsAsync('убери бикини', all, perms, { maxTools: SMALL_MODEL_MAX_TOOLS, pin: ['image_generate'] })
+    expect(out.map((t: { name: string }) => t.name)).toContain('image_generate')
+    const blocked = await selectRelevantToolsAsync('убери бикини', all, { ...(perms as object), system: 'blocked' } as never, { maxTools: SMALL_MODEL_MAX_TOOLS, pin: ['image_generate'] })
+    expect(blocked.map((t: { name: string }) => t.name)).not.toContain('image_generate')
+  })
+})
