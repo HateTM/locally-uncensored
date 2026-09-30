@@ -12,9 +12,10 @@ import { v4 as uuid } from 'uuid'
 import type { ToolArgs } from './types'
 import type { AgentRunContext } from '../agent-context'
 import type { WorkflowStep } from '../../types/agent-workflows'
+import { CIVITAI_TOOL_DEADLINE_MS, LORA_DOWNLOAD_WAIT_MS } from '../../lib/tool-timeout'
 
 const LIST_CAP = 40
-const LORA_WAIT_MS = 20 * 60_000
+const LORA_WAIT_MS = LORA_DOWNLOAD_WAIT_MS
 const POLL_MS = 2_000
 
 function list(label: string, items: string[]): string {
@@ -31,6 +32,35 @@ async function civitaiAuth(): Promise<{ apiKey?: string; host: string }> {
   const { useWorkflowStore } = await import('../../stores/workflowStore')
   const st = useWorkflowStore.getState()
   return { apiKey: st.civitaiApiKey || undefined, host: st.civitaiHost }
+}
+
+/** Thrown by withCivitaiDeadline when CivitAI takes longer than the tool may wait. */
+class CivitaiSlow extends Error {}
+
+/**
+ * One CivitAI request under the tool's own deadline, so the answer is this
+ * tool's (with the host and the mirror named) and not the loop's anonymous
+ * "Tool execution timed out" (lib/tool-timeout.ts CIVITAI_TOOL_DEADLINE_MS).
+ */
+async function withCivitaiDeadline<T>(p: Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      p,
+      new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new CivitaiSlow()), CIVITAI_TOOL_DEADLINE_MS) }),
+    ])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+}
+
+/** What to tell the model when CivitAI does not answer: the host, the mirror, and to go on without it. */
+function civitaiUnreachable(host: string, what: string): string {
+  const mirror = host === 'civitai.red'
+    ? ''
+    : ' If civitai.com is blocked where the user is, they can switch Settings → CivitAI host to civitai.red.'
+  return `CivitAI (${host}) did not answer within ${Math.round(CIVITAI_TOOL_DEADLINE_MS / 1000)} s, so ${what} is not available right now.${mirror}`
+    + ' Do not retry this search; continue with the task without it.'
 }
 
 // ── media_list ──────────────────────────────────────────────────
@@ -93,8 +123,17 @@ export async function executeMediaList(args: ToolArgs): Promise<string> {
 async function searchLoras(query: string): Promise<string> {
   const { searchCivitaiModels } = await import('../discover')
   const { apiKey, host } = await civitaiAuth()
-  const hits = (await searchCivitaiModels(query, 'LORA', apiKey, host)).filter((h) => h.downloadUrl).slice(0, 8)
-  if (hits.length === 0) return `No CivitAI LoRA found for "${query}" (or CivitAI did not answer). Try other words.`
+  let found: Awaited<ReturnType<typeof searchCivitaiModels>>
+  try {
+    found = await withCivitaiDeadline(searchCivitaiModels(query, 'LORA', apiKey, host))
+  } catch (e) {
+    if (e instanceof CivitaiSlow) return civitaiUnreachable(host, `a LoRA search for "${query}"`)
+    throw e
+  }
+  const hits = found.filter((h) => h.downloadUrl).slice(0, 8)
+  if (hits.length === 0) {
+    return `No CivitAI LoRA found for "${query}" on ${host} (or CivitAI did not answer). Try other words once; if it is empty again, continue without a LoRA.`
+  }
   const rows = hits.map((h) => {
     const bits = [
       h.baseModel ? `base ${h.baseModel}` : '',
@@ -121,8 +160,9 @@ async function civitaiRecipe(ref: string): Promise<string> {
   const { fetchExternal } = await import('../backend')
   let recipe: ReturnType<typeof parseCivitaiImage>
   try {
-    recipe = parseCivitaiImage(JSON.parse(await fetchExternal(`https://${host}/api/v1/images?imageId=${id}&nsfw=X`, auth.apiKey ?? null)))
+    recipe = parseCivitaiImage(JSON.parse(await withCivitaiDeadline(fetchExternal(`https://${host}/api/v1/images?imageId=${id}&nsfw=X`, auth.apiKey ?? null))))
   } catch (e) {
+    if (e instanceof CivitaiSlow) return civitaiUnreachable(host, `the recipe of image ${id}`)
     return `Error: CivitAI did not answer for image ${id}: ${errText(e)}`
   }
   if (!recipe) return `CivitAI image ${id} carries no generation data (its creator hid it, or it was not generated with a tool that records it).`

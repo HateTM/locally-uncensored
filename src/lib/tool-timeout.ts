@@ -53,6 +53,23 @@ export const NO_PRACTICAL_CAP_MS = 2_147_483_000
  */
 const AGENT_LOOP_TOOLS = new Set(['delegate_task', 'run_workflow'])
 
+/**
+ * How long `lora_download` waits for its download to finish before it hands
+ * back "still downloading" (api/mcp/media-tools.ts). It fell under the generic
+ * 60 s cap, so every LoRA that took longer than a minute ended as "Tool
+ * execution timed out" while the file kept downloading; the cap has to sit
+ * above the tool's own deadline, as the header says.
+ */
+export const LORA_DOWNLOAD_WAIT_MS = 20 * 60_000
+
+/**
+ * The deadline media_list gives one CivitAI request (search, image recipe).
+ * The backend's own fetch gives up after 60 s, which is the generic cap: an
+ * unreachable civitai.com ended as an anonymous timeout instead of the tool's
+ * own answer that names the host and the civitai.red mirror.
+ */
+export const CIVITAI_TOOL_DEADLINE_MS = 50_000
+
 export interface ToolTimeoutSettings {
   imageGenTimeoutMinutes?: number
   videoGenTimeoutMinutes?: number
@@ -70,6 +87,7 @@ export function toolCallCapMs(
   if (name === 'video_generate') {
     return Math.max(1, Number(settings.videoGenTimeoutMinutes) || 60) * 60_000 + 120_000
   }
+  if (name === 'lora_download') return LORA_DOWNLOAD_WAIT_MS + 60_000
   if (AGENT_LOOP_TOOLS.has(name) && args?.background !== true) {
     return NO_PRACTICAL_CAP_MS
   }

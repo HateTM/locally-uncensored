@@ -274,3 +274,14 @@ describe('Auflage 4: eine synchron werfende Fabrik reisst den Deckel-Timer und d
     await expect(promise).rejects.toBe(boom)
   })
 })
+
+describe('lora_download and CivitAI requests stay under their own deadlines', () => {
+  it('lora_download waits for its download: the cap sits above its own 20 minute wait', async () => {
+    const { LORA_DOWNLOAD_WAIT_MS } = await import('../tool-timeout')
+    expect(toolCallCapMs('lora_download', {}, settings)).toBeGreaterThan(LORA_DOWNLOAD_WAIT_MS)
+  })
+  it('media_list keeps the generic cap, and its CivitAI deadline answers before it', async () => {
+    const { CIVITAI_TOOL_DEADLINE_MS } = await import('../tool-timeout')
+    expect(CIVITAI_TOOL_DEADLINE_MS).toBeLessThan(toolCallCapMs('media_list', {}, settings))
+  })
+})
