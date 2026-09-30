@@ -47,11 +47,11 @@ describe('examplesMediaFor', () => {
 })
 
 describe('examplesUrl', () => {
-  it('sends only the documented parameters, on the configured mirror', () => {
+  it('asks for the generation data (withMeta) and sends only known parameters, on the configured mirror', () => {
     const u = new URL(examplesUrl({ host: 'civitai.red', sort: 'Most Reactions', period: 'Week', nsfw: 'X', cursor: '0|1' }))
     expect(u.host).toBe('civitai.red')
     expect(u.pathname).toBe('/api/v1/images')
-    expect(Object.fromEntries(u.searchParams)).toEqual({ limit: '100', sort: 'Most Reactions', period: 'Week', nsfw: 'X', cursor: '0|1' })
+    expect(Object.fromEntries(u.searchParams)).toEqual({ limit: '100', sort: 'Most Reactions', period: 'Week', nsfw: 'X', withMeta: 'true', cursor: '0|1' })
   })
   it('any other host falls back to civitai.com, and limit stays in 1…200', () => {
     const u = new URL(examplesUrl({ host: 'evil.example', sort: 'Newest', period: 'Day', nsfw: 'None', limit: 999 }))

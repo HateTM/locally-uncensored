@@ -8,8 +8,8 @@
  * LU already offers (Settings, CivitAI host), so the feed comes from whichever
  * host is set.
  *
- * Only query parameters the public endpoint documents are sent (limit, cursor,
- * sort, period, nsfw). Media type and model family are filtered here, on the
+ * Only the query parameters the endpoint takes are sent (limit, cursor, sort,
+ * period, nsfw, withMeta). Media type and model family are filtered here, on the
  * items, because an unknown parameter is a 400 and an ignored one is a lie.
  *
  * Pure. The fetch is in api/civitai-examples.ts, the grid in
@@ -61,6 +61,9 @@ export function examplesUrl(q: ExampleQuery): string {
     sort: q.sort,
     period: q.period,
     nsfw: q.nsfw,
+    // Without it CivitAI answers every item with `meta: null`, and a feed
+    // without generation data has nothing to copy.
+    withMeta: 'true',
   })
   if (q.cursor) params.set('cursor', q.cursor)
   const host = /^civitai\.(com|red)$/i.test(q.host) ? q.host.toLowerCase() : 'civitai.com'

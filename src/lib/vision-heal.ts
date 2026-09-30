@@ -12,8 +12,9 @@
  *
  * The heal: strip only the messages WE attached (marked `visionFeedback`),
  * replace them with their text fallback, and let the caller retry the turn.
- * A user-attached image is deliberately left alone — the user's request
- * depends on it, so the honest error is the right outcome there.
+ * A user-attached image is left alone by this function; in agent mode
+ * stripUserImagesForToolUse below degrades it too, because there the model
+ * does not need to see the picture to act on it.
  */
 
 export interface HealableMessage {
@@ -43,6 +44,39 @@ export function stripVisionFeedbackMessages(messages: HealableMessage[]): boolea
       messages[i] = {
         role: 'user',
         content: m.fallbackText || VISION_FALLBACK_TEXT,
+      }
+      healed = true
+    }
+  }
+  return healed
+}
+
+export const USER_IMAGE_TOOL_NOTE =
+  'You cannot see pictures, but the tools can use them: to edit, change or animate the attached picture, '
+  + 'call image_generate or video_generate with inputImage "attached". Do not ask the user to describe it.'
+
+/**
+ * Agent mode on a text-only model: drop the images the USER attached from the
+ * request and say in their place that they exist and how to use them.
+ *
+ * Every user attachment went to the model as an image, so a model without
+ * vision (a 9B or 12B text model, the usual local agent) refused the request
+ * and the run ended, although editing the attached photo never needs the
+ * model to look at it: image_generate takes it by reference ("attached",
+ * lib/media-input-ref.ts) straight from the chat store, which this does not
+ * touch. Only the request copy changes, in place. Returns true when a message
+ * was changed, so the caller retries the turn.
+ */
+export function stripUserImagesForToolUse(messages: HealableMessage[]): boolean {
+  let healed = false
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i]
+    if (m && m.role === 'user' && !m.visionFeedback && m.images?.length) {
+      const n = m.images.length
+      const { images: _dropped, ...rest } = m
+      messages[i] = {
+        ...rest,
+        content: `${m.content}\n\n[The user attached ${n === 1 ? 'a picture' : `${n} pictures`}. ${USER_IMAGE_TOOL_NOTE}]`,
       }
       healed = true
     }

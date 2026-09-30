@@ -160,7 +160,7 @@ async function civitaiRecipe(ref: string): Promise<string> {
   const { fetchExternal } = await import('../backend')
   let recipe: ReturnType<typeof parseCivitaiImage>
   try {
-    recipe = parseCivitaiImage(JSON.parse(await withCivitaiDeadline(fetchExternal(`https://${host}/api/v1/images?imageId=${id}&nsfw=X`, auth.apiKey ?? null))))
+    recipe = parseCivitaiImage(JSON.parse(await withCivitaiDeadline(fetchExternal(`https://${host}/api/v1/images?imageId=${id}&nsfw=X&withMeta=true`, auth.apiKey ?? null))))
   } catch (e) {
     if (e instanceof CivitaiSlow) return civitaiUnreachable(host, `the recipe of image ${id}`)
     return `Error: CivitAI did not answer for image ${id}: ${errText(e)}`

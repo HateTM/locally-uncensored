@@ -36,7 +36,7 @@ import { CODEX_CONFIRM_TOOLS, codexConfirmEnabled } from './codexShellGate'
 import { isThinkingCompatible, isPlainTextPlanner, declaredVision } from '../lib/model-compatibility'
 import { resolveToolCallingStrategy } from '../lib/agent-strategy'
 import { isMultimodalUnsupportedError, MULTIMODAL_UNSUPPORTED_MESSAGE } from '../lib/ollama-errors'
-import { stripVisionFeedbackMessages, reportMultimodalRefusal } from '../lib/vision-heal'
+import { stripVisionFeedbackMessages, stripUserImagesForToolUse, reportMultimodalRefusal } from '../lib/vision-heal'
 import { log } from '../lib/logger'
 import { buildHermesToolPrompt, buildHermesToolResult, buildHermesToolCall, parseHermesToolCalls, stripToolCallTags, hasToolCallTags } from '../api/hermes-tool-calling'
 import { parseLooseToolCalls, stripMatchedCalls, stripToolCallText, canonicalToolName } from '../lib/loose-tool-parse'
@@ -178,6 +178,17 @@ const activeAgentRuns = new Map<string, AgentRunState>()
 /** Test-only: which conversations currently have a live agent run. */
 export function __activeAgentRunConvIdsForTests(): string[] {
   return [...activeAgentRuns.keys()]
+}
+
+/**
+ * A multimodal refusal on this turn: strip OUR fed-back renders (G22) and the
+ * user's own attachments (the tools take those by reference), both, in place.
+ * True when anything changed, so the turn is retried instead of ending the run.
+ */
+function healForTextOnlyModel(messages: Parameters<typeof stripVisionFeedbackMessages>[0]): boolean {
+  const ours = stripVisionFeedbackMessages(messages)
+  const theirs = stripUserImagesForToolUse(messages)
+  return ours || theirs
 }
 
 export function useAgentChat() {
@@ -1651,10 +1662,10 @@ export function useAgentChat() {
                 // G22: OUR image attachment on a model that cannot see. Strip
                 // it to its text fallback and retry — the run must survive a
                 // wrong vision guess. A user-attached image stays untouched.
-                if (isMultimodalUnsupportedError(errorText(thinkErr)) && stripVisionFeedbackMessages(agentMessages)) {
+                if (isMultimodalUnsupportedError(errorText(thinkErr)) && healForTextOnlyModel(agentMessages)) {
                   // The send copy carries the same attachment; strip it there
                   // too or the retry resends exactly what just failed.
-                  stripVisionFeedbackMessages(sendMessages)
+                  healForTextOnlyModel(sendMessages)
                   visionRefused = true
                   log.warn('agent.vision_feedback_healed', { model: modelToUse })
                   continue
@@ -1758,8 +1769,8 @@ export function useAgentChat() {
                 // G22 parity with the Ollama branch: heal a wrong vision
                 // guess instead of ending the run (R20 witness: LM Studio,
                 // gemma-3-4b-it-abliterated, text-only conversion).
-                if (isMultimodalUnsupportedError(errorText(thinkErr)) && stripVisionFeedbackMessages(agentMessages)) {
-                  stripVisionFeedbackMessages(sendMessages)
+                if (isMultimodalUnsupportedError(errorText(thinkErr)) && healForTextOnlyModel(agentMessages)) {
+                  healForTextOnlyModel(sendMessages)
                   visionRefused = true
                   log.warn('agent.vision_feedback_healed', { model: modelToUse, provider: providerId })
                   continue
