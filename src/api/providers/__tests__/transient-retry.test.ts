@@ -128,19 +128,6 @@ describe('sendWithTransientRetry', () => {
     expect(await out.text()).toContain('flash_timeout')
   })
 
-  it('does not retry a stalled_runaway, a request LU Cloud ended after ten silent minutes', async () => {
-    const clock = recorder()
-    const send = vi.fn().mockResolvedValue(
-      res(504, JSON.stringify({ error: 'The model produced no visible output for 10 minutes, so this step was ended.', code: 'stalled_runaway' })),
-    )
-
-    const out = await sendWithTransientRetry(send, { wait: clock.wait })
-
-    expect(send).toHaveBeenCalledTimes(1)
-    expect(clock.waited).toEqual([])
-    expect(await out.text()).toContain('stalled_runaway')
-  })
-
   it('NEGATIVE CONTROL: a 504 without flash_timeout is still retried', async () => {
     const clock = recorder()
     const send = vi.fn().mockResolvedValue(res(504, 'bad gateway'))

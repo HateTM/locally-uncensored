@@ -75,7 +75,8 @@ describe('a request without streaming that LU Cloud ended as a runaway', () => {
         calls.push(url)
         return new Response(
           JSON.stringify({ error: 'The model produced no visible output for 10 minutes, so this step was ended.', code: 'stalled_runaway' }),
-          { status: 504, headers: { 'Content-Type': 'application/json' } },
+          // 422: the server answers a runaway with a 4xx so no app version retries it.
+          { status: 422, headers: { 'Content-Type': 'application/json' } },
         )
       }),
     )

@@ -84,12 +84,10 @@ async function isPermanent429(res: Response): Promise<boolean> {
  * `isPermanent429` above, not a transient gateway hiccup a second attempt
  * could fix.
  */
-async function isPermanentTimeout(res: Response): Promise<boolean> {
+async function isPermanentFlashTimeout(res: Response): Promise<boolean> {
   if (res.status !== 504) return false
   try {
-    // stalled_runaway (30.09.2026): a request without streaming that produced
-    // nothing for ten minutes, ended by the server. Again = ten more minutes.
-    return /flash_timeout|stalled_runaway/.test(await res.clone().text())
+    return /flash_timeout/.test(await res.clone().text())
   } catch {
     return false
   }
@@ -124,7 +122,7 @@ export async function sendWithTransientRetry(
     if (!TRANSIENT_STATUS.has(res.status)) return res
     if (opts?.signal?.aborted) return res
     if (await isPermanent429(res)) return res
-    if (await isPermanentTimeout(res)) return res
+    if (await isPermanentFlashTimeout(res)) return res
 
     // The server's own number wins — a fixed-window limiter refuses again for
     // the whole window, so guessing shorter just burns an attempt inside it.
