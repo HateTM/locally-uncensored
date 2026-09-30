@@ -78,7 +78,7 @@ import { toolCallCapMs, raceWithToolTimeout, SHELL_EXECUTE_DEFAULT_TIMEOUT_MS } 
 import { getModelMaxTokens, estimateTokens } from '../lib/context-compaction'
 import { capToLearnedWindow, contextOverflowOf, learnSendWindow, shrunkSendWindow } from './codex/context-overflow'
 import { buildRequestMessages, trimWorkingHistory, decayRestoredToolResult, isToolResult } from '../lib/context-decay'
-import { effectiveSendWindow } from '../lib/send-window'
+import { effectiveSendWindow, sendWindowFor } from '../lib/send-window'
 import { sendsToALanBackend } from '../lib/lan-openai-slot'
 import { useSendSizeStore } from '../stores/sendSizeStore'
 import { resolveAgentNumCtx } from '../lib/agent-num-ctx'
@@ -1245,7 +1245,7 @@ export function useCodex() {
         const sendWindow = capToLearnedWindow(effectiveSendWindow({
           providerId,
           modelWindow: numCtx,
-          sendWindowTokens: settings.codexSendWindowTokens,
+          sendWindowTokens: sendWindowFor(settings, activeModel),
           capEnabled: decayOn,
           smallModelMode: settings.smallModelMode,
           localBackend: sendsToALanBackend(providerId),

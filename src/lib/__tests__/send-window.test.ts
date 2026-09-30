@@ -78,8 +78,8 @@ describe('A2: the paid-provider send cap', () => {
 })
 
 describe('A2: the shipped defaults', () => {
-  it('ships the cap at 32k and the decay switch on', () => {
-    expect(DEFAULT_SETTINGS.codexSendWindowTokens).toBe(32000)
+  it('ships the cap at 32K and the decay switch on', () => {
+    expect(DEFAULT_SETTINGS.codexSendWindowTokens).toBe(32768)
     expect(DEFAULT_SETTINGS.contextDecay).toBe(true)
   })
 })
@@ -193,5 +193,15 @@ describe('A2 meter honesty: the tool catalog is part of the request', () => {
     const withoutCatalog = computeContextFill(msgs, { tokens: 732, atMessageCount: 2 })
     const withCatalog = computeContextFill(msgs, { tokens: 732 + 1856, atMessageCount: 2 })
     expect(withCatalog.used - withoutCatalog.used).toBe(1856)
+  })
+})
+
+describe('sendWindowFor: the per-model pick from the context dropdown', () => {
+  it('a pick for this model wins, other models keep the default', async () => {
+    const { sendWindowFor } = await import('../send-window')
+    const settings = { codexSendWindowTokens: 32768, cloudSendWindowByModel: { 'lu-cloud::Kimi': 131072 } }
+    expect(sendWindowFor(settings, 'lu-cloud::Kimi')).toBe(131072)
+    expect(sendWindowFor(settings, 'lu-cloud::GLM')).toBe(32768)
+    expect(sendWindowFor({ codexSendWindowTokens: 32768 }, 'lu-cloud::Kimi')).toBe(32768)
   })
 })

@@ -24,7 +24,7 @@ const agent = read('useAgentChat.ts')
 describe('plain chat sends under the A2 budget', () => {
   it('routes the built array through the budget', () => {
     expect(chat).toMatch(/applyChatSendBudget\(/)
-    expect(chat).toMatch(/sendWindowTokens: settings\.codexSendWindowTokens/)
+    expect(chat).toMatch(/sendWindowTokens: sendWindowFor\(settings, \w+\)/)
   })
 
   it('keeps the message-count cap as the second barrier', () => {

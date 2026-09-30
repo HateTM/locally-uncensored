@@ -46,7 +46,7 @@ import { summarizeTurn } from '../lib/turn-summary'
 import { buildVisionFeedback } from '../api/vision-feedback'
 import { getModelMaxTokens, estimateTokens } from '../lib/context-compaction'
 import { buildRequestMessages, trimWorkingHistory } from '../lib/context-decay'
-import { effectiveSendWindow } from '../lib/send-window'
+import { effectiveSendWindow, sendWindowFor } from '../lib/send-window'
 import { sendsToALanBackend } from '../lib/lan-openai-slot'
 import { useSendSizeStore } from '../stores/sendSizeStore'
 import { resolveAgentNumCtx } from '../lib/agent-num-ctx'
@@ -1448,7 +1448,7 @@ export function useAgentChat() {
         const sendWindow = effectiveSendWindow({
           providerId,
           modelWindow: agentCtx,
-          sendWindowTokens: settings.codexSendWindowTokens,
+          sendWindowTokens: sendWindowFor(settings, activeModel),
           capEnabled: decayOn,
           smallModelMode: settings.smallModelMode,
           localBackend: sendsToALanBackend(providerId),

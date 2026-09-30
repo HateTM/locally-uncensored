@@ -6,7 +6,7 @@ import { getModelContextCached } from '../api/ollama'
 import { getLmStudioModelContext } from '../api/lmstudio'
 import { getModelMaxTokens } from '../lib/context-compaction'
 import { effectiveContextWindow } from '../lib/context-window'
-import { effectiveSendWindow } from '../lib/send-window'
+import { effectiveSendWindow, isPaidProvider, sendWindowFor } from '../lib/send-window'
 import { isManagedBuiltinSlot } from '../api/builtin-ensure'
 import { ENGINE_DEFAULT_CTX } from '../lib/builtin-ctx'
 import { bundledEngineStatus, bundledCtxTrain } from '../api/engine'
@@ -111,7 +111,8 @@ export function useActiveContextWindow(reloadTick = 0): ActiveContext {
   const activeModel = useModelStore((s) => s.activeModel)
   const override = useSettingsStore((s) => s.settings.contextWindowOverride)
   const builtinCtx = useSettingsStore((s) => s.settings.builtinEngine.ctx)
-  const sendWindowTokens = useSettingsStore((s) => s.settings.codexSendWindowTokens)
+  const globalSendWindow = useSettingsStore((s) => s.settings.codexSendWindowTokens)
+  const cloudPicks = useSettingsStore((s) => s.settings.cloudSendWindowByModel)
   const capEnabled = useSettingsStore((s) => s.settings.contextDecay)
   // The resolved window carries the model it was resolved FOR. That tag does
   // two jobs: the "no model" case becomes a derivation instead of a setState
@@ -286,7 +287,7 @@ export function useActiveContextWindow(reloadTick = 0): ActiveContext {
         sendWindow: effectiveSendWindow({
           providerId,
           modelWindow: max,
-          sendWindowTokens,
+          sendWindowTokens: sendWindowFor({ codexSendWindowTokens: globalSendWindow, cloudSendWindowByModel: cloudPicks }, activeModel),
           capEnabled,
           // Der Zweig oben kehrt nur um, wenn der eigene Server ein Fenster
           // GENANNT hat. Sagt er keins, faellt er bis hierher durch, und ohne
@@ -294,18 +295,20 @@ export function useActiveContextWindow(reloadTick = 0): ActiveContext {
           localBackend: sendsToALanBackend(providerId),
         }),
         isTrue: false,
-        // Aus der Ferne ist das Fenster keine Sache des Nutzers: es gehoert
-        // einer fremden Bereitstellung, und der Sendedeckel ist hier der
-        // Hebel, der den Nenner regelt.
-        adjustable: false,
+        // The model's own window belongs to the remote deployment, but on a
+        // paid provider the send window is the user's lever: how much of the
+        // conversation each step sends and pays for. The dropdown sets it per
+        // model (settings.cloudSendWindowByModel). A LAN server that fell
+        // through to here bills nobody, so there is nothing to choose.
+        adjustable: capEnabled !== false && isPaidProvider(providerId, sendsToALanBackend(providerId)),
         // Woher die Zahl kommt, auch wenn sie hier niemand verstellen kann.
         source: remoteWindowSource(providerId, cloudResolved?.source, max),
-        windowKey: '',
+        windowKey: activeModel,
       })
     })()
 
     return () => { cancelled = true }
-  }, [activeModel, override, builtinCtx, sendWindowTokens, capEnabled, reloadTick, reloadBump])
+  }, [activeModel, override, builtinCtx, globalSendWindow, cloudPicks, capEnabled, reloadTick, reloadBump])
 
   return activeModel && resolved?.model === activeModel ? resolved.ctx : NO_CONTEXT
 }

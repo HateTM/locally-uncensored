@@ -32,7 +32,7 @@ describe('the retired 64k send window', () => {
   it('a stored 64000 follows the new 32k default', async () => {
     seed(64000)
     await useSettingsStore.persist.rehydrate()
-    expect(useSettingsStore.getState().settings.codexSendWindowTokens).toBe(32000)
+    expect(useSettingsStore.getState().settings.codexSendWindowTokens).toBe(32768)
   })
 
   it('a deliberate other value stays', async () => {

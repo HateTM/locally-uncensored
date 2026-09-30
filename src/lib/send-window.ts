@@ -48,7 +48,7 @@ export const PAID_PROVIDER_IDS: ReadonlySet<string> = new Set(['lu-cloud', 'open
  * decay capping old results and the run ledger keeping the dropped steps
  * known, 32k carries a coding run at half the price per step.
  */
-export const DEFAULT_SEND_WINDOW_TOKENS = 32000
+export const DEFAULT_SEND_WINDOW_TOKENS = 32768
 
 /** The pre-3.0.4 default. No UI ever wrote this setting, so a stored 64000 is
  *  the old default riding along in a profile, not anyone's choice. */
@@ -60,6 +60,21 @@ export const WINDOW_SHARE = 0.8
 /** Small-Model Mode keeps its own, much tighter profile (Knob 4). */
 export const SMALL_MODEL_SHARE = 0.5
 export const SMALL_MODEL_CEILING = 6000
+
+/**
+ * The send window setting for one model: the user's per-model pick from the
+ * context dropdown, else the global default. Every caller of
+ * effectiveSendWindow reads it through here, so the counter, the request
+ * builder and /compact always agree on the same number.
+ */
+export function sendWindowFor(
+  settings: { codexSendWindowTokens?: number; cloudSendWindowByModel?: Record<string, number> },
+  model: string,
+): number | undefined {
+  const pick = settings.cloudSendWindowByModel?.[model]
+  if (typeof pick === 'number' && pick > 0) return Math.floor(pick)
+  return settings.codexSendWindowTokens
+}
 
 export interface SendWindowInput {
   /** Provider id of the active model ('lu-cloud', 'ollama', …). */

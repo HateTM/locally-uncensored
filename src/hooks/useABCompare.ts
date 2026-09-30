@@ -2,6 +2,7 @@
  * A/B Compare Hook: sends the same prompt to two models in parallel.
  */
 
+import { sendWindowFor } from '../lib/send-window'
 import { useCallback, useRef } from 'react'
 import { useCompareStore } from '../stores/compareStore'
 import { useSettingsStore } from '../stores/settingsStore'
@@ -99,7 +100,7 @@ export function useABCompare() {
             modelWindow: chatBudgetApplies(providerId, settings.contextDecay)
               ? await getModelMaxTokens(m)
               : 0,
-            sendWindowTokens: settings.codexSendWindowTokens,
+            sendWindowTokens: sendWindowFor(settings, m),
             contextDecay: settings.contextDecay,
             localBackend: sendsToALanBackend(providerId),
           }

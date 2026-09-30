@@ -190,6 +190,14 @@ export interface Settings {
    */
   codexSendWindowTokens: number
   /**
+   * Per-model choice of the send window for paid cloud models, keyed by the
+   * prefixed model name. Picked in the header's context dropdown; absent
+   * means codexSendWindowTokens applies. The model's own window is fixed on a
+   * cloud provider, so this is the one context lever there: how much of the
+   * conversation each step sends, and pays for.
+   */
+  cloudSendWindowByModel?: Record<string, number>
+  /**
    * Auto-compact trigger, as a fraction of the send window. 2.6.8.
    *
    * 0 IS THE FEATURE SWITCH, not a tuning value. Owner decision 2026-09-02,

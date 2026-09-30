@@ -1,4 +1,5 @@
 import { useState, useCallback } from "react"
+import { sendWindowFor } from '../lib/send-window'
 import { markCannotThink } from '../lib/model-compatibility'
 import { v4 as uuid } from "uuid"
 import { useChatStore } from "../stores/chatStore"
@@ -125,7 +126,7 @@ async function runGroupTurn(convId: string, model: string, allModels: string[], 
       modelWindow: chatBudgetApplies(providerId, settings.contextDecay)
         ? await getModelMaxTokens(model)
         : 0,
-      sendWindowTokens: settings.codexSendWindowTokens,
+      sendWindowTokens: sendWindowFor(settings, model),
       contextDecay: settings.contextDecay,
       localBackend: sendsToALanBackend(providerId),
     },
@@ -1009,7 +1010,7 @@ export function useChat() {
       {
         providerId,
         modelWindow: modelWindowTokens,
-        sendWindowTokens: settings.codexSendWindowTokens,
+        sendWindowTokens: sendWindowFor(settings, activeModel),
         contextDecay: settings.contextDecay,
         // R2-3: der Hauptpfad des einfachen Chats liess dieses Feld weg, also
         // galt hier die Deckelung fuer bezahlte Anbieter und der eigene

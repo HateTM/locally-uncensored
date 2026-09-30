@@ -66,6 +66,7 @@ export const DEFAULT_SETTINGS: Settings = {
   // default; the switch is the support way back without a rollback release.
   contextDecay: true,
   codexSendWindowTokens: DEFAULT_SEND_WINDOW_TOKENS,
+  cloudSendWindowByModel: {},
   // 2.6.8: auto-compact is OFF until someone sets a threshold. 0 is the
   // switch, not a tuning value — see the field's comment in types/settings.ts.
   // No STORE_VERSION bump for this key: settingsStore's migrate merges

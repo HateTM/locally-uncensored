@@ -52,7 +52,8 @@ function abschneidendeFlaeche(el: Element): { oben: number; unten: number } {
  *   - LM Studio: `lms load -c <N>` (unload + reload, context is load-time there).
  *   - Built-in:  ctx lives in settings.builtinEngine (expert tuning), the
  *                engine relaunches with the new -c via swapBundledModel.
- * Hidden for cloud models (their context is fixed and not adjustable here).
+ * Cloud models: their own window is fixed, so the pick there is the send
+ * window per model (settings.cloudSendWindowByModel), saved without a reload.
  *
  * D-S06, „Zwei Kontextanzeigen 24px nebeneinander in verschiedener Notation:
  * ‚32/8.2k' und ‚ctx 8K' → eine."
@@ -163,11 +164,16 @@ export function ContextDropdown({ children }: { children?: ReactNode }) {
   // in `contextWindowByModel`, im SELBEN Speicher wie die beiden anderen
   // (settingsStore), nur unter einem Schluessel statt in einem festen Feld.
   const byModel = useSettingsStore((s) => s.settings.contextWindowByModel)
+  const cloudPicks = useSettingsStore((s) => s.settings.cloudSendWindowByModel)
+  const globalSendWindow = useSettingsStore((s) => s.settings.codexSendWindowTokens)
+  const cloud = ctx.provider === 'cloud'
   const selected = ctx.provider === 'builtin'
     ? builtinCtx
     : ctx.provider === 'custom'
       ? (ctx.windowKey ? byModel?.[ctx.windowKey] ?? 0 : 0)
-      : override
+      : cloud
+        ? (ctx.windowKey ? cloudPicks?.[ctx.windowKey] ?? 0 : 0)
+        : override
   // Gibt es ueberhaupt einen Fuellstand zu zeigen? Genau die Bedingung, unter
   // der `TokenCounter` `null` zurueckgibt. Bewusst ein BOOLEAN als Selektor:
   // ein Abo auf `s.conversations` wuerde diesen Knopf bei jedem Streaming-Flush
@@ -190,7 +196,10 @@ export function ContextDropdown({ children }: { children?: ReactNode }) {
    * Voreinstellungen darueber fallen weg.
    */
   const cap = ctx.modelMax > 0 ? Math.max(ctx.modelMax, 4096) : 0
-  const options = PRESETS.filter((p) => (cap > 0 ? p < cap : true))
+  // A cloud step carries the system prompt and the tool catalogue before any
+  // history (about 5k to 8k tokens), so the two smallest rungs could not hold
+  // a single turn there.
+  const options = PRESETS.filter((p) => (cap > 0 ? p < cap : true) && (!cloud || p >= 16384))
   const showMax = cap > 0
   /*
    * Der Haken sitzt auf dem, was WIRKLICH gilt. Eine gespeicherte Wahl ueber
@@ -201,6 +210,20 @@ export function ContextDropdown({ children }: { children?: ReactNode }) {
 
   const apply = async (value: number) => {
     setOpen(false)
+    /*
+     * Cloud model: its own window is fixed, the pick is how much of the chat
+     * each step SENDS (and pays for), saved per model. Nothing to reload, the
+     * next request reads it through sendWindowFor. 0 = Auto (the default).
+     */
+    if (cloud) {
+      if (!ctx.windowKey) return
+      const next = { ...(useSettingsStore.getState().settings.cloudSendWindowByModel ?? {}) }
+      if (value > 0) next[ctx.windowKey] = value
+      else delete next[ctx.windowKey]
+      updateSettings({ cloudSendWindowByModel: next })
+      window.dispatchEvent(new Event('lu-context-reloaded'))
+      return
+    }
     /*
      * Eigener OpenAI-kompatibler Server: die Zahl ist eine Angabe DARUEBER,
      * was der Server geladen hat, kein Befehl AN ihn. Sein `-c` steht in
@@ -283,7 +306,9 @@ export function ContextDropdown({ children }: { children?: ReactNode }) {
         onClick={() => setOpen((o) => !o)}
         disabled={busy}
         title={
-          ctx.provider === 'custom'
+          cloud
+            ? 'Context sent per step: how much of this chat the model sees on every step. More remembers more and costs more per step.'
+            : ctx.provider === 'custom'
             ? `Context window: ${SOURCE_LABEL[ctx.source]}. This server decides its own context; pick the value it actually runs with so the counter and the request budget match it.`
             : `Context window: ${ctx.provider === 'lmstudio' ? "LM Studio's loaded context" : ctx.provider === 'builtin' ? "the LU Engine's loaded context" : 'Ollama num_ctx'}. Changing it reloads the model so it takes effect now.`
         }
@@ -320,7 +345,7 @@ export function ContextDropdown({ children }: { children?: ReactNode }) {
         {/* Der Fuellstand IST die Beschriftung. Nur wenn es keinen gibt (leerer
             Chat), steht hier wieder das Fenster allein. */}
         <span id={valueId}>
-          {hasFill ? children : <span>ctx {formatContextWindow(ctx.contextWindow)}</span>}
+          {hasFill ? children : <span>ctx {formatContextWindow(cloud ? ctx.sendWindow : ctx.contextWindow)}</span>}
         </span>
         <ChevronDown size={8} className={`transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
@@ -353,7 +378,7 @@ export function ContextDropdown({ children }: { children?: ReactNode }) {
             }`}
           >
             <button onClick={() => apply(0)} className={rowCls(selectedNow === 0)}>
-              <span>Auto{ctx.provider === 'ollama' ? ` · ${formatContextWindow(effectiveContextWindow(ctx.modelMax, 0))}` : ctx.provider === 'builtin' ? ` · ${formatContextWindow(ENGINE_DEFAULT_CTX)}` : ctx.provider === 'custom' && ctx.source !== 'user' ? ` · ${formatContextWindow(ctx.contextWindow)}` : ''}</span>
+              <span>Auto{ctx.provider === 'ollama' ? ` · ${formatContextWindow(effectiveContextWindow(ctx.modelMax, 0))}` : ctx.provider === 'builtin' ? ` · ${formatContextWindow(ENGINE_DEFAULT_CTX)}` : ctx.provider === 'custom' && ctx.source !== 'user' ? ` · ${formatContextWindow(ctx.contextWindow)}` : cloud ? ` · ${formatContextWindow(globalSendWindow)}` : ''}</span>
               {selectedNow === 0 && <Check size={10} />}
             </button>
             {options.map((p) => (
@@ -369,7 +394,9 @@ export function ContextDropdown({ children }: { children?: ReactNode }) {
               </button>
             )}
             <div className="mt-0.5 px-2 pt-1 border-t border-gray-100 dark:border-white/[0.06] text-[0.5rem] text-gray-400 leading-snug">
-              {ctx.provider !== 'custom'
+              {cloud
+                ? 'How much of the chat each step sends. More remembers more, and every step costs more. Saved for this model.'
+                : ctx.provider !== 'custom'
                 ? 'Reloads the model on change.'
                 : (ctx.clampedFrom ?? 0) > 0
                   ? `Your saved ${formatContextWindow(ctx.clampedFrom ?? 0)} is more than this server runs, so ${formatContextWindow(ctx.contextWindow)} is used. Start the server larger to use it.`

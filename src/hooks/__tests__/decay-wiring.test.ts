@@ -40,7 +40,7 @@ describe.each([
 
   it('derives the budget from the effective send window', () => {
     expect(source).toMatch(/effectiveSendWindow\(\{/)
-    expect(source).toMatch(/sendWindowTokens: settings\.codexSendWindowTokens/)
+    expect(source).toMatch(/sendWindowTokens: sendWindowFor\(settings, \w+\)/)
     expect(source).toMatch(/capEnabled: decayOn/)
   })
 
