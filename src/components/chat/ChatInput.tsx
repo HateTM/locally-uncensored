@@ -610,7 +610,7 @@ export function ChatInput({ onSend, onStop, isGenerating, waitingForLocalLane, p
             only the middle spacer giving way, das `flex: 0 0 auto` steckt
             seit der Composer-Grammatik im Rezept `.lu-control` (index.css),
             nicht mehr als `shrink-0` an jedem einzelnen Knopf. */}
-        <div className="flex flex-nowrap items-center gap-1 px-2 py-1.5 min-h-[38px] border-t border-gray-200 dark:border-white/[0.05]">
+        <div className="@container flex flex-nowrap items-center gap-1 px-2 py-1.5 min-h-[38px] border-t border-gray-200 dark:border-white/[0.05]">
           {/* Clip button */}
           <button
             onClick={() => fileInputRef.current?.click()}
@@ -664,7 +664,8 @@ export function ChatInput({ onSend, onStop, isGenerating, waitingForLocalLane, p
             }
           >
             <Brain size={11} />
-            <span>Think</span>
+            {/* In a narrow composer the icon and the tooltip carry it. */}
+            <span className="@max-[30rem]:hidden">Think</span>
           </button>
 
           {/* Reasoning effort. Same shape and size as the Think button beside
@@ -723,8 +724,11 @@ export function ChatInput({ onSend, onStop, isGenerating, waitingForLocalLane, p
           {/* Sampling controls sit next to the picker: same row, collapsed. */}
           <div className="shrink-0"><SamplingControls /></div>
 
-          {/* Model picker, opens upward from the composer */}
-          <div className="shrink-0">{composerModel}</div>
+          {/* Model picker, opens upward from the composer. The one control
+              that may give way when the row runs out of width (Code tab with
+              the explorer open): its name ellipsizes in the middle instead of
+              pushing Stop out of the frame. */}
+          <div className="min-w-[4rem] shrink">{composerModel}</div>
 
           {/* Send and Stop are the SAME slot: one fixed 26x26 box at the end of
               the row, never two, never one below the other. Stop replaces Send

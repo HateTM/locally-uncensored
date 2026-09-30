@@ -9,7 +9,7 @@ import { useSettingsStore } from '../../stores/settingsStore'
 import { useUIStore } from '../../stores/uiStore'
 import { unloadAllModels, loadModel, unloadModel, listRunningModels } from '../../api/ollama'
 import { displayModelName, getProviderIdFromModel } from '../../api/providers'
-import { splitForMiddleEllipsis, shortModelLabel } from '../../lib/model-label'
+import { splitForMiddleEllipsis, modelDisplayLabel } from '../../lib/model-label'
 import { formatContextWindow } from '../../lib/formatters'
 import { activateBuiltinModel, isManagedBuiltinActive } from '../../api/engine'
 import { diagnoseBuiltinEngine } from '../../api/builtin-ensure'
@@ -1231,17 +1231,7 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
   const wechselLaeuft = isModelLoading || imWechselZu !== null
     || (swapLaeuft && getProviderIdFromModel(gezeigtesModell ?? '') === 'openai')
   const gezeigtesObj = models.find((m) => m.name === gezeigtesModell)
-  const activeDisplayName = gezeigtesModell
-    ? (gezeigtesObj && 'displayName' in gezeigtesObj && gezeigtesObj.displayName) ||
-      // F3 (3.0.1): `.split(':')[0]` here truncated at the FIRST colon in the
-      // model id, not just the `provider::model` prefix `displayModelName`
-      // already stripped. An Ollama tag ("llama3.1:8b-instruct-q4_K_M") uses
-      // a single colon as its OWN separator, so the header showed only
-      // "llama3.1" while the dropdown row below it, which never split on
-      // ':', showed the real, full name. Dropped the split entirely so the
-      // header matches the row (both go through shortModelLabel only).
-      shortModelLabel(displayModelName(gezeigtesModell))
-    : 'Select Model'
+  const activeDisplayName = gezeigtesModell ? modelDisplayLabel(models, gezeigtesModell) : 'Select Model'
   // Der Punkt folgt demselben Modell wie der Name daneben, sonst haette der
   // Knopf waehrend eines Wechsels zwei Aussagen in sich.
   const activeType = gezeigtesObj?.type || 'text'
@@ -1311,7 +1301,9 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
         // Akzent, die Aussage steht damit im selben Vokabular wie der Rest
         // der Leiste, und im Accessibility-Baum, wo sie hingehoert.
         aria-busy={wechselLaeuft}
-        className="lu-control"
+        // max-w-full + min-w-0 below: in a tight composer row the name
+        // ellipsizes inside the slot ChatInput lets shrink.
+        className="lu-control max-w-full"
       >
         {/* Type indicator dot */}
         <span className={`w-1.5 h-1.5 rounded-full ${
@@ -1320,7 +1312,7 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
 
         {/* Model name. Keine eigene Textfarbe mehr, sie wird vom Control
             geerbt, sonst haette der Knopf zwei Graustufen in sich. */}
-        <span className="max-w-[140px] truncate leading-none">
+        <span className="min-w-0 max-w-[140px] truncate leading-none">
           {activeDisplayName}
         </span>
 

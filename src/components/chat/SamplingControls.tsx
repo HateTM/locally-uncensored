@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
-import { X } from 'lucide-react'
+import { X, SlidersHorizontal } from 'lucide-react'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useChatStore } from '../../stores/chatStore'
 import { HINWEIS_TEXT } from '../../lib/hinweis'
@@ -189,7 +189,9 @@ export function SamplingControls() {
     <div className="relative text-xs" ref={wrapRef} data-testid="sampling-controls">
       <button
         type="button"
-        className="text-gray-500 hover:text-gray-300"
+        // The composer row's own recipe, like Think and Docs beside it. It
+        // was plain text-xs (12px) in a row of 9.6px controls.
+        className="lu-control"
         aria-expanded={open}
         aria-controls={panelId}
         data-testid="sampling-trigger"
@@ -202,7 +204,11 @@ export function SamplingControls() {
         // disappear under the pointer on the second click.
         onClick={() => setOpen(true)}
       >
-        Sampling: {value.temperature.toFixed(2)}
+        {/* In a narrow composer (the row is the @container, ChatInput.tsx)
+            an icon stands in for the word; title and aria-label keep it. */}
+        <SlidersHorizontal size={10} className="hidden @max-[30rem]:inline-block mr-1 -mt-px" />
+        <span className="@max-[30rem]:hidden">Sampling: </span>
+        {value.temperature.toFixed(2)}
         {/* Ein geaenderter Regler ist kein Zwischenfall, also traegt der
             Stern den ruhigen Ton und keine eigene Warnfarbe. */}
         {changed && <span className={`ml-1 ${HINWEIS_TEXT.ruhig}`} title="Changed from the defaults">*</span>}

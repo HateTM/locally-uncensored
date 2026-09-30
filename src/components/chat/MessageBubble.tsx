@@ -11,6 +11,7 @@ import { VramSwitchCard } from './VramSwitchCard'
 import { SpeakerButton } from './SpeakerButton'
 import { ChatArtifactCard } from './ChatArtifactCard'
 import { displayModelName } from '../../api/providers/model-name'
+import { modelDisplayLabel } from '../../lib/model-label'
 import type { Message } from '../../types/chat'
 import { stripModelNoise } from '../../lib/strip-model-noise'
 import { truncationNotice } from '../../lib/answer-notes'
@@ -69,6 +70,11 @@ function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, o
     activeConversationId ? s.agentModeActive[activeConversationId] ?? false : false
   )
   const activeModel = useModelStore((s) => s.activeModel)
+  // The catalogue's name for the model that wrote this turn ("Kimi K2.6"), the
+  // same one the picker shows. A string, so the selector stays stable.
+  const answeredByName = useModelStore((s) =>
+    message.modelId ? modelDisplayLabel(s.models, message.modelId) : '',
+  )
   const toggleAgentMode = useAgentModeStore((s) => s.toggleAgentMode)
   const userAvatarDataUrl = useSettingsStore((s) => s.settings.userAvatarDataUrl)
   // Chat Tools (v2.5.3) gives plain chat web/file/image/video WITHOUT Agent Mode.
@@ -306,7 +312,7 @@ function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, o
           // Kennung davor ist unsere Adresse. Wer den Zeiger auf der Zeile
           // ruhen liess, bekam sie zu sehen, obwohl sie ihm nichts sagt.
           <div title={displayModelName(message.modelId)} className="t-mono text-gray-500 dark:text-gray-400 pl-1">
-            {displayModelName(message.modelId)}
+            {answeredByName}
           </div>
         )}
         {/* Thinking block — auto-expands while this (last) turn is still

@@ -47,7 +47,7 @@ import { useGenerationStore } from '../../stores/generationStore'
 import { composerBusy } from '../../lib/composer-busy'
 import { useIsQueuedForLocalLane, useLocalLaneQueuePosition, useLocalLaneHolderWaitsForApproval, useLocalLaneHolderId } from '../../lib/run-idle'
 import { useRemoteStore } from '../../stores/remoteStore'
-import { displayModelName } from '../../api/providers'
+import { modelDisplayLabel } from '../../lib/model-label'
 import { MONOGRAM, MONOGRAM_INVERT } from '../layout/brand'
 
 /** Was die Eingangsseite sagt und anbietet, je nach Lage. */
@@ -274,7 +274,7 @@ export function ChatView() {
       // Der Modellname steht auf einer EIGENEN Zeile und wird gekuerzt: er ist
       // haeufig 50+ Zeichen lang (`hf.co/DevQuasar/huihui-ai_Qwen3-4B-abliterated-GGUF`),
       // und im Fliesstext liess er die Zeile dreimal umbrechen.
-      : { subline: 'Type below to start.', note: displayModelName(activeModel), cta: null }
+      : { subline: 'Type below to start.', note: modelDisplayLabel(models, activeModel), cta: null }
 
   return (
     <div className="h-full flex flex-col min-w-0">

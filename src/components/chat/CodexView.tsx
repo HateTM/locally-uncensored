@@ -28,6 +28,7 @@ import { LoopBar } from './LoopBar'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useModelStore } from '../../stores/modelStore'
 import { useAnyAgentLoopActive } from '../../stores/agentLoopStore'
+import { useUIStore } from '../../stores/uiStore'
 import { useAgentModeStore } from '../../stores/agentModeStore'
 import {
   CODEX_WORKDIR_LOCK_TITLE,
@@ -153,6 +154,8 @@ export function CodexView() {
   // active one's.
   const loop = useAnyAgentLoopActive()
   const lockReason = codexBusyReason({ sendsInFlight, threads, generating: generatingMap, loop })
+  // The open explorer already says why the folder is held (explorer-workdir-lock).
+  const explorerCollapsed = useUIStore((s) => s.explorerCollapsed)
 
   // Where the agent goes while no folder is picked: a per-chat workspace or
   // settings.defaultWorkspace both beat an empty picker, so the header and the
@@ -225,7 +228,7 @@ export function CodexView() {
           className="flex items-center gap-1.5 px-2 py-0.5 border-b border-gray-200 dark:border-white/[0.04]"
         >
           <Code size={9} className="text-gray-500" />
-          <span className="text-[0.55rem] text-gray-600 dark:text-gray-400 font-medium">Coding Agent</span>
+          <span className="text-[0.55rem] text-gray-600 dark:text-gray-400 font-medium whitespace-nowrap shrink-0">Coding Agent</span>
           {/* Code-Review Mode badge (B13), makes it impossible to miss
               that the agent is read-only. The toggle itself lives in
               Settings → Codex Agent; clicking the badge jumps you there
@@ -250,7 +253,7 @@ export function CodexView() {
               er ist eigentlich in Dokumenten"). Empty = per-chat sandbox under
               ~/agent-workspace, which is also where shell output now lands. */}
           <span
-            className="flex items-center gap-1 text-[0.5rem] text-gray-500 dark:text-gray-500 font-mono truncate max-w-[200px]"
+            className="flex items-center gap-1 text-[0.5rem] text-gray-500 dark:text-gray-500 font-mono truncate min-w-0 max-w-[200px]"
             title={codexWorkingDir || `No folder picked, the agent works in ${fallbackLabel}`}
           >
             <Folder size={9} className="shrink-0 opacity-70" />
@@ -279,7 +282,7 @@ export function CodexView() {
           <button
             onClick={startNewSession}
             title="New coding session (clears the current run, keeps the folder)"
-            className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[0.55rem] text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/5 transition-colors"
+            className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[0.55rem] text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/5 transition-colors whitespace-nowrap shrink-0"
           >
             <RotateCcw size={10} />
             <span>New</span>
@@ -305,8 +308,11 @@ export function CodexView() {
             und ein `disabled` Knopf nimmt keine Mauszeiger-Ereignisse an, also
             ist der Hinweis nie erschienen (derselbe Fehler wie im ExplorerPanel,
             dort mit `explorer-workdir-lock` behoben). Ruhiger Ton, keine
-            Warnfarbe: gesperrt ist ein Zustand, der von selbst endet. */}
-        {lockReason && (
+            Warnfarbe: gesperrt ist ein Zustand, der von selbst endet.
+            Nur wenn es den Entfernen-Knopf gibt und der offene Explorer
+            denselben Satz nicht schon zeigt: sonst stand er zweimal
+            nebeneinander, einmal ueber nichts. */}
+        {lockReason && codexWorkingDir && explorerCollapsed && (
           <p
             data-testid="codex-workdir-lock"
             className={`px-3 py-1 ${QUIET_HINT_TEXT} border-b border-gray-200 dark:border-white/[0.04]`}

@@ -3,6 +3,7 @@ import { Check, X, ChevronDown, ChevronRight, FileText } from 'lucide-react'
 import { useStagedChangesStore, type StagedChange } from '../../stores/stagedChangesStore'
 import { applyStagedChange } from '../../lib/staged-apply'
 import { DiffView } from './DiffView'
+import { displayPath, parseUnifiedDiff } from '../../lib/diff'
 import { log } from '../../lib/logger'
 import { HINWEIS_TEXT, HINWEIS_ZEILE } from '../../lib/hinweis'
 
@@ -128,20 +129,27 @@ export function StagedChangesPanel({ chatId }: Props) {
         <div className="px-1.5 pb-2 space-y-1.5 max-h-[40vh] overflow-y-auto scrollbar-thin" data-testid="staged-changes-list">
           {changes.map((change) => {
             const isApplying = applying.has(change.id)
+            const counts = change.diff ? parseUnifiedDiff(change.diff) : null
             return (
               <div
                 key={change.id}
                 className="rounded border border-gray-200 dark:border-white/[0.08] bg-white dark:bg-black/20"
                 data-testid="staged-change"
               >
-                <div className="flex items-center justify-between gap-1 px-1.5 py-1 border-b border-gray-100 dark:border-white/[0.04]">
+                <div className="flex items-center justify-between gap-1 px-1.5 py-1 border-b border-gray-100 dark:border-white/[0.04] text-[0.55rem]">
                   <span
-                    className="text-[0.55rem] font-mono truncate text-gray-700 dark:text-gray-300"
+                    className="font-mono truncate text-gray-700 dark:text-gray-300"
                     title={change.path}
                   >
-                    {change.path}
+                    {displayPath(change.path)}
                   </span>
                   <span className="flex items-center gap-0.5 shrink-0">
+                    {counts && counts.added > 0 && (
+                      <span className="font-mono text-emerald-500 pr-0.5">+{counts.added}</span>
+                    )}
+                    {counts && counts.removed > 0 && (
+                      <span className="font-mono text-red-400 pr-0.5">-{counts.removed}</span>
+                    )}
                     <button
                       onClick={() => applyOne(change)}
                       disabled={isApplying}
@@ -177,7 +185,7 @@ export function StagedChangesPanel({ chatId }: Props) {
                 )}
                 {change.diff && (
                   <div className="text-[0.5rem]">
-                    <DiffView diff={change.diff} maxLines={40} />
+                    <DiffView diff={change.diff} maxLines={40} showPath={false} />
                   </div>
                 )}
               </div>

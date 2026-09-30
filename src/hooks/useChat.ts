@@ -1053,8 +1053,13 @@ export function useChat() {
     // only shows in the chat whose turn is in flight — not in every other chat
     // the user switches to (David 2026-06-12). Cleared in finally.
     useGenerationStore.getState().setGenerating(convId, true)
-    setIsLoadingModel(true)
-    useModelStore.getState().setIsModelLoading(true)
+    // Only a local model is loaded before it answers. A cloud model read
+    // "Loading model" under every reply and spun the picker as if it were
+    // switching models, until the first token arrived.
+    if (isLocalModelByName(activeModel)) {
+      setIsLoadingModel(true)
+      useModelStore.getState().setIsModelLoading(true)
+    }
     // Owns this turn's streamed text end to end, see the ChatRun doc comment
     // above. `convId` is fixed at this point: the `if (!convId)` branch above
     // already resolved it to a real string.
