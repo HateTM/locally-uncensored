@@ -124,9 +124,21 @@ async function jailFor(chatId: string): Promise<string> {
   return resolveChatWorkspaceSlug(chatId, title)
 }
 
-export async function applyStagedChange(chatId: string, change: StagedChange): Promise<void> {
+/** True when the change is still queued. A Reject removes it from the store;
+ *  the Apply loops run over a snapshot and the reconcile read is async, so
+ *  without this check a change the user rejected mid "Apply all" was written
+ *  anyway. */
+function stillPending(chatId: string, change: StagedChange): boolean {
+  return useStagedChangesStore.getState().list(chatId).some((c) => c.id === change.id)
+}
+
+/** Writes one staged change. Returns false, without writing, when the user
+ *  rejected it before the write happened. */
+export async function applyStagedChange(chatId: string, change: StagedChange): Promise<boolean> {
+  if (!stillPending(chatId, change)) return false
   const jail = await jailFor(chatId)
   const { content, merged } = await reconcile(jail, change)
+  if (!stillPending(chatId, change)) return false
   const res = await backendCall<{ status?: string; path?: string }>('fs_write', {
     path: change.resolvedPath || change.path,
     content,
@@ -160,6 +172,7 @@ export async function applyStagedChange(chatId: string, change: StagedChange): P
     timestamp: Date.now(),
     notice: merged > 0 ? 'warn' : 'info',
   })
+  return true
 }
 
 /** Apply every pending change for a chat, sequentially (fs_write serializes
@@ -173,8 +186,7 @@ export async function applyAllStagedChanges(
   const failed: string[] = []
   for (const change of [...useStagedChangesStore.getState().list(chatId)]) {
     try {
-      await applyStagedChange(chatId, change)
-      applied.push(change.path)
+      if (await applyStagedChange(chatId, change)) applied.push(change.path)
     } catch {
       failed.push(change.path)
     }
