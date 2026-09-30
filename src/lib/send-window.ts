@@ -38,8 +38,21 @@
  */
 export const PAID_PROVIDER_IDS: ReadonlySet<string> = new Set(['lu-cloud', 'openai', 'anthropic'])
 
-/** Default ceiling for one sent step, in tokens. Power users may raise it. */
-export const DEFAULT_SEND_WINDOW_TOKENS = 64000
+/**
+ * Default ceiling for one sent step, in tokens. Power users may raise it.
+ *
+ * 64k until 3.0.4. Customer case 30.09.2026: a Code-tab run on LU Cloud rode
+ * that ceiling for two days, 38k tokens per request on average and up to 77k,
+ * and 65 % of the credits went to models without an upstream prompt cache,
+ * where every one of those tokens is billed again on every step. With the age
+ * decay capping old results and the run ledger keeping the dropped steps
+ * known, 32k carries a coding run at half the price per step.
+ */
+export const DEFAULT_SEND_WINDOW_TOKENS = 32000
+
+/** The pre-3.0.4 default. No UI ever wrote this setting, so a stored 64000 is
+ *  the old default riding along in a profile, not anyone's choice. */
+export const RETIRED_SEND_WINDOW_DEFAULT = 64000
 
 /** The share of the model window a step was already limited to before 2.6.6. */
 export const WINDOW_SHARE = 0.8

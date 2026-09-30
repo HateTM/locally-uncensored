@@ -41,6 +41,7 @@ import {
 import type { ResolvedContextWindow } from '../../lib/context-source'
 import { contextWindowKey, storedWindow, capIsDerivable } from '../../lib/context-source'
 import { useSettingsStore } from '../../stores/settingsStore'
+import { log } from '../../lib/logger'
 
 // Transport routing lives in the `useLocalProxy` getter (below) plus the shared
 // host helpers in backend.ts. A direct webview fetch only works for hosts the
@@ -989,6 +990,9 @@ export class OpenAIProvider implements ProviderClient {
       // terminal chunk as a clean cut, so the chat layer explains it the same
       // way instead of throwing a raw error at the user.
       if (isStreamIdleTimeout(err)) {
+        // The only trace a silent cut leaves: the chat shows "disconnected",
+        // the support log says which watchdog and after how long.
+        log.warn('provider.stream_idle_timeout', { provider: this.config.id, idleMs: err.idleMs })
         yield doneChunk('disconnect')
         return
       }

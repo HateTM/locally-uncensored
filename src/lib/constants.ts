@@ -1,4 +1,5 @@
 import type { Persona, Settings } from '../types/settings'
+import { DEFAULT_SEND_WINDOW_TOKENS } from './send-window'
 
 // Feature flags — flip to true when ready to ship
 export const FEATURE_FLAGS = {
@@ -64,7 +65,7 @@ export const DEFAULT_SETTINGS: Settings = {
   // 2.6.6 plan A1/A2: age decay and the paid-provider send cap. ON by
   // default; the switch is the support way back without a rollback release.
   contextDecay: true,
-  codexSendWindowTokens: 64000,
+  codexSendWindowTokens: DEFAULT_SEND_WINDOW_TOKENS,
   // 2.6.8: auto-compact is OFF until someone sets a threshold. 0 is the
   // switch, not a tuning value — see the field's comment in types/settings.ts.
   // No STORE_VERSION bump for this key: settingsStore's migrate merges

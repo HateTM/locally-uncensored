@@ -63,7 +63,6 @@ import { explainError as explainToolError } from '../api/agents/error-hints'
 import { budgetFromSettings } from '../api/agents/budget'
 import { settleThinking } from '../lib/thinking-stripper'
 import { openPlanGap, planReconcileSteer, PLAN_RECONCILE_BUDGET } from '../lib/plan-reconcile'
-import { PlanStaleness, planStalenessSteer } from '../lib/plan-staleness'
 import { planResumeAnchor } from '../lib/plan-resume'
 import { useTodoStore } from '../stores/todoStore'
 import { httpStatusOf } from '../lib/http-status'
@@ -108,13 +107,22 @@ import { codexCutoffNote } from './codex/turn-cutoff'
 import { codexToolDiff, codexEventKind } from './codex/tool-result-view'
 import { capHiddenToolHistory } from './codex/hidden-history'
 import { withHouseConduct } from '../lib/system-prompt'
+import { gatePlanTool, planToolAllowed } from '../lib/plan-gate'
 
-// No-op diagnostic hook. Kept as a call site so future debugging can swap
-// this for a file logger without re-editing every iter-point in the loop.
-// Release builds must not write to the user's filesystem; if you need
-// traces, gate on a build-time env flag or a settings toggle.
-function diagLog(_tag: string, _data: unknown): void {
-  /* release: no-op */
+// Why a run ended, or was pushed on, belongs in the support log. This used to
+// be a no-op, and the customer case of 30.09.2026 (936k credits, "never
+// finished one task") had nothing to read on the customer's machine: which
+// guard ended each run was unknowable. The run-shaping tags go out as warn,
+// which logger.ts mirrors into the rolling log file; the per-step trace stays
+// on debug (console only). No payload carries message text, only counters,
+// reasons and lengths.
+const RUN_EVENT_TAGS: ReadonlySet<string> = new Set([
+  'break-no-toolcalls', 'budget-halt', 'context-overflow-retry', 'continue-nudge',
+  'loop-guard-halt', 'loop-guard-steer', 'outer-catch', 'plan-reconcile-steer', 'turn-cut-off',
+])
+function diagLog(tag: string, data: Record<string, unknown>): void {
+  if (RUN_EVENT_TAGS.has(tag)) log.warn(`codex.${tag}`, data)
+  else log.debug(`codex.${tag}`, data)
 }
 
 // Review-mode system prompt (B13). In review mode this REPLACES the base
@@ -143,13 +151,15 @@ AUTONOMY CONTRACT (read carefully):
 
 Workflow per task:
 1. Understand the task (optional brief sentence)
-2. If it needs more than about three tool calls, call todo_write with the whole plan BEFORE step 3. The user sees that list live and it is how they follow a long run.
-3. Explore the codebase, file_list / file_read / file_search
-4. Implement ALL required changes, file_edit to change existing files, file_write for new ones; as many calls as needed in one go
-5. Verify, shell_execute to run tests, lint, or build
-6. Only THEN write a short summary of what you did
+2. Explore the codebase, file_list / file_read / file_search
+3. Implement ALL required changes, file_edit to change existing files, file_write for new ones
+4. Verify, shell_execute to run tests, lint, or build
+5. Only THEN write a short summary of what you did
 
-Keeping the plan current: after each step call todo_write again with the COMPLETE list, the finished item as completed and the next one as in_progress. Exactly one item is in_progress at a time, and nothing is completed before it actually succeeded. A plan that stops updating is worse than no plan.
+Work in batches. Every step resends the whole conversation, so each round trip costs the user real money:
+- Put independent tool calls into ONE response: read all the files you need at once, run several searches at once, make several edits at once.
+- Never spend a step on bookkeeping alone. If a todo_write tool is offered, send the updated list in the same response as your next real tool call, never on its own.
+- Do not re-read a file you already read unless it changed since.
 
 Rules:
 - Always read a file before modifying it
@@ -183,11 +193,11 @@ const CODEX_ASSET_LINE = `- Asset generation: when the task needs an image or a 
 const CODEX_SYSTEM_PROMPT_LEAN = `You are a coding agent in LU. Use tools to do the work, never guess file contents.
 
 Rules:
-- More than about three steps? Call todo_write first with the plan, and again after each step with the complete list. The user watches it.
+- Put independent tool calls into one response (several reads or edits at once). Every step costs the user money.
 - Read a file before you edit it.
 - To change an existing file use file_edit (replace a unique old_string with new_string), not file_write. Use file_write only to create a new file.
 - PATHS: use relative paths (e.g. \`package.json\`, \`.\`). Never start with \`/\` or a drive letter, it escapes the workspace and fails.
-- Emit the tool call as your FIRST output, no "Okay, let me…" preamble. One step at a time, as valid JSON.
+- Emit the tool call as your FIRST output, no "Okay, let me…" preamble. Valid JSON.
 - After each tool result, if more steps remain, immediately call the next tool. Do not narrate "I will now…" and then stop.
 - When the task is done and verified, reply with one short sentence. Never end with only raw JSON or a bare code block.`
 
@@ -817,7 +827,7 @@ export function useCodex() {
     // started and the next standalone tool call inherits its jail root.
     if (!conv) { endAgentRun(run); activeCodexRuns.delete(convId); return }
 
-    void diagLog('pre-loop', {
+    diagLog('pre-loop', {
       activeModel, providerId, strategy, workDir,
       systemPromptLen: systemPrompt.length,
       systemPromptHead: systemPrompt.slice(0, 500),
@@ -887,7 +897,7 @@ export function useCodex() {
     if (convId) {
       const resume = planResumeAnchor(useTodoStore.getState().getTodos(convId))
       if (resume) {
-        void diagLog('plan-resume-anchor', { done: resume.gap.done, total: resume.gap.total })
+        diagLog('plan-resume-anchor', { done: resume.gap.done, total: resume.gap.total })
         messages.push({ role: 'user', content: resume.text })
       }
     }
@@ -1135,9 +1145,6 @@ export function useCodex() {
       // from the nudges above, because a nudge fires on an EMPTY turn while
       // this fires on a turn that claims to be done.
       let planReconcilesRemaining = PLAN_RECONCILE_BUDGET
-      // PlanBar lag: batches of real work without a todo_write while the plan
-      // has open items earn one bounded mid-run steer to report progress.
-      const planStaleness = new PlanStaleness()
       // Raised from 20 → 50 (v2.3.7): large refactors across 10+ files
       // legitimately need >20 tool calls. Budget still caps via
       // agentMaxToolCalls/agentMaxIterations.
@@ -1166,6 +1173,7 @@ export function useCodex() {
         budget.addIteration()
         const bx = budget.exceeded()
         if (bx.kind !== 'none') {
+          diagLog('budget-halt', { iter: i, kind: bx.kind })
           useChatStore.getState().updateMessageContent(
             convId!,
             assistantMsg.id,
@@ -1409,7 +1417,16 @@ export function useCodex() {
             : !isLocalModelByName(activeModel)
               ? codexTools
               : selectRelevantTools(lastUserMsg, codexTools, permissions)
-          const relevantDefs = gateCreateTools(routedDefs, lastUserMsg, createGateOpened)
+          // Planning is opt-in (lib/plan-gate.ts): without Plan mode, a plan
+          // request or an open plan, todo_write is not offered at all.
+          const relevantDefs = gatePlanTool(
+            gateCreateTools(routedDefs, lastUserMsg, createGateOpened),
+            planToolAllowed({
+              mode: codexMode,
+              userText: lastUserMsg,
+              todos: convId ? useTodoStore.getState().getTodos(convId) : [],
+            }),
+          )
           const tools: ToolDefinition[] = relevantDefs.map(t => ({
             type: 'function' as const,
             function: { name: t.name, description: t.description, parameters: t.inputSchema },
@@ -1422,7 +1439,7 @@ export function useCodex() {
           if (convId) {
             useSendSizeStore.getState().reportTools(convId, stepToolsEstimate)
           }
-          void diagLog('iter-start', {
+          diagLog('iter-start', {
             iter: i,
             activeModel, modelToUse, strategy, providerId,
             allToolsCount: toolRegistry.getAll().length,
@@ -1452,7 +1469,7 @@ export function useCodex() {
             // count has landed yet, so a real value is never downgraded.
             seedEstimatedUsage(convId!, assistantMsg.id, sendMessages, tools)
             try {
-              void diagLog('streamWithTools-enter', { iter: i, messagesLen: sendMessages.length, toolsCount: tools.length, thinking: chatOptions.thinking })
+              diagLog('streamWithTools-enter', { iter: i, messagesLen: sendMessages.length, toolsCount: tools.length, thinking: chatOptions.thinking })
               turn = await streamWithTools(
                 modelToUse, sendMessages, tools,
                 { temperature: 0.1, thinking: chatOptions.thinking, maxTokens: chatOptions.maxTokens, contextWindow: numCtx, signal: abort.signal },
@@ -1464,9 +1481,9 @@ export function useCodex() {
                   }
                 },
               )
-              void diagLog('streamWithTools-ok', { iter: i, contentLen: turn.content?.length || 0, toolCallsCount: turn.toolCalls?.length || 0 })
+              diagLog('streamWithTools-ok', { iter: i, contentLen: turn.content?.length || 0, toolCallsCount: turn.toolCalls?.length || 0 })
             } catch (thinkErr) {
-              void diagLog('streamWithTools-catch', {
+              diagLog('streamWithTools-catch', {
                 iter: i,
                 status: httpStatusOf(thinkErr),
                 messageHead: errorText(thinkErr).slice(0, 400),
@@ -1484,7 +1501,7 @@ export function useCodex() {
                   liveContent,
                   () => {},
                 )
-                void diagLog('streamWithTools-retry-ok', { iter: i, contentLen: turn.content?.length || 0, toolCallsCount: turn.toolCalls?.length || 0 })
+                diagLog('streamWithTools-retry-ok', { iter: i, contentLen: turn.content?.length || 0, toolCallsCount: turn.toolCalls?.length || 0 })
               } else {
                 throw thinkErr
               }
@@ -1494,7 +1511,7 @@ export function useCodex() {
             turnContent = turn.content || ''
             turnFinishReason = turn.doneReason
             reportTurnUsage(convId!, assistantMsg.id, turn)
-            void diagLog('streamWithTools-return', {
+            diagLog('streamWithTools-return', {
               iter: i,
               toolCallsCount: toolCalls.length,
               toolCalls: toolCalls.map(tc => ({ name: tc.function?.name, args: tc.function?.arguments })),
@@ -1701,7 +1718,7 @@ export function useCodex() {
           overflowRetries++
           settleLivePaint()
           learnSendWindow(modelToUse, numCtx, next)
-          void diagLog('context-overflow-retry', { iter: i, sent, next, window: overflow.window, promptTokens: overflow.promptTokens })
+          diagLog('context-overflow-retry', { iter: i, sent, next, window: overflow.window, promptTokens: overflow.promptTokens })
           addBlock({
             id: uuid(),
             phase: 'reflection',
@@ -1878,7 +1895,7 @@ export function useCodex() {
           const { nudgeWorthy } = codexStallVerdict(turnContent, fullContent)
           if (nudgeWorthy && continueNudgesRemaining > 0) {
             continueNudgesRemaining--
-            void diagLog('continue-nudge', { iter: i, remaining: continueNudgesRemaining, turnContentLen: turnContent.length })
+            diagLog('continue-nudge', { iter: i, remaining: continueNudgesRemaining, turnContentLen: turnContent.length })
             messages.push({
               role: 'user',
               // A read-only command's deliverable IS the text. Demanding "the
@@ -1902,7 +1919,7 @@ export function useCodex() {
             const gap = openPlanGap(useTodoStore.getState().getTodos(convId))
             if (gap) {
               planReconcilesRemaining--
-              void diagLog('plan-reconcile-steer', { iter: i, done: gap.done, total: gap.total, remaining: planReconcilesRemaining })
+              diagLog('plan-reconcile-steer', { iter: i, done: gap.done, total: gap.total, remaining: planReconcilesRemaining })
               messages.push({ role: 'user', content: planReconcileSteer(gap) })
               continue
             }
@@ -1920,7 +1937,7 @@ export function useCodex() {
             convId ? openPlanGap(useTodoStore.getState().getTodos(convId)) : null,
           )
           if (cutoff && convId) {
-            void diagLog('turn-cut-off', { iter: i, reason: turnFinishReason })
+            diagLog('turn-cut-off', { iter: i, reason: turnFinishReason })
             useChatStore.getState().updateMessageContent(
               convId,
               assistantMsg.id,
@@ -1933,7 +1950,7 @@ export function useCodex() {
               timestamp: Date.now(),
             })
           }
-          void diagLog('break-no-toolcalls', { iter: i, turnContentLen: turnContent.length, fullContentLen: fullContent.length, finishReason: turnFinishReason })
+          diagLog('break-no-toolcalls', { iter: i, turnContentLen: turnContent.length, fullContentLen: fullContent.length, finishReason: turnFinishReason })
           break
         }
 
@@ -1964,7 +1981,7 @@ export function useCodex() {
               { trimmedReadKeys },
             )
         if (batchVerdict.action === 'halt') {
-          void diagLog('loop-guard-halt', { iter: i, reason: batchVerdict.reason })
+          diagLog('loop-guard-halt', { iter: i, reason: batchVerdict.reason })
           const msg = `\n\n_(halted: ${batchVerdict.reason}. The model is looping. Try a stronger model for multi-step code tasks, or rephrase the instruction.)_`
           useChatStore.getState().updateMessageContent(convId, assistantMsg.id, fullContent + msg)
           // A halt has to be visible in the thread itself, not only as a
@@ -1986,7 +2003,7 @@ export function useCodex() {
         if (batchVerdict.action === 'steer') {
           // Let this batch still run (the in-turn cache serves it instantly),
           // but put the anti-repeat instruction in front of the NEXT turn.
-          void diagLog('loop-guard-steer', { iter: i })
+          diagLog('loop-guard-steer', { iter: i })
           pendingSteer = batchVerdict.message
           addBlock({
             id: uuid(),
@@ -2228,7 +2245,7 @@ export function useCodex() {
           abortSignal: abort.signal,
         })
 
-        void diagLog('executeParallel-done', {
+        diagLog('executeParallel-done', {
           iter: i,
           results: results.map(r => ({ tool: r.toolName, status: r.status, error: r.error?.slice(0,200), hint: r.errorHint?.slice(0,200), resultHead: r.result?.slice(0,200) })),
         })
@@ -2395,16 +2412,6 @@ export function useCodex() {
         if (failVerdict.action === 'steer') {
           messages.push({ role: 'user', content: failVerdict.message })
         }
-        // PlanBar lag, parity with the Agent loop: the bar renders only what
-        // the model reports, so after enough batches of silent progress ask it
-        // to bring the list current.
-        if (convId) {
-          const staleGap = openPlanGap(useTodoStore.getState().getTodos(convId))
-          if (planStaleness.recordBatch(requests.map((r) => r.toolName), staleGap !== null) && staleGap) {
-            void diagLog('plan-staleness-steer', { iter: i, done: staleGap.done, total: staleGap.total })
-            messages.push({ role: 'user', content: planStalenessSteer(staleGap) })
-          }
-        }
       }
 
       // The bubble carries the MODEL'S answer or nothing. This used to build
@@ -2453,7 +2460,7 @@ export function useCodex() {
       // undefined for a non-object instead.
       const errName = asString(prop(err, 'name'))
       const code = asString(prop(err, 'code'))
-      void diagLog('outer-catch', {
+      diagLog('outer-catch', {
         name: errName,
         message: errorText(err).slice(0, 400),
         status: httpStatusOf(err),

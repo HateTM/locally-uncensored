@@ -366,6 +366,67 @@ export function pruneSupersededPlans<T extends DecayMessage>(
  * the contextDecay notaus wants: a support case that flips the switch should
  * land on the 2.6.5 window, not on a third behaviour nobody has ever seen.
  */
+/** How many ledger lines the pinned task carries at most. */
+export const LEDGER_MAX_LINES = 40
+
+/** The argument that names what a call worked on, in the order tools use them. */
+const LEDGER_ARG_KEYS = ['path', 'file_path', 'filePath', 'command', 'query', 'pattern', 'url', 'name'] as const
+
+function ledgerArg(args: unknown): string {
+  let obj: unknown = args
+  if (typeof args === 'string') {
+    try { obj = JSON.parse(args) } catch { return '' }
+  }
+  if (!obj || typeof obj !== 'object') return ''
+  const rec = obj as Record<string, unknown>
+  for (const key of LEDGER_ARG_KEYS) {
+    const v = rec[key]
+    if (typeof v === 'string' && v.trim()) {
+      const one = v.replace(/\s+/g, ' ').trim()
+      return one.length > 80 ? one.slice(0, 77) + '...' : one
+    }
+  }
+  return ''
+}
+
+/**
+ * The run ledger (customer case 30.09.2026, "always starting with the
+ * beginning"). trimWorkingHistory drops the oldest steps whole once a run
+ * outgrows its send window. The task stayed pinned, but nothing said what had
+ * already been done, so the model read the same files and redid the same
+ * edits, and every repeat paid the full context again.
+ *
+ * One line per call in the dropped part, oldest first, duplicates folded. It
+ * is derived from the dropped messages alone, so it only changes when the
+ * drop point moves: between trims every request keeps the same prefix and the
+ * upstream cache keeps hitting.
+ */
+export function runLedger(dropped: DecayMessage[]): string | null {
+  const lines: string[] = []
+  const seen = new Set<string>()
+  for (const m of dropped) {
+    if (m.role !== 'assistant') continue
+    for (const tc of toolCallsIn(m)) {
+      const name = callName(tc)
+      if (!name || name === 'todo_write') continue
+      const arg = ledgerArg(tc.function?.arguments)
+      const line = arg ? `${name}: ${arg}` : name
+      if (seen.has(line)) continue
+      seen.add(line)
+      lines.push(line)
+    }
+  }
+  if (lines.length === 0) return null
+  const kept = lines.length > LEDGER_MAX_LINES ? lines.slice(-LEDGER_MAX_LINES) : lines
+  const skipped = lines.length - kept.length
+  return [
+    '[Run ledger] Earlier steps of this run were removed from the context to save cost. They were already done, do not repeat them unless something changed:',
+    ...(skipped > 0 ? [`- (${skipped} older steps)`] : []),
+    ...kept.map((l) => `- ${l}`),
+    'Continue from where the run stands now.',
+  ].join('\n')
+}
+
 export function trimWorkingHistory<T extends DecayMessage>(
   messages: T[],
   budgetTokens: number,
@@ -394,7 +455,14 @@ export function trimWorkingHistory<T extends DecayMessage>(
     while (tail.length > 0 && isToolResult(tail[0])) tail = tail.slice(1)
     const out: T[] = []
     if (systemMsg) out.push(systemMsg)
-    if (firstUser && !tail.includes(firstUser)) out.push(firstUser)
+    if (firstUser && !tail.includes(firstUser)) {
+      // The ledger rides on the pinned task instead of being a message of its
+      // own: two user messages in a row break strict chat templates.
+      const ledger = runLedger(rest.slice(0, drop))
+      out.push(ledger && typeof firstUser.content === 'string'
+        ? { ...firstUser, content: `${firstUser.content}\n\n${ledger}` }
+        : firstUser)
+    }
     out.push(...tail)
     return out
   }

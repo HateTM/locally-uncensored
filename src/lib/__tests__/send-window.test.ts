@@ -78,8 +78,8 @@ describe('A2: the paid-provider send cap', () => {
 })
 
 describe('A2: the shipped defaults', () => {
-  it('ships the cap at 64k and the decay switch on', () => {
-    expect(DEFAULT_SETTINGS.codexSendWindowTokens).toBe(64000)
+  it('ships the cap at 32k and the decay switch on', () => {
+    expect(DEFAULT_SETTINGS.codexSendWindowTokens).toBe(32000)
     expect(DEFAULT_SETTINGS.contextDecay).toBe(true)
   })
 })

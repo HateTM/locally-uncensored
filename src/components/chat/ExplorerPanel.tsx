@@ -296,7 +296,7 @@ export function ExplorerPanel({ onApprovePlan }: Props) {
             title={planWaiting ? 'A plan is waiting for your approval' : 'Show the plan'}
             data-testid="explorer-plan-waiting"
             className={`mt-1 p-1 rounded transition-colors hover:bg-gray-100 dark:hover:bg-white/5 ${
-              planWaiting ? 'text-purple-400' : 'text-blue-400'
+              planWaiting ? 'text-lu-accent' : 'text-gray-400 dark:text-gray-500'
             }`}
           >
             <ListTodo size={12} />
@@ -320,7 +320,7 @@ export function ExplorerPanel({ onApprovePlan }: Props) {
         onPointerDown={startDrag}
         title="Drag to resize"
         data-testid="explorer-resize-handle"
-        className="absolute left-0 top-0 h-full w-1 -ml-0.5 z-10 cursor-col-resize hover:bg-blue-500/40 active:bg-blue-500/60 transition-colors"
+        className="absolute left-0 top-0 h-full w-1 -ml-0.5 z-10 cursor-col-resize hover:bg-white/10 active:bg-white/20 transition-colors"
       />
 
       <div className="flex items-center gap-1 p-1.5 border-b border-gray-200 dark:border-white/[0.04]">
@@ -429,7 +429,7 @@ export function ExplorerPanel({ onApprovePlan }: Props) {
                     style={{ paddingLeft: `${row.depth * 8 + 4}px` }}
                     className={`flex items-center gap-1 w-full pr-1 py-[2px] text-[0.5rem] rounded transition-colors text-left ${
                       isSelected
-                        ? 'bg-blue-500/10 text-gray-800 dark:text-gray-100'
+                        ? 'bg-gray-200/70 dark:bg-white/[0.07] text-gray-800 dark:text-gray-100'
                         : row.node.isDirectory
                           ? 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/5'
                           : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-white/5'

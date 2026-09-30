@@ -160,8 +160,8 @@ const BUILTIN_TOOLS: MCPToolDefinition[] = [
   {
     name: 'todo_write',
     description:
-      'Write and update the plan for a multi-step task. The list is shown to the user live, so it is how they follow a long run. '
-      + 'USE FIRST when a task needs more than about three tool calls, then send it again after each step. '
+      'Write and update the plan the user asked for. The list is shown to the user live. '
+      + 'NEVER send it as a step of its own: send an update together with your next real tool call. '
       + 'Send the COMPLETE list every time: it replaces the previous one, it does not merge.',
     inputSchema: {
       type: 'object',

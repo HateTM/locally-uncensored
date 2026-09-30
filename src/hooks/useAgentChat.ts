@@ -38,6 +38,7 @@ import { resolveToolCallingStrategy } from '../lib/agent-strategy'
 import { isMultimodalUnsupportedError, MULTIMODAL_UNSUPPORTED_MESSAGE } from '../lib/ollama-errors'
 import { stripVisionFeedbackMessages, reportMultimodalRefusal } from '../lib/vision-heal'
 import { log } from '../lib/logger'
+import { gatePlanTool, planToolAllowed } from '../lib/plan-gate'
 import { buildHermesToolPrompt, buildHermesToolResult, buildHermesToolCall, parseHermesToolCalls, stripToolCallTags, hasToolCallTags } from '../api/hermes-tool-calling'
 import { parseLooseToolCalls, stripMatchedCalls, stripToolCallText, canonicalToolName } from '../lib/loose-tool-parse'
 import { mediaCallSucceeded } from '../lib/media-result'
@@ -95,7 +96,6 @@ import { isOutsideWorkspaceRefusal, OUTSIDE_WORKSPACE_NOTICE } from '../lib/work
 import { useChatNoticeStore } from '../stores/chatNoticeStore'
 import { settleThinking } from '../lib/thinking-stripper'
 import { openPlanGap, planReconcileSteer, PLAN_RECONCILE_BUDGET } from '../lib/plan-reconcile'
-import { PlanStaleness, planStalenessSteer } from '../lib/plan-staleness'
 import { planResumeAnchor } from '../lib/plan-resume'
 import { reasoningOnlyRound, REASONING_CONTINUE_BUDGET, REASONING_CONTINUE_STEER } from '../lib/reasoning-round'
 import { findUnbackedLinks, unbackedLinksSteer } from '../lib/unbacked-links'
@@ -975,13 +975,21 @@ export function useAgentChat() {
     //
     // Nur im hermes_xml-Fall berechnet: sonst zahlte jeder native Zug eine
     // Einbettungsabfrage fuer eine Liste, die er nie benutzt.
+    // Planning is opt-in (lib/plan-gate.ts). Decided once per run: the tool
+    // list of a run must not change mid-way, and a plan the model cannot open
+    // cannot become an open plan inside this run either.
+    const planAllowed = planToolAllowed({
+      mode: null,
+      userText: userContent,
+      todos: convId ? useTodoStore.getState().getTodos(convId) : [],
+    })
     const hermesToolDefs = strategy === 'hermes_xml'
-      ? await selectRelevantToolsAsync(
+      ? gatePlanTool(await selectRelevantToolsAsync(
           userContent,
           toolRegistry.getAll().filter((t) => toolMatchesCurated(t.name)),
           permissions,
           toolSelectionOpts(!!settings.smallModelMode, (texts) => generateEmbeddings(texts)),
-        )
+        ), planAllowed)
       : []
     // Small-Model Mode (Knob 2): swap the ~3000-char agent prompt for a lean
     // ~750-char one on the native path. Der Hermes-Zweig behaelt seine eigene
@@ -1000,8 +1008,10 @@ export function useAgentChat() {
     // The roster the prompt shows comes from the same filtered registry the
     // request draws on, so the prompt can never advertise a tool a permission
     // blocked or omit one that was added since (audit 2026-08-05).
-    const offeredTools = toolRegistry.getAvailableTools(permissions)
-      .filter((t) => toolMatchesCurated(t.name))
+    const offeredTools = gatePlanTool(
+      toolRegistry.getAvailableTools(permissions).filter((t) => toolMatchesCurated(t.name)),
+      planAllowed,
+    )
     let agentSystemPrompt = strategy === 'hermes_xml'
       ? buildHermesToolPrompt(hermesToolDefs) + (systemPrompt ? `\n\n${systemPrompt}` : '')
       : opts?.chatToolsMode
@@ -1278,9 +1288,6 @@ export function useAgentChat() {
     let planReconcilesRemaining = PLAN_RECONCILE_BUDGET
     // G17: budget for continuing past reasoning-only rounds mid-run.
     let reasoningContinuesRemaining = REASONING_CONTINUE_BUDGET
-    // PlanBar lag: batches of real work without a todo_write while the plan
-    // has open items earn one bounded mid-run steer to report progress.
-    const planStaleness = new PlanStaleness()
     const executedCallKeys = new Set<string>()
     const callKey = (tc: { function: { name: string; arguments: unknown } }) =>
       tc.function.name + '|' + JSON.stringify(tc.function.arguments ?? {})
@@ -1545,12 +1552,12 @@ export function useAgentChat() {
           // Als sie hier standen, gab es sie nur an DIESER Stelle — der
           // hermes_xml-Zweig oben nahm stattdessen den ganzen Katalog, und
           // niemandem fiel es auf, weil nichts brach.
-          const relevantDefs = await selectRelevantToolsAsync(
+          const relevantDefs = gatePlanTool(await selectRelevantToolsAsync(
             lastUserMsg,
             toolRegistry.getAll().filter((t) => toolMatchesCurated(t.name)),
             permissions,
             toolSelectionOpts(!!settings.smallModelMode, (texts) => generateEmbeddings(texts)),
-          )
+          ), planAllowed)
           const tools: ToolDefinition[] = relevantDefs.map(t => ({
             type: 'function' as const,
             function: { name: t.name, description: t.description, parameters: t.inputSchema },
@@ -2721,14 +2728,6 @@ export function useAgentChat() {
         if (failVerdict.action === 'steer') {
           agentMessages.push({ role: 'user', content: failVerdict.message })
         }
-        // PlanBar lag: the bar renders only what the model reports, so after
-        // enough batches of silent progress ask it to bring the list current.
-        {
-          const staleGap = openPlanGap(useTodoStore.getState().getTodos(convId!))
-          if (planStaleness.recordBatch(batch.map((e) => e.ac.toolName), staleGap !== null) && staleGap) {
-            agentMessages.push({ role: 'user', content: planStalenessSteer(staleGap) })
-          }
-        }
 
         // Vision feedback (David 2026-06-03): after image_generate, hand the
         // generated picture to a vision-capable model so it SEES the result and
@@ -3237,10 +3236,9 @@ ${roster}
 
 That list is what LU can do. Your request carries the subset that fits the task at hand, and on a local model it is a subset. Only ever call a tool that is in your tool list. Calling one that is not there fails as an unknown tool and wastes a step. If you need one that is missing, name it in your answer and carry on with what you have.
 
-PLAN FIRST (todo_write):
-- Any task that needs more than about three tool calls starts with todo_write: write the whole plan before the first step. The user sees that list live, it is how they know what you are doing.
-- After each step, call todo_write again with the COMPLETE list, flipping the finished item to completed and the next one to in_progress. Exactly one item is in_progress at a time.
-- Never mark an item completed before the work actually succeeded. Skip the plan entirely for a single-step request.
+WORK IN BATCHES (every step resends the whole conversation and costs the user money):
+- Put independent tool calls into ONE response: several reads, searches or edits at once.
+- Never spend a step on bookkeeping alone. If a todo_write tool is offered, send the updated list together with your next real tool call.
 
 AUTONOMY CONTRACT (read carefully, this is the most important rule):
 - When the user asks you to BUILD, CREATE, MAKE, or WRITE something (a file, a website, a script, a folder structure), you MUST execute it via tools, typically file_write.
@@ -3290,11 +3288,11 @@ ${platformPromptLine()}
 You always have: ${alwaysThere}. Your request carries the other tools that fit the task. Read their names there, do not guess.
 
 Rules:
-- For a task of more than about three steps, call todo_write FIRST with the whole plan, then again after each step with the complete list (one item in_progress, finished ones completed). The user watches that list.
+- Put independent tool calls into one response (several reads or edits at once). Every step costs the user money.
 - To build/create/write something, CALL the tool (usually file_write), never paste a code block and say "save this".
 - To change an existing file use file_edit with a unique old_string, not file_write.
 - PATHS: use relative paths (e.g. \`package.json\`, \`.\`). Never start with \`/\` or a drive letter, it escapes your workspace and fails.
-- Emit the tool call as your FIRST output, no "Okay, let me…" preamble. Valid JSON, one at a time. Never guess file contents, file_read first.
+- Emit the tool call as your FIRST output, no "Okay, let me…" preamble. Valid JSON. Never guess file contents, file_read first.
 - After each tool result, if a step remains, immediately call the next tool. Do not narrate "I will now…" and then stop.
 - For images/video call image_generate / video_generate as real tool calls.
 - When everything is done, reply with one short sentence in the user's language.`
