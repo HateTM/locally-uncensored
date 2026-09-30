@@ -1202,8 +1202,8 @@ export function useAgentChat() {
       [...agentMessages].reverse().find((m) => m.role === 'user')?.content || ''
     // G27b, parity with useCodex: a new turn on a conversation whose plan is
     // still open carries the plan instead of hoping the model digs it back out
-    // of the history. This loop persists NO hidden tool chain at all, so
-    // without the anchor the next request contains no todo_write whatsoever.
+    // of the history. The stored chain is capped, so the last todo_write may
+    // already be outside it.
     // The plan state comes from the todoStore, which is what the PlanBar shows.
     // Pushed LAST, behind the user's own message: volatile tail, stable head
     // (plan A5). Deliberately after userPromptText above, so the media-intent
@@ -2938,7 +2938,8 @@ export function useAgentChat() {
       // Die Werkzeugkette als versteckte Nachrichten ablegen, VOR der
       // Assistentenantwort. Im finally, nicht am Ende des Erfolgswegs: ein Lauf,
       // der mit einem Fehler oder Abbruch endete, verlor sonst seine ganze Kette,
-      // und "continue" fing von vorn an (Kundenfall swift_maple90, 30.09.2026) — genau wie useCodex es tut (dieselbe Deckelung,
+      // und "continue" fing von vorn an (Kundenfall swift_maple90, 30.09.2026).
+      // Genau wie useCodex (dieselbe Deckelung und
       // derselbe Waisenschnitt aus hooks/codex/hidden-history.ts: ein Fenster,
       // das mit einem Ergebnis ohne seinen Aufruf beginnt, laesst strenge
       // Anbieter mit 422 antworten). Ohne das hier sah die naechste Runde nur
