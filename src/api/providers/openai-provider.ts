@@ -910,10 +910,16 @@ export class OpenAIProvider implements ProviderClient {
         // text-only model returns `event: error` with HTTP 200 (2026-06-21).
         const streamErr = chunk.error
         if (streamErr) {
-          throw new Error(
+          // The server's code travels with the error, so the retry ladder can
+          // tell a step it must not repeat (LU Cloud `stalled_runaway`: ten
+          // minutes of output nobody saw) from a dropped line.
+          const serverCode = typeof streamErr === 'string' ? undefined : asString(prop(streamErr, 'code')) || undefined
+          throw new ProviderError(
             typeof streamErr === 'string'
               ? streamErr
               : withContextNumbers(asString(prop(streamErr, 'message')) || 'Streaming error', streamErr),
+            'openai',
+            serverCode,
           )
         }
 
