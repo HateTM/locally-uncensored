@@ -2301,6 +2301,32 @@ export function useAgentChat() {
           }
         }
 
+        // A tool switched off in the permissions is refused, not offered for
+        // approval (bug hunt 01.10.2026, A4). The approval below asked for
+        // every level that was not 'auto', 'blocked' included, so one click on
+        // Approve ran a tool the user had turned off. Leaving it out of the
+        // catalog is not a gate: the loose parser lifts a call written as text
+        // and the executor resolves it by name. Same level, same inputs as the
+        // approval, and the same refusal the Code tab gives.
+        {
+          const overrides = usePermissionStore.getState().perToolOverrides
+          const isBlocked = (tc: ToolCall) => resolveApprovalLevel(tc.function.name, {
+            categoryLevel: toolRegistry.getPermissionLevelWithOverrides(tc.function.name, permissions, {}),
+            override: overrides[tc.function.name],
+            codexMode: null,
+            readOnlyRun: run.readOnlyShellTurn,
+          }) === 'blocked'
+          const refused = toolCalls.filter(isBlocked)
+          if (refused.length) {
+            toolCalls = toolCalls.filter((tc) => !isBlocked(tc))
+            const names = [...new Set(refused.map((tc) => tc.function.name))].join(', ')
+            agentMessages.push({
+              role: 'user',
+              content: `${names} is switched off for this conversation in the tool permissions, so it was not run. Do not call it again. Continue with the tools you have, or say what you would need.`,
+            })
+          }
+        }
+
         // Loop-detector, parity with Codex: narration first (the same line
         // re-emitted every iteration), then the batch (windowed signature
         // repeats + identical reads against an unchanged workspace). Steer is
