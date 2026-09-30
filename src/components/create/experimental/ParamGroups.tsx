@@ -16,6 +16,7 @@ import { Button } from '../ui/Button'
 import { Tooltip } from '../ui/Tooltip'
 import { cn } from '../ui/cn'
 import { HINWEIS_TEXT } from '../../../lib/hinweis'
+import { staleSelectedLoras } from '../../../lib/stale-loras'
 
 // Video families whose dynamic-workflow strategy actually wires a LoRA node:
 // the generic UNET path (wan/hunyuan/ltx/mochi/cosmos) plus Wan 2.2's dedicated
@@ -242,6 +243,23 @@ export function ParamGroups() {
                 <RotateCcw className="w-3 h-3" /> Rescan
               </button>
             </div>
+            {staleSelectedLoras(s.selectedLoras, loraList, s.comfyRunning).map((name) => (
+              <div key={name} className="flex items-center justify-between gap-2 rounded-md border border-white/[0.06] px-2.5 py-1.5 t-control">
+                <span className="truncate text-gray-400" title={`${name} is selected but ComfyUI does not list it, so a render with it fails`}>
+                  {name.replace(/\.safetensors$/, '')} <span className="t-mono text-red-300">missing</span>
+                </span>
+                <button
+                  onClick={() => {
+                    s.toggleLora(name)
+                    if (s.selectedCharacter?.id === `local:${name}`) s.setSelectedCharacter(null)
+                  }}
+                  className="t-mono text-gray-500 hover:text-gray-300"
+                  title="Remove it from the LoRA stack"
+                >
+                  remove
+                </button>
+              </div>
+            ))}
             {loraList.length === 0 ? (
               <div className="t-control text-gray-600">No LoRAs found yet. Drop .safetensors files into ComfyUI&apos;s models/loras folder and hit Rescan. Characters trained in Character Studio land there automatically.</div>
             ) : (
