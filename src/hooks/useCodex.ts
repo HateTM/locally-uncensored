@@ -893,7 +893,7 @@ export function useCodex() {
     // from a history whose newest todo_write may have aged out or fallen off
     // the 60-message persist cap below. Last in the array, so the stable head
     // a prefix cache matches stays byte-identical (plan A5), and BEFORE
-    // messagesStartLen so the anchor is never persisted back into the chat.
+    // the run log starts, so the anchor is never persisted back into the chat.
     if (convId) {
       const resume = planResumeAnchor(useTodoStore.getState().getTodos(convId))
       if (resume) {
@@ -935,7 +935,23 @@ export function useCodex() {
       }
     }
 
-    const messagesStartLen = messages.length
+    // What this run adds, by identity instead of by index. `messages` gets
+    // trimmed during a long run (trimWorkingHistory), so an index taken here
+    // pointed into the wrong place at the end: the persisted chain lost its
+    // older steps and the ledger with them, and "continue" started over
+    // (customer case swift_maple90, 30.09.2026). `runLog` keeps every message
+    // the run itself pushed, in order; a copy the trim makes (the pinned task
+    // with its ledger) is not the run's own and is kept out.
+    const notRunOwn = new Set<ChatMessage>(messages)
+    const runLog: ChatMessage[] = []
+    const logged = new Set<ChatMessage>()
+    const logRun = () => {
+      for (const m of messages) {
+        if (notRunOwn.has(m) || logged.has(m)) continue
+        logged.add(m)
+        runLog.push(m)
+      }
+    }
 
     // Setup
     const abort = new AbortController()
@@ -1264,7 +1280,10 @@ export function useCodex() {
           // moves every step is a prompt prefix that is never the same twice.
           // Whole messages are dropped here, never shortened: decay stays on
           // the send copy alone, so the store keeps every result complete.
+          logRun()
+          const beforeTrim = new Set(messages)
           messages = trimWorkingHistory(messages, sendWindow, { enabled: decayOn, hysteresis: decayOn }).messages
+          for (const m of messages) if (!beforeTrim.has(m)) notRunOwn.add(m)
           const built = buildRequestMessages(messages, {
             budgetTokens: sendWindow,
             enabled: decayOn,
@@ -2520,7 +2539,8 @@ export function useCodex() {
       // one-set()-per-message insert loop was the visible hang at run end.
       // The most recent chain is what the next turn actually needs; older
       // steps are summarised by the visible transcript anyway.
-      const toolHistoryAll = messages.slice(messagesStartLen)
+      logRun()
+      const toolHistoryAll = runLog
       // Deckelung UND Waisenschnitt gehoeren zusammen: hooks/codex/hidden-history.ts.
       const toolHistory = capHiddenToolHistory(toolHistoryAll)
       if (toolHistory.length > 0 && convId) {

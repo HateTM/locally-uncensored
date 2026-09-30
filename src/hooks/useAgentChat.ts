@@ -2788,30 +2788,6 @@ export function useAgentChat() {
         runState.content = closingSummary()
       }
 
-      // Die Werkzeugkette als versteckte Nachrichten ablegen, VOR der
-      // Assistentenantwort — genau wie useCodex es tut (dieselbe Deckelung,
-      // derselbe Waisenschnitt aus hooks/codex/hidden-history.ts: ein Fenster,
-      // das mit einem Ergebnis ohne seinen Aufruf beginnt, laesst strenge
-      // Anbieter mit 422 antworten). Ohne das hier sah die naechste Runde nur
-      // noch den Antworttext und holte dieselbe Seite ein zweites Mal.
-      if (werkzeugKette.length > 0 && convId) {
-        const kette = capHiddenToolHistory(werkzeugKette)
-        const store = useChatStore.getState()
-        const convNow = store.conversations.find((c) => c.id === convId)
-        const idx = convNow?.messages.findIndex((m) => m.id === assistantMessage.id) ?? -1
-        if (kette.length > 0 && idx > 0) {
-          store.insertMessagesBefore(convId, assistantMessage.id, kette.map((tm) => ({
-            id: uuid(),
-            role: tm.role as import('../types/chat').Message['role'],
-            content: tm.content || '',
-            timestamp: Date.now(),
-            hidden: true,
-            ...(tm.tool_calls ? { tool_calls: tm.tool_calls as import('../types/chat').Message['tool_calls'] } : {}),
-            ...(tm.tool_call_id ? { tool_call_id: tm.tool_call_id } : {}),
-          })))
-        }
-      }
-
       // Final store update
       useChatStore.getState().updateMessageContent(convId!, assistantMessage.id, runState.content)
       if (runState.thinking) {
@@ -2959,6 +2935,32 @@ export function useAgentChat() {
         useGenerationStore.getState().clearAborter(convId)
         activeAgentRuns.delete(convId)
       }
+      // Die Werkzeugkette als versteckte Nachrichten ablegen, VOR der
+      // Assistentenantwort. Im finally, nicht am Ende des Erfolgswegs: ein Lauf,
+      // der mit einem Fehler oder Abbruch endete, verlor sonst seine ganze Kette,
+      // und "continue" fing von vorn an (Kundenfall swift_maple90, 30.09.2026) — genau wie useCodex es tut (dieselbe Deckelung,
+      // derselbe Waisenschnitt aus hooks/codex/hidden-history.ts: ein Fenster,
+      // das mit einem Ergebnis ohne seinen Aufruf beginnt, laesst strenge
+      // Anbieter mit 422 antworten). Ohne das hier sah die naechste Runde nur
+      // noch den Antworttext und holte dieselbe Seite ein zweites Mal.
+      if (werkzeugKette.length > 0 && convId) {
+        const kette = capHiddenToolHistory(werkzeugKette)
+        const store = useChatStore.getState()
+        const convNow = store.conversations.find((c) => c.id === convId)
+        const idx = convNow?.messages.findIndex((m) => m.id === assistantMessage.id) ?? -1
+        if (kette.length > 0 && idx > 0) {
+          store.insertMessagesBefore(convId, assistantMessage.id, kette.map((tm) => ({
+            id: uuid(),
+            role: tm.role as import('../types/chat').Message['role'],
+            content: tm.content || '',
+            timestamp: Date.now(),
+            hidden: true,
+            ...(tm.tool_calls ? { tool_calls: tm.tool_calls as import('../types/chat').Message['tool_calls'] } : {}),
+            ...(tm.tool_call_id ? { tool_call_id: tm.tool_call_id } : {}),
+          })))
+        }
+      }
+
       // Chat-tools artifact mode: attach any files the model "wrote" (captured
       // in-memory, NOT on disk) to the assistant message so they render inline
       // with a preview + Download button. takeChatArtifacts drains this run's

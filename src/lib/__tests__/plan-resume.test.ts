@@ -151,10 +151,10 @@ describe('both surfaces are wired, in the request copy only', () => {
     expect(codex).toContain('planResumeAnchor(useTodoStore.getState().getTodos(convId))')
     const pushAt = codex.indexOf("messages.push({ role: 'user', content: resume.text })")
     const builtAt = codex.indexOf('let messages: ChatMessage[] = [')
-    const startLenAt = codex.indexOf('const messagesStartLen = messages.length')
+    const startLenAt = codex.indexOf('const notRunOwn = new Set<ChatMessage>(messages)')
     expect(pushAt).toBeGreaterThan(builtAt)
-    // Before the marker the hidden-history persist slices from: the anchor is
-    // a request line, it must never be written back into the conversation.
+    // Before the run log starts: the anchor is a request line, it must never
+    // be written back into the conversation.
     expect(pushAt).toBeLessThan(startLenAt)
   })
 
