@@ -81,8 +81,13 @@ describe('the agent loop actually wires the heal', () => {
   const hook = read('../../hooks/useAgentChat.ts')
 
   it('both transport branches heal before any other error handling', () => {
-    const occurrences = hook.split('stripVisionFeedbackMessages(agentMessages)').length - 1
+    // Since the text-only agent fix both branches call one helper, which runs
+    // the G22 strip and the user-attachment strip together.
+    const occurrences = hook.split('healForTextOnlyModel(agentMessages)').length - 1
     expect(occurrences).toBe(2)
+    const helper = hook.slice(hook.indexOf('function healForTextOnlyModel'), hook.indexOf('export function useAgentChat'))
+    expect(helper).toContain('stripVisionFeedbackMessages(messages)')
+    expect(helper).toContain('stripUserImagesForToolUse(messages)')
   })
 
   it('a healed run stops attaching for its remainder', () => {
