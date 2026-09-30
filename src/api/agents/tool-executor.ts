@@ -495,6 +495,18 @@ function abortedResult(tagged: { req: ExecutionRequest; key?: string }): Executi
   }
 }
 
+/**
+ * What the loop guard needs to know about one result: did it fail. A tool that
+ * reports its failure as text (`Error (1): …`, `Web search failed: …`) comes
+ * back `completed`, and the guard fed `status === 'failed'` never saw it: a
+ * command failing over and over read as progress and even cleared the failure
+ * streaks (bug hunt 01.10.2026), so the run went on to the 200-round budget.
+ */
+export function resultFailed(r: Pick<ExecutionResult, 'status' | 'result'>): boolean {
+  if (r.status === 'failed') return true
+  return (r.status === 'completed' || r.status === 'cached') && toolResultIsFailure(r.result)
+}
+
 /** Convenience: attach ExecutionResult fields back onto an AgentToolCall. */
 export function applyResultToToolCall(call: AgentToolCall, result: ExecutionResult): AgentToolCall {
   call.status =
