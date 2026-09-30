@@ -736,6 +736,16 @@ export class OpenAIProvider implements ProviderClient {
     options?: ChatOptions,
   ): Promise<void> {
     const requested = options?.maxTokens && options.maxTokens > 0 ? options.maxTokens : 0
+    // LU Cloud sizes an absent budget itself: it clamps to the room the model
+    // has, and a free Flash request gets its 8192 default. Our own fallback of
+    // up to 32768 read there as an explicit wish, so Flash reserved four times
+    // what the web reserves for the same message and fell over to credits
+    // while the day's free allowance still had room (bug hunt 01.10.2026, H5).
+    // Only the user's own number goes up.
+    if (this.config.id === 'lu-cloud' && (requested === 0 || options?.maxTokensIsDefault)) {
+      delete body.max_tokens
+      return
+    }
     let ctxLen = 0
     let derivable = false
     // Audit: the probe behind this runs on the SEND path. Without the signal a
