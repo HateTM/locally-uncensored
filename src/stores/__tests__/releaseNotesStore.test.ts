@@ -333,17 +333,12 @@ describe('the notes table', () => {
     }
   })
 
-  it('the 3.0.3 entry names every fix of the hotfix, now that it is the shipping version', () => {
-    // Hotfix vom 28.09.2026: package.json, Cargo.toml/.lock and
-    // tauri.conf.json all moved to 3.0.3 in one commit, so THIS is now the
-    // shipping entry the earlier existence guard checks. Nothing but this
-    // sheet announces the release (no Discord post), so an anchor per fix:
-    // a later edit that drops one fails here instead of shipping quietly
-    // incomplete.
-    const shipping = JSON.parse(
-      readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../../../package.json'), 'utf8'),
-    ).version as string
-    expect(shipping).toBe('3.0.3')
+  it('the 3.0.3 entry names every fix of the hotfix', () => {
+    // Hotfix vom 28.09.2026. 3.0.4 kam darauf (package.json), also pinnt
+    // dieser Block den 3.0.3-Eintrag ueber seine eigene Version, wie die
+    // Bloecke darueber. Ein Anker pro Fix: eine spaetere Aenderung, die einen
+    // verliert, faellt hier auf.
+    const shipping = '3.0.3'
     const prose = proseOf(shipping)
     for (const anchor of [
       // Der Chat-Speicher: Ursache, Grenze, Umzug und die Rueckholung.
@@ -368,6 +363,31 @@ describe('the notes table', () => {
       // Der Agent und sein Arbeitsordner (Discord 28.09.2026).
       'the button next to agent', 'pick a folder', 'no longer says filesystem reaches files anywhere',
       'plain chat has no tool that reads your files', 'says to turn on agent',
+    ]) {
+      expect(prose, `${shipping}: nothing about "${anchor}"`).toContain(anchor)
+    }
+  })
+
+  it('the 3.0.4 entry names every fix, now that it is the shipping version', () => {
+    // Kundenfall swift_maple90, 30.09.2026: package.json, Cargo.toml/.lock und
+    // tauri.conf.json stehen in einem Zug auf 3.0.4, also ist DAS jetzt der
+    // Eintrag, den die Existenzpruefung oben verlangt. Ein Anker pro Fix.
+    const shipping = JSON.parse(
+      readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../../../package.json'), 'utf8'),
+    ).version as string
+    expect(shipping).toBe('3.0.4')
+    const prose = proseOf(shipping)
+    for (const anchor of [
+      // Der Abbruch mitten im Schreiben und was jetzt zaehlt.
+      'in the middle of the write', 'only when no data arrives at all',
+      // "continue" nach Stopp oder Fehler, und das Protokoll der alten Schritte.
+      'after a stop or an error', 'short list of what is already done',
+      // Plan nur auf Wunsch, dunkle Leiste.
+      'in plan mode, when you ask for a plan', 'dark instead of blue',
+      // Buendeln und file_edit.
+      'several files in one step', 'several places in a file in one call',
+      // Kontext.
+      '32k of context by default instead of 64k', 'a small triangle',
     ]) {
       expect(prose, `${shipping}: nothing about "${anchor}"`).toContain(anchor)
     }

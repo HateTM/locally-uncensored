@@ -130,11 +130,39 @@ export interface ReleaseNote {
 }
 
 export const RELEASE_NOTES: ReleaseNote[] = [
-  // Stand 28.09.2026: package.json, src-tauri/Cargo.toml (plus Cargo.lock) und
-  // src-tauri/tauri.conf.json stehen jetzt alle auf 3.0.3, in einem Zug mit
-  // dem Eintrag darunter, damit kein Release still bleibt (Gedaechtnis
-  // lu-265-plan-2026-08-10, "release-notes.ts vergessen = stummes Release").
-  // 3.0.2 IST veroeffentlicht (v3.0.2 auf 1472e7ad, 22.09.2026) und bleibt
+  // 3.0.4, vorbereitet 30.09.2026 auf fix/agent-credit-burn: der Kundenfall
+  // swift_maple90 (Code-Agent auf LU Cloud). package.json, Cargo.toml/.lock und
+  // tauri.conf.json stehen im selben Zug auf 3.0.4. 3.0.3 darunter bleibt
+  // unveraendert. Veroeffentlicht wird erst auf Davids Go.
+  {
+    version: '3.0.4',
+    headline: 'A fix for the Code agent on LU Cloud: long file writes no longer end the run, "continue" picks up where the run stopped, and the agent no longer spends requests on steps you did not ask for.',
+    lines: [
+      {
+        title: 'Writing a long file no longer ends the run.',
+        detail: 'While a model writes a file, the app receives the file in pieces but shows no text. After five minutes without text it treated the connection as stalled and ended the run in the middle of the write, and the next run started that step again. The app now ends a run only when no data arrives at all.',
+      },
+      {
+        title: '"continue" picks up where the run stopped.',
+        detail: 'After a stop or an error, the next message lost the steps the run had already done, and the agent started over. Those steps are now kept for the next message, also after a stop, and older steps that no longer fit are kept as a short list of what is already done.',
+      },
+      {
+        title: 'The agent keeps a plan only when you ask for one.',
+        detail: 'The Code agent wrote a todo list for almost every task and sent an update after each step, each one a request of its own. It now keeps a plan in Plan mode, when you ask for a plan, or while a plan is still open. The plan panel and the approval bar are dark instead of blue.',
+      },
+      {
+        title: 'Fewer requests for the same work.',
+        detail: 'The agent is now told to read several files in one step instead of one request per file, and file_edit changes several places in a file in one call, also when the indentation in the file differs slightly from the model\'s copy.',
+      },
+      {
+        title: 'Cloud context is 32K by default and can be set per model.',
+        detail: 'Cloud models now send at most 32K of context by default instead of 64K. You can change it per model in the context menu in the header. Once you set it above the default, a small triangle shows that every message then sends more and costs more credits.',
+      },
+    ],
+  },
+  // Stand 28.09.2026: 3.0.3 IST veroeffentlicht und bleibt unveraendert
+  // (Gedaechtnis lu-265-plan-2026-08-10, "release-notes.ts vergessen = stummes
+  // Release"). 3.0.2 IST veroeffentlicht (v3.0.2 auf 1472e7ad, 22.09.2026) und bleibt
   // wie 3.0.1 und 3.0.0 darunter unveraendert. Der Hotfix 3.0.3 bringt den
   // Chat-Speicherfix, die Create-Fehler aus Discord und die GitHub-Issues 139
   // bis 143; dieses Blatt ist diesmal die einzige Ankuendigung (David

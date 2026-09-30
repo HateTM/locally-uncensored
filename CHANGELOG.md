@@ -2,6 +2,46 @@
 
 All notable changes to Locally Uncensored are documented here.
 
+## [3.0.4] - unreleased
+
+A fix for the Code agent and the agent in chat on LU Cloud. Long file writes
+no longer end the run, "continue" picks up where a run stopped, and the agent
+no longer spends requests on steps nobody asked for. The open-model counts
+from 3.0.2 still hold: fourteen video models and seven image models in the
+cloud catalogue.
+
+### Fixed
+
+- **Writing a long file no longer ends the run.** While a model writes a file,
+  the app receives the file in pieces but has no text to show. After five
+  minutes without text it treated the connection as stalled and ended the run
+  in the middle of the write, and the next run started that step again. The
+  app now ends a run only when no data arrives at all for a minute. While a
+  model is still working, the server sends a short signal every 15 seconds.
+- **"continue" picks up where the run stopped.** After a stop or an error, the
+  next message lost the steps the run had already done, and the agent started
+  over. The steps of a run are now kept for the next message, also after a
+  stop or an error. Older steps that no longer fit into the context are kept
+  as a short list of what is already done, instead of being dropped.
+- **The agent keeps a plan only when you ask for one.** The Code agent wrote a
+  todo list for almost every task and sent an update after each step, each one
+  a request of its own. It now keeps a plan in Plan mode, when you ask for a
+  plan, or while a plan is still open. The plan panel, the approval bar and the
+  file explorer are dark instead of blue.
+
+### Changed
+
+- **Fewer requests for the same work.** The agent is now told to read several
+  files in one step instead of one request per file. file_edit changes several
+  places in a file in one call, all or nothing, can replace every occurrence of
+  a string, and still finds the place when the indentation in the file differs
+  slightly from the model's copy.
+- **Cloud context is 32K by default and can be set per model.** Cloud models
+  now send at most 32K of context by default instead of 64K. You can change it
+  per model in the context menu in the header. Once you set it above the
+  default, a small triangle shows that every message then sends more and costs
+  more credits.
+
 ## [3.0.3] - 2026-09-28
 
 A hotfix for chats with many images, which could run the app out of memory,
