@@ -103,7 +103,7 @@ import { shouldDowngradeThinking, engineDeniedThinking } from './codex/thinking-
 import { recoverToolCallsFromContent } from './codex/tool-call-recovery'
 import { codexStallVerdict } from './codex/stall-verdict'
 import { createStagedWriter } from './codex/staged-writes'
-import { codexCutoffNote } from './codex/turn-cutoff'
+import { codexCutoffNote, dropCutOffCall } from './codex/turn-cutoff'
 import { codexToolDiff, codexEventKind } from './codex/tool-result-view'
 import { capHiddenToolHistory } from './codex/hidden-history'
 import { withHouseConduct } from '../lib/system-prompt'
@@ -1898,6 +1898,15 @@ export function useCodex() {
               role: 'user',
               content: `${names} is switched off for this conversation in the tool permissions, so it was not run. Do not call it again. Continue with the tools you have, or say what you would need.`,
             })
+          }
+        }
+
+        // A turn cut off by the token limit: its last call may stop halfway.
+        {
+          const cut = dropCutOffCall(toolCalls, turnFinishReason)
+          if (cut.dropped) {
+            toolCalls = cut.calls
+            diagLog('cut-off-call-dropped', { iter: i, name: (cut.dropped as { function?: { name?: string } }).function?.name })
           }
         }
 

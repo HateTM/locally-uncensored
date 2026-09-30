@@ -31,3 +31,21 @@ export function codexCutoffNote(finishReason: string | undefined, gap: PlanGap |
     ? `${head} The plan stands at ${gap.done} of ${gap.total}, still open: "${gap.next}". ${tail}`
     : `${head} ${tail}`
 }
+
+/**
+ * The call a cut-off turn was writing when the limit hit.
+ *
+ * Bug hunt 01.10.2026 (A2). A turn that ends on 'length' can carry a tool call
+ * whose arguments stop in the middle: a file_write with half the file, a shell
+ * command without its end. Every path that builds calls repairs what it gets
+ * (safeParseArgs, repairJson, a closed-off <tool_call>, the loose parser), so
+ * the half call came out valid and ran: half a file on disk, reported as
+ * written. Output is written in order, so only the LAST call can be the one
+ * that was cut; the ones before it were finished before the model moved on.
+ * The last one is dropped even when it happens to be whole, because nothing on
+ * the wire says which, and one call written again costs less than half a file.
+ */
+export function dropCutOffCall<T>(calls: T[], finishReason: string | undefined): { calls: T[]; dropped: T | null } {
+  if (finishReason !== 'length' || calls.length === 0) return { calls, dropped: null }
+  return { calls: calls.slice(0, -1), dropped: calls[calls.length - 1] }
+}

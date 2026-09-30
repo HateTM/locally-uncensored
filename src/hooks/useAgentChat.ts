@@ -108,7 +108,7 @@ import { capHiddenToolHistory } from './codex/hidden-history'
 // Derselbe Satz wie im Code Reiter, aus derselben Datei: der Fall ist
 // derselbe, und zwei Wortlaute fuer einen abgeschnittenen Zug waeren zwei
 // Stellen, von denen eine gepflegt wird.
-import { codexCutoffNote } from './codex/turn-cutoff'
+import { codexCutoffNote, dropCutOffCall } from './codex/turn-cutoff'
 import { asString, errorText, prop } from '../types/json-guards'
 import type { ToolArgs } from '../api/mcp/types'
 import { CREDITS_EXHAUSTED_MESSAGE } from '../lib/credits-exhausted'
@@ -1981,6 +1981,17 @@ export function useAgentChat() {
         // call was emitted alongside the echo. Tool args/results stay in the
         // agent's internal history; this only cleans the visible bubble.
         turnContent = stripToolCallText(turnContent, knownToolNames)
+
+        // A turn cut off by the token limit: its last call may stop halfway
+        // (dropCutOffCall). Checked after the loose fallback, which reads the
+        // same cut text.
+        {
+          const cut = dropCutOffCall(toolCalls, turnFinishReason)
+          if (cut.dropped) {
+            toolCalls = cut.calls
+            log.info('agent.cut_off_call_dropped', { name: cut.dropped.function.name })
+          }
+        }
 
         // Over-loop guard: keep only the media the user asked for (once each) and
         // drop any tool call that exactly repeats one already run this turn.
