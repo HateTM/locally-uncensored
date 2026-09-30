@@ -103,11 +103,11 @@ export function countOccurrences(haystack: string, needle: string): number {
  * file's, so the result sits at the file's own level.
  */
 function fuzzyLineMatch(contentLf: string, oldLf: string, newLf: string):
-  { ok: true; content: string } | { ok: false; matches: number } {
+  { content: string | null; matches: number } {
   const oldLines = oldLf.split('\n')
   while (oldLines.length && oldLines[0].trim() === '') oldLines.shift()
   while (oldLines.length && oldLines[oldLines.length - 1].trim() === '') oldLines.pop()
-  if (oldLines.length === 0 || oldLines.join('').trim().length < 2) return { ok: false, matches: 0 }
+  if (oldLines.length === 0 || oldLines.join('').trim().length < 2) return { content: null, matches: 0 }
   const fileLines = contentLf.split('\n')
   const want = oldLines.map((l) => l.trim())
   const hits: number[] = []
@@ -118,7 +118,7 @@ function fuzzyLineMatch(contentLf: string, oldLf: string, newLf: string):
     }
     if (same) hits.push(i)
   }
-  if (hits.length !== 1) return { ok: false, matches: hits.length }
+  if (hits.length !== 1) return { content: null, matches: hits.length }
   const at = hits[0]
   const indentOf = (l: string) => l.match(/^[ \t]*/)![0]
   const fileIndent = indentOf(fileLines[at])
@@ -128,7 +128,7 @@ function fuzzyLineMatch(contentLf: string, oldLf: string, newLf: string):
     newLines = newLines.map((l) => (l.trim() === '' ? l : fileIndent + l.slice(oldIndent.length)))
   }
   const out = [...fileLines.slice(0, at), ...newLines, ...fileLines.slice(at + want.length)]
-  return { ok: true, content: out.join('\n') }
+  return { content: out.join('\n'), matches: 1 }
 }
 
 /**
@@ -146,7 +146,7 @@ export function applyUniqueEdit(content: string, oldString: string, newString: s
   if (oldLf === newLf) return { ok: false, matches, reason: 'noop' }
   if (matches === 0) {
     const fuzzy = fuzzyLineMatch(contentLf, oldLf, newLf)
-    if (!fuzzy.ok) {
+    if (fuzzy.content === null) {
       return fuzzy.matches > 1
         ? { ok: false, matches: fuzzy.matches, reason: 'not_unique' }
         : { ok: false, matches: 0, reason: 'not_found' }
