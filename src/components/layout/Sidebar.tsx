@@ -2,6 +2,7 @@ import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Plus, Search, Trash2, Edit3, Check, X, MessageSquare, Code, Radio, Copy, RefreshCw, Square, Wifi, Globe, QrCode, PanelLeftOpen, PanelLeftClose } from 'lucide-react'
 import { useChatStore } from '../../stores/chatStore'
+import { latestConversationOfMode } from '../../lib/conversation-mode'
 import { useUIStore } from '../../stores/uiStore'
 import { useCompareStore } from '../../stores/compareStore'
 import { useModelStore } from '../../stores/modelStore'
@@ -440,7 +441,7 @@ export function Sidebar() {
             <MessageSquare size={15} />
           </button>
           <button
-            onClick={() => { setChatMode('codex'); setActiveConversation(null); setView('chat'); setDispatchPicker(false) }}
+            onClick={() => { setChatMode('codex'); setActiveConversation(latestConversationOfMode(useChatStore.getState().conversations, 'codex')); setView('chat'); setDispatchPicker(false) }}
             title="Code"
             aria-label="Code"
             className={railBtn(isCodingMode)}
@@ -604,7 +605,7 @@ export function Sidebar() {
             {/* Code tab — direct switch to the coding agent (no dropdown).
                 Internal mode value 'codex' is kept for storage back-compat. */}
             <button
-              onClick={() => { setChatMode('codex'); setActiveConversation(null); setView('chat'); setDispatchPicker(false) }}
+              onClick={() => { setChatMode('codex'); setActiveConversation(latestConversationOfMode(useChatStore.getState().conversations, 'codex')); setView('chat'); setDispatchPicker(false) }}
               title="Code"
               aria-label="Code"
               className={`flex items-center gap-1.25 justify-center px-2.5 h-[var(--control-h-md)] rounded-[5px] font-medium transition-all flex-1 min-w-0 ${

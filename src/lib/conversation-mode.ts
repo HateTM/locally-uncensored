@@ -32,3 +32,41 @@ export function conversationMode(
 ): NonNullable<Conversation['mode']> {
   return conv?.mode ?? 'lu'
 }
+
+/**
+ * The conversation that may stay active when the app starts.
+ *
+ * The app always starts in the Chat tab (codexStore resets chatMode to 'lu'
+ * on every rehydrate, a product decision), while the active conversation id
+ * is persisted. When the last conversation was a Code one, the Chat tab
+ * rendered it as a plain chat with Agent off, and a "continue" typed there
+ * went out without any tools (Gegenprobe on the real build, 30.09.2026). A
+ * conversation that belongs to another tab therefore does not survive the
+ * start; the app opens on the empty chat, as it does for a newcomer.
+ */
+export function activeConversationAtStart(
+  conversations: ReadonlyArray<{ id: string } & ConversationModeSource>,
+  activeId: string | null | undefined,
+): string | null {
+  if (!activeId) return null
+  const conv = conversations.find((c) => c.id === activeId)
+  return conv && conversationMode(conv) === 'lu' ? activeId : null
+}
+
+/**
+ * The Code conversation the Code button returns to: the one worked on last.
+ * The button used to clear the active conversation, so going to Chat and
+ * back to Code while a run was in flight landed on the empty start page and
+ * the running conversation had to be found in the list.
+ */
+export function latestConversationOfMode(
+  conversations: ReadonlyArray<{ id: string; updatedAt?: number } & ConversationModeSource>,
+  mode: NonNullable<Conversation['mode']>,
+): string | null {
+  let best: { id: string; updatedAt?: number } | null = null
+  for (const c of conversations) {
+    if (conversationMode(c) !== mode) continue
+    if (!best || (c.updatedAt ?? 0) > (best.updatedAt ?? 0)) best = c
+  }
+  return best?.id ?? null
+}

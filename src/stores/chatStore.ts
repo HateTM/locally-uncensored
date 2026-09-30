@@ -20,6 +20,7 @@ import { useCodexStore } from './codexStore'
 import { useAgentTaskStore } from './agentTaskStore'
 import { log } from '../lib/logger'
 import { isRecord, prop } from '../types/json-guards'
+import { activeConversationAtStart } from '../lib/conversation-mode'
 
 /**
  * Rehydration migration for Phase 1 (v2.4.0) — wraps legacy
@@ -678,7 +679,9 @@ export const useChatStore = create<ChatState>()(
       // buy nothing and cost a reset on every downgrade.
       merge: (persistedState, currentState) => {
         const migrated = migratePersistedChat(persistedState)
-        return { ...currentState, ...(isRecord(migrated) ? migrated : {}) }
+        const merged = { ...currentState, ...(isRecord(migrated) ? migrated : {}) }
+        // The app starts in the Chat tab; see activeConversationAtStart.
+        return { ...merged, activeConversationId: activeConversationAtStart(merged.conversations, merged.activeConversationId) }
       },
     }
   )
