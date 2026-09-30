@@ -216,7 +216,7 @@ export function MessageList({ isGenerating, isThisChatGenerating, isLoadingModel
             streams. G14-6: one shimmering "Working" with the clock beside it,
             instead of three dots here and a floating counter elsewhere. */}
         {showTyping && lastMessage?.role === 'assistant' && (
-          <WorkingAnchor isRunning label={isLoadingModel ? 'Loading model' : undefined} />
+          <WorkingAnchor isRunning conversationId={conversation?.id} label={isLoadingModel ? 'Loading model' : undefined} />
         )}
       </div>
     </div>

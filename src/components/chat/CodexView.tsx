@@ -683,6 +683,7 @@ export function CodexView() {
                   blocked run never looks like a working one (G15b). */}
               <WorkingAnchor
                 isRunning={codexGenerating}
+                conversationId={activeConversationId}
                 label={pendingConfirm ? 'Waiting for your approval' : undefined}
               />
             </div>

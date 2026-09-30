@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { formatElapsed } from '../../lib/format-elapsed'
+import { useGenerationStore } from '../../stores/generationStore'
 
 interface Props {
   isRunning: boolean
@@ -8,6 +9,11 @@ interface Props {
    * whenever the surface knows better, because a wait that looks like work
    * is how a nine minute approval stall got mistaken for progress (G15b). */
   label?: string
+  /** The conversation whose run this is. Its booked start (generationStore
+   *  `runs[id].bookedAt`) drives the clock, so leaving the tab and coming
+   *  back does not start the count again at 0 (Gegenprobe 30.09.2026: an
+   *  eight minute run read "12s" after a tab switch). */
+  conversationId?: string | null
 }
 
 /**
@@ -18,8 +24,9 @@ interface Props {
  * exactly one anchor that says the app is alive, what it is doing, and for
  * how long. Reference is the Claude desktop app.
  */
-export function WorkingAnchor({ isRunning, label }: Props) {
+export function WorkingAnchor({ isRunning, label, conversationId }: Props) {
   const [elapsed, setElapsed] = useState(0)
+  const bookedAt = useGenerationStore((s) => (conversationId ? s.runs[conversationId]?.bookedAt : undefined))
 
   // The clock resets in the render where `isRunning` flips, not in an effect
   // afterwards. Two things were wrong with the effect version: `useRef(Date.now())`
@@ -36,14 +43,15 @@ export function WorkingAnchor({ isRunning, label }: Props) {
 
   useEffect(() => {
     if (!isRunning) return
-    // The start belongs to this run, so it lives in the run's own closure —
-    // no ref, and nothing left over from the previous run to read back.
-    const start = Date.now()
+    // The run's booked start when there is one; otherwise the start belongs
+    // to this mount, in the effect's own closure, with nothing left over from
+    // the previous run to read back.
+    const start = bookedAt ?? Date.now()
     const interval = setInterval(() => {
-      setElapsed(Math.floor((Date.now() - start) / 1000))
+      setElapsed(Math.max(0, Math.floor((Date.now() - start) / 1000)))
     }, 250)
     return () => clearInterval(interval)
-  }, [isRunning])
+  }, [isRunning, bookedAt])
 
   if (!isRunning) return null
 
