@@ -41,6 +41,8 @@ test('a cloud model gets its own context pick from the header dropdown', async (
   await expect(knob).toBeVisible({ timeout: 15_000 })
   // Default: the fill over the 32K send window, not over the model's 256K.
   await expect(knob).toContainText('/32K')
+  // No warning on the default (David 30.09.2026: only once it was raised).
+  await expect(page.getByLabel('Larger context costs more')).toHaveCount(0)
 
   await knob.click()
   await expect(page.getByRole('button', { name: /^Auto · 32K$/ })).toBeVisible()
@@ -48,6 +50,7 @@ test('a cloud model gets its own context pick from the header dropdown', async (
   await expect(page.getByRole('button', { name: /^8K$/ })).toHaveCount(0)
   await page.getByRole('button', { name: /^64K$/ }).click()
   await expect(knob).toContainText('/64K')
+  await expect(page.getByLabel('Larger context costs more')).toHaveCount(1)
 
   const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('chat-settings') || '{}').state?.settings?.cloudSendWindowByModel)
   expect(Object.values(saved ?? {})).toEqual([65536])
@@ -56,4 +59,5 @@ test('a cloud model gets its own context pick from the header dropdown', async (
   await knob.click()
   await page.getByRole('button', { name: /^Auto · 32K$/ }).click()
   await expect(knob).toContainText('/32K')
+  await expect(page.getByLabel('Larger context costs more')).toHaveCount(0)
 })

@@ -14,6 +14,7 @@ import { useActiveContextWindow } from '../../hooks/useActiveContextWindow'
 // hier eine eigene Rechnung und im Fuellstand daneben eine zweite, und beide
 // zeigten denselben Wert verschieden (Gegenprobe G2, 04.09.2026).
 import { formatContextWindow } from '../../lib/formatters'
+import { DEFAULT_SEND_WINDOW_TOKENS } from '../../lib/send-window'
 import { ENGINE_DEFAULT_CTX } from '../../lib/builtin-ctx'
 import { SOURCE_LABEL, withStoredWindow } from '../../lib/context-source'
 import { platzFuerPopover, type PopoverPlatz } from '../../lib/popover-placement'
@@ -185,6 +186,10 @@ export function ContextDropdown({ children }: { children?: ReactNode }) {
   // Nicht verstellbar (Cloud): kein Regler, aber der Fuellstand bleibt stehen.
   if (!activeModel || !ctx.adjustable) return <>{children}</>
 
+  // Hinweis erst, wenn der Nutzer ueber den Standard gegangen ist, vorher
+  // nicht (David 30.09.2026). Grau, kein Gelb (Regel vom 04.09.).
+  const raised = cloud && ctx.sendWindow > DEFAULT_SEND_WINDOW_TOKENS
+
   /*
    * Die Liste endet an der Decke, und die Decke ist der groesste Eintrag.
    *
@@ -342,6 +347,7 @@ export function ContextDropdown({ children }: { children?: ReactNode }) {
         <span id={labelId} className="sr-only">Context window</span>
         {busy ? <Loader2 size={9} className="animate-spin" /> : null}
         {applyError && !busy ? <AlertTriangle size={9} className="text-red-400" /> : null}
+        {raised && !applyError && !busy ? <AlertTriangle size={9} className="text-gray-400" aria-label="Larger context costs more" /> : null}
         {/* Der Fuellstand IST die Beschriftung. Nur wenn es keinen gibt (leerer
             Chat), steht hier wieder das Fenster allein. */}
         <span id={valueId}>
@@ -394,8 +400,10 @@ export function ContextDropdown({ children }: { children?: ReactNode }) {
               </button>
             )}
             <div className="mt-0.5 px-2 pt-1 border-t border-gray-100 dark:border-white/[0.06] text-[0.5rem] text-gray-400 leading-snug">
-              {cloud
-                ? 'How much of the chat each step sends. More remembers more, and every step costs more. Saved for this model.'
+              {raised
+                ? <span className="flex items-start gap-1"><AlertTriangle size={9} className="shrink-0 mt-px" />Once the chat is longer than {formatContextWindow(DEFAULT_SEND_WINDOW_TOKENS)}, every message sends more and costs more credits.</span>
+                : cloud
+                ? 'How much of the chat each message sends. Saved for this model.'
                 : ctx.provider !== 'custom'
                 ? 'Reloads the model on change.'
                 : (ctx.clampedFrom ?? 0) > 0
