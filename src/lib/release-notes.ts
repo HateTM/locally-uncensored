@@ -158,6 +158,10 @@ export const RELEASE_NOTES: ReleaseNote[] = [
         title: 'Cloud context is 32K by default and can be set per model.',
         detail: 'Cloud models now send at most 32K of context by default instead of 64K. You can change it per model in the context menu in the header. Once you set it above the default, a small triangle shows that every message then sends more and costs more credits.',
       },
+      {
+        title: 'Code conversations stay in the Code tab.',
+        detail: 'After a restart the last Code conversation opened in the Chat tab, where the agent was off and a "continue" ran without tools. The app now starts on an empty chat, and the Code button takes you back to the Code conversation you worked on last, also while a run is going.',
+      },
     ],
   },
   // Stand 28.09.2026: 3.0.3 IST veroeffentlicht und bleibt unveraendert

@@ -28,6 +28,19 @@ cloud catalogue.
   a request of its own. It now keeps a plan in Plan mode, when you ask for a
   plan, or while a plan is still open. The plan panel, the approval bar and the
   file explorer are dark instead of blue.
+- **Code conversations stay in the Code tab.** After a restart the last Code
+  conversation opened in the Chat tab, where the agent was off and a
+  "continue" ran without tools. The app now starts on an empty chat, and the
+  Code button takes you back to the Code conversation you worked on last, also
+  while a run is going.
+- **Smaller fixes in Chat, Agent and Code.** The Working clock counts from the
+  start of the run, also after you switch tabs. The answer header names the
+  model the way the model picker does. Cloud models no longer show "Loading
+  model". Code blocks no longer show a light band behind every line. An
+  approval card that appears at the bottom scrolls into view. In a narrow
+  window the Code tab keeps its header on one line and the Stop button inside
+  the prompt box. Diffs of new files no longer count an empty last line, and
+  the file name shows once.
 
 ### Changed
 
