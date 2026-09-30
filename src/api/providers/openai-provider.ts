@@ -1760,6 +1760,9 @@ export class OpenAIProvider implements ProviderClient {
     // honest, user-facing `error` line (already captured as `message`).
     if (serverCode === 'model_no_tools') code = 'tools_unsupported'
     else if (serverCode === 'model_no_vision') code = 'vision_unsupported'
+    // A request without streaming that LU Cloud ended after ten minutes with
+    // nothing to show; lib/http-status treats it as terminal.
+    else if (serverCode === 'stalled_runaway') code = 'stalled_runaway'
     else if (serverCode === 'credits_exhausted') {
       // Out of credits, top-up wallet empty (HTTP 429). Raise the global
       // signal so the "Load up your credits" dialog opens on top of the

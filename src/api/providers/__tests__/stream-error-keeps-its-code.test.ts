@@ -64,3 +64,31 @@ describe('a stream error chunk keeps its code', () => {
     expect(isTerminalModelError(err)).toBe(false)
   })
 })
+
+describe('a request without streaming that LU Cloud ended as a runaway', () => {
+  it('is sent once, thrown with its code, and terminal', async () => {
+    vi.resetModules()
+    const calls: string[] = []
+    vi.doMock('../../backend', () =>
+      backendMock((url) => {
+        if (!url.includes('/chat/completions')) return new Response('{}', { status: 404 })
+        calls.push(url)
+        return new Response(
+          JSON.stringify({ error: 'The model produced no visible output for 10 minutes, so this step was ended.', code: 'stalled_runaway' }),
+          { status: 504, headers: { 'Content-Type': 'application/json' } },
+        )
+      }),
+    )
+    const { OpenAIProvider } = await import('../openai-provider')
+    const p = new OpenAIProvider({
+      id: 'openai', name: 'LU Cloud', enabled: true, apiKey: 'x', baseUrl: 'https://lu-labs.test/api/inference/v1', isLocal: false,
+    })
+    const err = await p.chatWithTools('google/gemma-4-26B-A4B-it', [{ role: 'user', content: 'go' }], []).then(
+      () => { throw new Error('did not throw') },
+      (e: unknown) => e,
+    )
+    expect(calls).toHaveLength(1)
+    expect((err as { code?: string }).code).toBe('stalled_runaway')
+    expect(isTerminalModelError(err)).toBe(true)
+  })
+})
