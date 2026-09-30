@@ -88,7 +88,7 @@ export function countOccurrences(haystack: string, needle: string): number {
 }
 
 /**
- * Whitespace-tolerant fallback for a missing exact match (01.10.2026).
+ * Whitespace-tolerant fallback for a missing exact match (30.09.2026).
  *
  * Open models copy code back with the indentation off by a level, tabs turned
  * into spaces or a trailing space lost. The exact search then fails, and the

@@ -1,5 +1,5 @@
 /**
- * file_edit, the three additions of 01.10.2026: a whitespace-tolerant line
+ * file_edit, the three additions of 30.09.2026: a whitespace-tolerant line
  * match when the exact text is not there, replace_all, and several edits in
  * one call. Every failed edit on a paid provider meant "read again, retry",
  * two more full-context round trips.
