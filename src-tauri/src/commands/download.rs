@@ -3,7 +3,8 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
 
 use futures_util::StreamExt;
 use sha2::{Digest, Sha256};
@@ -1003,6 +1004,46 @@ fn resumed_bytes(resume_offset: u64, status: u16) -> u64 {
     if resume_offset > 0 && status == 206 { resume_offset } else { 0 }
 }
 
+// ── Download speed limit (Discord, boromirofgeo 2026-09-23) ─────────────
+//
+// "is there a way to limit download speed that this app does whenever it
+// downloads anything?" Every model file LU fetches itself runs through
+// do_download, so the limit sits there, shared by all downloads at once:
+// two downloads under a 10 MB/s limit get 10 MB/s together, not 20. Ollama
+// pulls and package installs run in other programs and are not limited.
+
+/// Bytes per second, 0 for no limit. Set from Settings at boot and on change.
+static DOWNLOAD_LIMIT_BPS: AtomicU64 = AtomicU64::new(0);
+/// When the shared line is free again, across all running downloads.
+static DOWNLOAD_NEXT_SLOT: Mutex<Option<Instant>> = Mutex::new(None);
+
+/// How long the download that just received `bytes` waits before it reads
+/// on, so that everything together stays at `limit_bps`. A line that has been
+/// idle starts from now, so a pause never turns into a burst afterwards.
+fn throttle_wait(slot: &mut Option<Instant>, limit_bps: u64, bytes: u64, now: Instant) -> Duration {
+    if limit_bps == 0 {
+        *slot = None;
+        return Duration::ZERO;
+    }
+    let start = match *slot {
+        Some(t) if t > now => t,
+        _ => now,
+    };
+    let done = start + Duration::from_secs_f64(bytes as f64 / limit_bps as f64);
+    *slot = Some(done);
+    done.saturating_duration_since(now)
+}
+
+/// Settings, Model Storage: megabytes per second, 0 for no limit.
+#[tauri::command]
+pub fn set_download_limit(mb_per_sec: f64) -> Result<(), String> {
+    if !mb_per_sec.is_finite() || mb_per_sec < 0.0 {
+        return Err("The download limit has to be 0 or a positive number of MB/s.".to_string());
+    }
+    DOWNLOAD_LIMIT_BPS.store((mb_per_sec * 1_000_000.0).round() as u64, Ordering::Relaxed);
+    Ok(())
+}
+
 /// True when the body stopped before Content-Length was reached. `total == 0`
 /// means the server declared no length — there is nothing to check against.
 fn ended_early(total: u64, downloaded: u64) -> bool {
@@ -1549,6 +1590,19 @@ async fn do_download(
                         file.write_all(&bytes).await.map_err(|e| format!("Write: {}", os_error::english(&e)))?;
                         if let Some(h) = hasher.as_mut() { h.update(&bytes); }
                         downloaded += bytes.len() as u64;
+
+                        let wait = {
+                            let mut slot = DOWNLOAD_NEXT_SLOT.lock().unwrap_or_else(|p| p.into_inner());
+                            throttle_wait(&mut slot, DOWNLOAD_LIMIT_BPS.load(Ordering::Relaxed), bytes.len() as u64, Instant::now())
+                        };
+                        if !wait.is_zero() {
+                            // Pause and Cancel still answer at once: the
+                            // outer select sees the token on the next turn.
+                            tokio::select! {
+                                _ = token.cancelled() => {}
+                                _ = tokio::time::sleep(wait) => {}
+                            }
+                        }
 
                         // Update progress every 500ms
                         if last_update.elapsed().as_millis() > 500 {
@@ -2542,6 +2596,25 @@ pub async fn check_model_sizes(
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn the_download_limit_is_shared_and_off_at_zero() {
+        let now = Instant::now();
+        let mut slot = None;
+        // 1 MB at 1 MB/s takes a second.
+        assert_eq!(throttle_wait(&mut slot, 1_000_000, 1_000_000, now), Duration::from_secs(1));
+        // A second download in the same instant queues behind the first.
+        assert_eq!(throttle_wait(&mut slot, 1_000_000, 500_000, now), Duration::from_millis(1500));
+        // After an idle stretch the line starts from now, without a burst.
+        let later = now + Duration::from_secs(10);
+        assert_eq!(throttle_wait(&mut slot, 1_000_000, 250_000, later), Duration::from_millis(250));
+        // 0 means no limit and clears the queue.
+        assert_eq!(throttle_wait(&mut slot, 0, 1_000_000, later), Duration::ZERO);
+        assert_eq!(slot, None);
+        assert!(set_download_limit(-1.0).is_err());
+        assert!(set_download_limit(f64::NAN).is_err());
+    }
+
     use super::*;
 
     /// Der Rueckfall, den dieser Test verhindert, ist im Zusammenschluss des

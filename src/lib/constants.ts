@@ -54,6 +54,7 @@ export const DEFAULT_SETTINGS: Settings = {
   // Unlimited by design — see the note on the type.
   loopMaxPasses: 0,
   hfDownloadPathOverride: '',
+  downloadLimitMBps: 0,
   // Generation timeouts (Bug P v2.4.7)
   imageGenTimeoutMinutes: 20,
   videoGenTimeoutMinutes: 60,

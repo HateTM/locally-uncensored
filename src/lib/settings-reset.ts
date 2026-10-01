@@ -20,7 +20,7 @@ export const SETTINGS_TAB_RESET_KEYS: Record<SettingsTab, (keyof Settings)[]> = 
     'gpuVendor', 'gpuIndices',
     'imageGenTimeoutMinutes', 'videoGenTimeoutMinutes',
   ],
-  backends: ['apiEndpoint', 'hfDownloadPathOverride', 'exclusiveVramMode', 'builtinEngine'],
+  backends: ['apiEndpoint', 'hfDownloadPathOverride', 'downloadLimitMBps', 'exclusiveVramMode', 'builtinEngine'],
   agent: [
     'personasEnabled', 'defaultWorkspace',
     'agentMaxToolCalls', 'agentMaxIterations',

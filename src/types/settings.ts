@@ -141,6 +141,9 @@ export interface Settings {
   loopMaxPasses: number
   /** Override for the HuggingFace GGUF download directory. Empty = auto-detect from active openai-compat provider (e.g. LM Studio models folder). */
   hfDownloadPathOverride: string
+  /** Cap for the model files LU downloads itself, in MB/s, shared by all
+   *  downloads at once. 0 = no limit (Discord, boromirofgeo 2026-09-23). */
+  downloadLimitMBps: number
   // Generation timeouts (Bug P v2.4.7 — ake0n_official Discord 2026-05-19,
   // Intel UHD CPU-only setup hit the 20-min cap at sampling 9/25 on a 1024px
   // Juggernaut-XL gen).

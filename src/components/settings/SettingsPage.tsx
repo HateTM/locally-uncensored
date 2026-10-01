@@ -37,6 +37,7 @@ import { LocalApiSettings } from './LocalApiSettings'
 import { RemoteAccessSettings } from './RemoteAccessSettings'
 import { RemoteAccessDocs } from './RemoteAccessDocs'
 import { HardwareSettings } from './HardwareSettings'
+import { DownloadLimitSetting } from './DownloadLimitSetting'
 import { ChatbotImporter } from '../import/ChatbotImporter'
 import { ProviderSettings } from './ProviderConfig'
 import { BuiltinEngineSettings } from './BuiltinEngineSettings'
@@ -2145,6 +2146,7 @@ export function SettingsPage() {
 
           <Section title="Model Storage">
             <HfDownloadPathSetting />
+            <DownloadLimitSetting />
             <LmStudioFolderSetting />
             <ImportLocalModels />
           </Section>

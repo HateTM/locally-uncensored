@@ -562,6 +562,7 @@ fn main() {
             commands::download::find_orphan_downloads,
             commands::download::delete_orphan_download,
             commands::download::resume_download,
+            commands::download::set_download_limit,
             commands::download::detect_model_path,
             commands::download::lmstudio_model_dir,
             commands::download::check_model_sizes,
