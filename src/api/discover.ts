@@ -1,7 +1,7 @@
 import { backendCall, fetchExternal } from "./backend"
 import { readComfyFolderLists, filterPartialFiles, refreshComfyModels } from "./comfyui"
 import { COMPONENT_REGISTRY, type ComponentSpec, type ComponentRequirements } from './component-registry'
-import { clearNodeCache } from "./comfyui-nodes"
+import { clearNodeCache, getAllNodeInfo } from "./comfyui-nodes"
 import { restartComfyForNewNodes } from "./comfy-restart"
 import type { ProviderId } from "./providers/types"
 import { log } from "../lib/logger"
@@ -1824,6 +1824,33 @@ export function civitaiDescriptionToText(html: string): string {
     .trim()
 }
 
+/** A GGUF quant, read by the ComfyUI-GGUF pack and by nothing else. */
+export function isGgufFile(filename: string | undefined): boolean {
+  return /\.gguf$/i.test(filename ?? '')
+}
+
+/**
+ * Download a CivitAI hit, and for a GGUF quant make sure ComfyUI can read it.
+ *
+ * A curated bundle installs the ComfyUI-GGUF pack along with its files; a
+ * CivitAI hit had no such step, so a GGUF from the search downloaded fine and
+ * stayed invisible. The pack is installed only when this ComfyUI lacks its
+ * loader (installing restarts ComfyUI, which a running render would not
+ * survive), in the background so the download is never held up, and never
+ * for a ComfyUI on another machine, whose packs this one cannot touch.
+ */
+export async function startCivitaiDownload(model: { downloadUrl?: string; filename?: string; subfolder?: string }): Promise<void> {
+  if (!model.downloadUrl || !model.filename || !model.subfolder) return
+  await startModelDownload(model.downloadUrl, model.subfolder, model.filename)
+  if (!isGgufFile(model.filename)) return
+  const target = await comfyModelTarget()
+  if (target.remote) return
+  const nodes = await getAllNodeInfo().catch(() => null)
+  if (nodes && 'UnetLoaderGGUF' in nodes) return
+  void installCustomNodes(['gguf'], { keepGoing: true, restart: true })
+    .catch((err) => log.warn('[discover] ComfyUI-GGUF install for a CivitAI GGUF failed', { err }))
+}
+
 export async function searchCivitaiModels(
   query: string,
   type: 'Checkpoint' | 'LORA' | 'VAE' | 'TextualInversion' = 'Checkpoint',
@@ -1886,6 +1913,11 @@ export async function searchCivitaiModels(
 
       const filename = asString(prop(file, 'name'))
         || `${(itemName ?? '').replace(/[^a-zA-Z0-9._-]/g, '_')}.safetensors`
+      // A GGUF quant is a bare diffusion model whatever its name says, and the
+      // only loader that lists .gguf (ComfyUI-GGUF's UnetLoaderGGUF) reads
+      // diffusion_models/unet. In checkpoints/ nothing ever saw it (rantokim,
+      // Discord 2026-09-23: qwenImageEdit2511_q50.gguf "Complete", Installed 0).
+      if (type === 'Checkpoint' && isGgufFile(filename)) subfolder = 'diffusion_models'
 
       const descParts: string[] = []
       const rawDesc = civitaiDescriptionToText(asString(prop(item, 'description')) ?? '')

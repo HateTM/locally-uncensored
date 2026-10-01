@@ -9,7 +9,7 @@
  */
 import { useEffect, useState } from 'react'
 import { Search, Loader2, ExternalLink, Download, CheckCircle } from 'lucide-react'
-import { searchCivitaiModels, startModelDownload, type CivitAIModelResult } from '../../api/discover'
+import { searchCivitaiModels, startCivitaiDownload, type CivitAIModelResult } from '../../api/discover'
 import { openExternal } from '../../api/backend'
 import { useDownloadStore } from '../../stores/downloadStore'
 import { useWorkflowStore } from '../../stores/workflowStore'
@@ -81,7 +81,7 @@ export function CivitaiSearchPanel({ modelType, title, placeholder, search = '',
   const download = async (model: CivitAIModelResult) => {
     if (!model.downloadUrl || !model.filename || !model.subfolder) return
     dlStore.getState().setMeta(model.filename, model.downloadUrl, model.subfolder)
-    await startModelDownload(model.downloadUrl, model.subfolder, model.filename)
+    await startCivitaiDownload(model)
     dlStore.getState().startPolling()
   }
 
