@@ -46,8 +46,10 @@ vi.mock('../../../api/backend', () => ({
 vi.mock('../../../api/discover', () => ({
   searchCivitaiModels: (query: string, type: string, key?: string, host?: string) =>
     searchCivitaiModels(query, type, key, host),
-  startModelDownload: (url: string, subfolder: string, filename: string) =>
-    startModelDownload(url, subfolder, filename),
+  // The panel downloads through startCivitaiDownload; for a safetensors LoRA
+  // that is exactly one startModelDownload (api/discover).
+  startCivitaiDownload: (m: { downloadUrl: string; subfolder: string; filename: string }) =>
+    startModelDownload(m.downloadUrl, m.subfolder, m.filename),
 }))
 vi.mock('../../../api/comfyui', () => ({
   checkComfyConnection: vi.fn(async () => comfyLaeuft),
