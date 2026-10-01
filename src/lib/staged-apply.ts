@@ -81,17 +81,25 @@ async function reconcile(
 ): Promise<{ content: string; merged: number }> {
   const base = change.oldContent ?? ''
   let current: string
+  let res: { content?: string; encoding?: string } | undefined
   try {
-    const res = await backendCall<{ content?: string }>('fs_read', {
+    res = await backendCall<{ content?: string; encoding?: string }>('fs_read', {
       path: change.resolvedPath || change.path,
       chatId: jail,
       workingDirectory: change.workingDirectory,
     })
-    current = res?.content ?? ''
   } catch {
     // gone or unreadable, the write recreates it, which is what the user asked for
     return { content: change.newContent, merged: 0 }
   }
+  // Not UTF-8 on disk (bug hunt 01.10.2026, C8): read as '' it matched an
+  // empty base and was overwritten without the drift check ever seeing it.
+  if (typeof res?.content !== 'string' && (res?.encoding === 'binary' || res?.encoding === 'base64')) {
+    throw new Error(
+      `${change.path} is not a UTF-8 text file on disk, so this edit cannot be checked against it and was not applied. Reject this one and let the model read the file again.`,
+    )
+  }
+  current = res?.content ?? ''
   // The file on disk decides the form; an empty file inherits the model's.
   const eol = current ? eolOf(current) : eolOf(change.newContent)
   const baseLf = toLf(base)

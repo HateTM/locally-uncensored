@@ -113,6 +113,13 @@ export function createStagedWriter(deps: StagedWriterDeps): StagedWriter {
     } else {
       try {
         const r = await readFile(resolvedPath, stageReadCtx)
+        // A file that is not UTF-8 (Latin-1, UTF-16 from PowerShell) comes
+        // back without content. Read as '' it was reviewed as a brand new
+        // file, an all-insert diff hiding what gets overwritten (bug hunt
+        // 01.10.2026, C8). Refused like file_edit refuses it.
+        if (r?.encoding === 'binary' || r?.encoding === 'base64') {
+          return `file_write: ${path} exists but is not a UTF-8 text file, so the review cannot show what this write would replace. It was not staged. Ask the user before overwriting it.`
+        }
         oldContent = r?.content ?? ''
       } catch {
         // New file — leave oldContent empty so the diff renders an
