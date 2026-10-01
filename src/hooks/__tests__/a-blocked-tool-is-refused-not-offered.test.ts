@@ -16,7 +16,7 @@ const agent = readFileSync(resolve(__dirname, '../useAgentChat.ts'), 'utf8')
 describe('a tool switched off in the permissions', () => {
   it('resolves to blocked, which is not auto, so the approval path alone would ask for it', () => {
     expect(resolveApprovalLevel('shell_execute', { categoryLevel: 'blocked', codexMode: null, readOnlyRun: false })).toBe('blocked')
-    expect(agent).toMatch(/const needsApproval = permLevel !== 'auto' \|\| cloudShellConfirm/)
+    expect(agent).toMatch(/const needsApproval = \(permLevel !== 'auto' \|\| cloudShellConfirm\)/)
   })
 
   it('is filtered out and refused before any card is built', () => {
