@@ -688,7 +688,7 @@ async function executeFileWrite(args: ToolArgs, run?: AgentRunContext): Promise<
   if (isChatArtifactMode(run)) {
     const name = artifactBaseName(path)
     captureChatArtifact(name, content, mimeForName(name), run)
-    return `Created "${name}" (${formatBytes(content.length)}). It is shown to the user right here in the chat with a preview and a Download button — nothing was written to disk. Do not call file_read on it; just tell the user it's ready.`
+    return `Created "${name}" (${formatBytes(content.length)}). It is shown to the user right here in the chat with a preview and a Download button. Nothing was written to disk. Do not call file_read on it; just tell the user it's ready.`
   }
   const data = await backendCall<FsWriteResult>('fs_write', { path, content, ...chatCtx(run) })
   // Rust returns {status: 'saved'|'unchanged', path: <absolute>, bytes}. Surface
@@ -781,6 +781,9 @@ async function executeFileList(args: ToolArgs, run?: AgentRunContext): Promise<s
     ...chatCtx(run),
   })
   if (Array.isArray(data.entries)) {
+    // An empty answer read as nothing: the model said "I listed the files"
+    // and named none, the step showed no result (3.0.4 box run).
+    if (!data.entries.length) return 'The folder is empty.'
     return data.entries
       .map((e) => `${e.isDir ? '[DIR]' : ''} ${e.name} (${formatBytes(e.size)})  ${e.path}`)
       .join('\n')
@@ -798,6 +801,7 @@ async function executeFileSearch(args: ToolArgs, run?: AgentRunContext): Promise
     ...chatCtx(run),
   })
   if (Array.isArray(data.results)) {
+    if (!data.results.length) return 'No matches.'
     return data.results
       .map((r) => {
         const matches = r.matches?.map((m) => `  L${m.line}: ${m.text}`).join('\n') || ''
