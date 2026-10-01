@@ -15,18 +15,22 @@ const convs = [
 ]
 
 describe('activeConversationAtStart', () => {
-  it('drops a Code conversation, the app starts in the Chat tab', () => {
-    expect(activeConversationAtStart(convs, 'code-new')).toBeNull()
+  // 01.10.2026: instead of the empty page, the chat worked on last.
+  it('a Code conversation gives way to the chat worked on last, the app starts in the Chat tab', () => {
+    expect(activeConversationAtStart(convs, 'code-new')).toBe('legacy')
   })
-  it('drops any conversation of another tab', () => {
-    expect(activeConversationAtStart(convs, 'remote')).toBeNull()
+  it('so does any conversation of another tab', () => {
+    expect(activeConversationAtStart(convs, 'remote')).toBe('legacy')
+  })
+  it('with no chat at all it is the empty page', () => {
+    expect(activeConversationAtStart([{ id: 'c', mode: 'codex', updatedAt: 1 }], 'c')).toBeNull()
   })
   it('keeps a chat, also one saved before conversations had a mode', () => {
     expect(activeConversationAtStart(convs, 'chat-old')).toBe('chat-old')
     expect(activeConversationAtStart(convs, 'legacy')).toBe('legacy')
   })
-  it('drops an id that no longer exists', () => {
-    expect(activeConversationAtStart(convs, 'gone')).toBeNull()
+  it('an id that no longer exists opens the last chat, nothing active stays nothing', () => {
+    expect(activeConversationAtStart(convs, 'gone')).toBe('legacy')
     expect(activeConversationAtStart(convs, null)).toBeNull()
   })
 })

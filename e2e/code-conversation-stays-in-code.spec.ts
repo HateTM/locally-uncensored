@@ -62,7 +62,8 @@ test('after a restart a Code conversation is not shown as a chat', async ({ page
   await expect(page.getByTestId('codex-transcript').getByText(MARKE)).toBeVisible()
 
   await page.reload()
-  // The app starts in the Chat tab, on the empty chat.
+  // The app starts in the Chat tab, on the chat worked on last; there is none
+  // here, so on the empty chat.
   await expect(page.locator('textarea').first()).toBeVisible()
   await expect(page.getByTestId('codex-transcript')).toHaveCount(0)
   await expect(page.getByText(MARKE)).toHaveCount(0)
@@ -70,4 +71,44 @@ test('after a restart a Code conversation is not shown as a chat', async ({ page
   // One click and the Code conversation is back, in the Code tab.
   await page.getByRole('button', { name: 'Code', exact: true }).click()
   await expect(page.getByTestId('codex-transcript').getByText(MARKE)).toBeVisible()
+})
+
+const CHAT_MARKE = 'Zeile aus dem Chat, zu der der Chat-Knopf zurueckfuehrt'
+
+/** A plain chat with one exchange, worked on before the Code conversation. */
+async function chatVerlauf(page: Page): Promise<void> {
+  await page.evaluate(async (marke) => {
+    const chatPath = '/src/stores/chatStore.ts'
+    const chat = await import(/* @vite-ignore */ chatPath) as typeof import('../src/stores/chatStore')
+    const id = chat.useChatStore.getState().createConversation('m', '', 'lu')
+    chat.useChatStore.getState().addMessage(id, { id: 'cu1', role: 'user', content: 'hello', timestamp: Date.now() })
+    chat.useChatStore.getState().addMessage(id, { id: 'ca1', role: 'assistant', content: marke, timestamp: Date.now() + 1 })
+    await chat.flushChatPersist()
+  }, CHAT_MARKE)
+}
+
+// Gegenprobe 01.10.2026: Chat, Code, Chat landed on an empty page and the app
+// started empty after a Code session. Both now go back to the chat worked on last.
+test('the Chat button goes back to the chat, and so does the start after a Code session', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 })
+  await page.addInitScript(tauriMockInit, { assistantReply: DEFAULT_ASSISTANT_REPLY, modelName: DEFAULT_MODEL_NAME })
+  await seedOnboardingDone(page)
+  await page.goto('/')
+  await expect(page.getByRole('button', { name: 'New Chat' }).first()).toBeVisible()
+  await chatVerlauf(page)
+  await page.getByRole('button', { name: 'Code', exact: true }).click()
+  await openNewChat(page)
+  await codeVerlauf(page)
+  await expect(page.getByTestId('codex-transcript').getByText(MARKE)).toBeVisible()
+
+  await page.locator('button[title="Chat"][aria-label="Chat"]').first().click()
+  await expect(page.getByText(CHAT_MARKE)).toBeVisible()
+  await expect(page.getByText(MARKE)).toHaveCount(0)
+
+  // Leave in Code, start again: the Chat tab opens on the same chat.
+  await page.getByRole('button', { name: 'Code', exact: true }).click()
+  await expect(page.getByTestId('codex-transcript').getByText(MARKE)).toBeVisible()
+  await page.reload()
+  await expect(page.getByText(CHAT_MARKE)).toBeVisible()
+  await expect(page.getByTestId('codex-transcript')).toHaveCount(0)
 })

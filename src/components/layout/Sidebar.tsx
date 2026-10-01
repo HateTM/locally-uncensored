@@ -433,7 +433,7 @@ export function Sidebar() {
           </button>
           <div className="w-6 h-px bg-gray-200 dark:bg-white/10 my-1" />
           <button
-            onClick={() => { setChatMode('lu'); setActiveConversation(null); setView('chat'); setDispatchPicker(false) }}
+            onClick={() => { setChatMode('lu'); setActiveConversation(latestConversationOfMode(useChatStore.getState().conversations, 'lu')); setView('chat'); setDispatchPicker(false) }}
             title="Chat"
             aria-label="Chat"
             className={railBtn(!isCodingMode && !isRemoteMode)}
@@ -589,7 +589,7 @@ export function Sidebar() {
             </button>
             {/* Chat tab */}
             <button
-              onClick={() => { setChatMode('lu'); setActiveConversation(null); setView('chat'); setDispatchPicker(false) }}
+              onClick={() => { setChatMode('lu'); setActiveConversation(latestConversationOfMode(useChatStore.getState().conversations, 'lu')); setView('chat'); setDispatchPicker(false) }}
               title="Chat"
               aria-label="Chat"
               className={`flex items-center gap-1.25 justify-center px-2.5 h-[var(--control-h-md)] rounded-[5px] font-medium transition-all flex-1 min-w-0 ${

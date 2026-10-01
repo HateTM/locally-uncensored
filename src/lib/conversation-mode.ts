@@ -42,19 +42,25 @@ export function conversationMode(
  * rendered it as a plain chat with Agent off, and a "continue" typed there
  * went out without any tools (Gegenprobe on the real build, 30.09.2026). A
  * conversation that belongs to another tab therefore does not survive the
- * start; the app opens on the empty chat, as it does for a newcomer.
+ * start; the app opens on the chat worked on last instead, so a returning
+ * user is where they left the Chat tab (Gegenprobe 01.10.2026: it opened
+ * empty). Nothing active stays nothing active, and so does a newcomer.
  */
 export function activeConversationAtStart(
-  conversations: ReadonlyArray<{ id: string } & ConversationModeSource>,
+  conversations: ReadonlyArray<{ id: string; updatedAt?: number } & ConversationModeSource>,
   activeId: string | null | undefined,
 ): string | null {
   if (!activeId) return null
   const conv = conversations.find((c) => c.id === activeId)
-  return conv && conversationMode(conv) === 'lu' ? activeId : null
+  if (conv && conversationMode(conv) === 'lu') return activeId
+  return latestConversationOfMode(conversations, 'lu')
 }
 
 /**
- * The Code conversation the Code button returns to: the one worked on last.
+ * The conversation the Code button (mode 'codex') and the Chat button (mode
+ * 'lu') return to: the one worked on last. For Chat since 01.10.2026: Chat,
+ * Code, Chat landed on an empty page while the chat was one click away.
+ * "New Chat" is the way to an empty one.
  * The button used to clear the active conversation, so going to Chat and
  * back to Code while a run was in flight landed on the empty start page and
  * the running conversation had to be found in the list.
