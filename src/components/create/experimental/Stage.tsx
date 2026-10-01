@@ -21,6 +21,7 @@ import { InstallCancelled } from '../../../lib/bundle-install'
 import { isMlxImageHost } from '../../../api/mlx-image'
 import { bundleForVideoIntent } from '../../../api/comfyui'
 import { getVideoBundles } from '../../../api/discover'
+import { ReferenceStrip } from './ReferenceStrip'
 import { MIN_TRAIN_IMAGES, maxTrainImages } from '../../../lib/train-image-cap'
 
 interface Props {
@@ -335,6 +336,7 @@ function SourcePreview({ onOpenMaskEditor }: { onOpenMaskEditor: () => void }) {
             <X size={14} />
           </button>
         </div>
+        <ReferenceStrip />
         <div className="flex items-center gap-2 mt-4">
           {meta.allowsMask && (
             <Button variant="secondary" icon={Wand2} onClick={onOpenMaskEditor}>{mask ? 'Edit mask' : 'Paint mask'}</Button>

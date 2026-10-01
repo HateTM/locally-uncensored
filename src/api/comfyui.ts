@@ -52,6 +52,9 @@ export interface GenerateParams {
   seed: number
   batchSize: number
   inputImage?: string   // I2I source image filename (uploaded to ComfyUI)
+  /** Edit: further reference images (ComfyUI upload names) after the source,
+   *  for the families lib/edit-references names. GH #144. */
+  referenceImages?: string[]
   /** What the model file carries besides the diffusion model (header sniff).
    *  Lets an all-in-one file in models/checkpoints use its own encoder/VAE. */
   modelParts?: { textEncoder: boolean; vae: boolean }

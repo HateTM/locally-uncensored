@@ -57,6 +57,7 @@ function specDefault(spec: ComfyInputValue | undefined): ComfyInputValue | undef
 // dort). Re-Export, damit bestehende Importpfade unverändert bleiben.
 export { promptFilenamePrefix, videoDecodeNode } from './comfyui-graph'
 import { promptFilenamePrefix, videoDecodeNode } from './comfyui-graph'
+import { extraReferenceSlots, isQwenImageEditModel } from '../lib/edit-references'
 
 // ─── Strategy Detection ───
 
@@ -381,13 +382,6 @@ const SNIFFED_FAMILY: Partial<Record<WorkflowStrategy, SniffedFamily>> = {
 
 /** Latent spaces that start from EmptySD3LatentImage (16 channels). */
 const SD3_LATENT_STRATEGIES = new Set<WorkflowStrategy>(['unet_chroma', 'unet_hidream', 'unet_sd3', 'unet_lumina2', 'unet_qwenimage1'])
-
-/** Qwen-Image-Edit (2509/2511) and FireRed edit files take the source image
- *  through TextEncodeQwenImageEditPlus; plain Qwen-Image does latent img2img. */
-export function isQwenImageEditModel(name: string): boolean {
-  const lower = name.toLowerCase()
-  return lower.includes('edit') && (lower.includes('qwen') || lower.includes('firered'))
-}
 
 /** Verbatim from comfy_extras/nodes_lumina2.py (SYSTEM_PROMPT["superior"]) and
  *  the negative of the NetaYume Lumina template. */
@@ -1009,6 +1003,11 @@ export async function buildDynamicWorkflow(
   // the source goes through TextEncodeQwenImageEditPlus on both sides and is
   // the latent itself, sampled at denoise 1.0 like the template.
   const isQwen1Edit = !isVideo && strategy === 'unet_qwenimage1' && !!gp.inputImage && isQwenImageEditModel(params.model)
+  // Extra reference images, only for a family that takes them and only as
+  // many as it has slots for (lib/edit-references); anything else ignores them.
+  const references = (isQwenEdit || isQwen1Edit)
+    ? (gp.referenceImages ?? []).slice(0, extraReferenceSlots(type, params.model))
+    : []
   if (isQwen1Edit && !allNodes['TextEncodeQwenImageEditPlus']) {
     throw new WorkflowUnavailableError(
       'Qwen-Image-Edit needs a newer ComfyUI (TextEncodeQwenImageEditPlus). Update ComfyUI, then try again.',
@@ -1047,12 +1046,14 @@ export async function buildDynamicWorkflow(
       resolution: qwenEditResolution(params.width, params.height),
     }
     if (isQwenEdit) {
-      const qwenImageId = String(n++)
-      workflow[qwenImageId] = {
-        class_type: 'LoadImage',
-        inputs: { image: gp.inputImage },
+      // The source is image_1 and sets the output shape; the references the
+      // user added follow as image_2 and up, the names the prompt uses.
+      const images = [gp.inputImage!, ...references]
+      for (const [i, image] of images.entries()) {
+        const loadId = String(n++)
+        workflow[loadId] = { class_type: 'LoadImage', inputs: { image } }
+        qwenInputs[`images.image_${i + 1}`] = [loadId, 0]
       }
-      qwenInputs['images.image_1'] = [qwenImageId, 0]
       qwenInputs.vae = [vaeSourceId, vaeOutputSlot]
     }
     workflow[posId] = { class_type: 'TextEncodeQwenImage21', inputs: qwenInputs }
@@ -1066,8 +1067,16 @@ export async function buildDynamicWorkflow(
       workflow[scaleId] = { class_type: 'FluxKontextImageScale', inputs: { image: [loadId, 0] } }
       qwen1EditImageRef = [scaleId, 0]
     }
+    // References go in unscaled as image2 and image3: the node resizes every
+    // extra image itself, only image1 sets the canvas.
+    const refInputs: ComfyNodeInputs = {}
+    for (const [i, image] of references.entries()) {
+      const refId = String(n++)
+      workflow[refId] = { class_type: 'LoadImage', inputs: { image } }
+      refInputs[`image${i + 2}`] = [refId, 0]
+    }
     const editInputs = (prompt: string): ComfyNodeInputs => ({
-      clip: [clipSourceId, clipOutputSlot], prompt, vae: [vaeSourceId, vaeOutputSlot], image1: qwen1EditImageRef!,
+      clip: [clipSourceId, clipOutputSlot], prompt, vae: [vaeSourceId, vaeOutputSlot], image1: qwen1EditImageRef!, ...refInputs,
     })
     workflow[posId] = { class_type: 'TextEncodeQwenImageEditPlus', inputs: editInputs(params.prompt) }
     workflow[negId] = { class_type: 'TextEncodeQwenImageEditPlus', inputs: editInputs(params.negativePrompt || '') }

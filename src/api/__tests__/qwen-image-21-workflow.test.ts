@@ -424,3 +424,43 @@ describe('Qwen-Image 2.1 bundle', () => {
     expect(bundle!.customNodes || []).toHaveLength(0)
   })
 })
+
+// ── Further references (GH #144) ────────────────────────────────────────
+
+describe('buildDynamicWorkflow, Qwen-Image 2.1 edit with further references', () => {
+  beforeEach(() => {
+    vi.mocked(getAllNodeInfo).mockResolvedValue(QWEN_NODES as never)
+    serveEnums()
+  })
+
+  it('the source is image_1 and every reference follows as image_2 and up', async () => {
+    const wf = await buildDynamicWorkflow({
+      ...baseParams, inputImage: 'scene.png', denoise: 0.7, referenceImages: ['person.png', 'outfit.png'],
+    } as never)
+    const enc = nodeOf(wf, 'TextEncodeQwenImage21')![1]
+    const loaded = (slot: string) => {
+      const [id] = enc.inputs[slot] as [string, number]
+      return wf[id].inputs!.image
+    }
+    expect(loaded('images.image_1')).toBe('scene.png')
+    expect(loaded('images.image_2')).toBe('person.png')
+    expect(loaded('images.image_3')).toBe('outfit.png')
+    expect(enc.inputs['images.image_4']).toBeUndefined()
+    expect(nodesOf(wf, 'LoadImage')).toHaveLength(3)
+  })
+
+  it('takes no more than three references besides the source', async () => {
+    const wf = await buildDynamicWorkflow({
+      ...baseParams, inputImage: 'scene.png', denoise: 0.7, referenceImages: ['a.png', 'b.png', 'c.png', 'd.png'],
+    } as never)
+    const enc = nodeOf(wf, 'TextEncodeQwenImage21')![1]
+    expect(enc.inputs['images.image_4']).toBeDefined()
+    expect(enc.inputs['images.image_5']).toBeUndefined()
+  })
+
+  // Negative control: references without a source are not an edit at all.
+  it('a generate run ignores references', async () => {
+    const wf = await buildDynamicWorkflow({ ...baseParams, referenceImages: ['person.png'] } as never)
+    expect(nodeOf(wf, 'LoadImage')).toBeUndefined()
+  })
+})

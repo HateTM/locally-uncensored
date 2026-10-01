@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { maxTrainImages } from '../lib/train-image-cap'
+import { MAX_EXTRA_REFERENCES } from '../lib/edit-references'
 import type { FixupPrompt } from '../lib/render-fixups'
 import { persist } from 'zustand/middleware'
 import { safeJSONStorage } from '../lib/storage-quota'
@@ -12,7 +13,7 @@ import { isRecord } from '../types/json-guards'
  * results, the in-flight flag). Everything else in the blob is a preference.
  */
 const RUNTIME_ONLY_KEYS: readonly string[] = [
-  'backend', 'source', 'mask', 'caps', 'isGenerating', 'comfyCorsBlocked',
+  'backend', 'source', 'mask', 'references', 'caps', 'isGenerating', 'comfyCorsBlocked',
   // Ein gespeicherter Preis von gestern ist eine Luege (siehe partialize
   // unten): auch wenn ein fremder/aelterer Blob ihn doch mitbringt, darf er
   // nie zurueckkommen.
@@ -332,6 +333,9 @@ interface CreateState {
   /** Unified Stage input slot (runtime-only). On the local path source.filename
    *  maps to i2iImage/i2vImage; on the cloud path it is a render-inputs path. */
   source: ImageRef | null
+  /** Edit: further reference images after the source, for a model that takes
+   *  them (lib/edit-references). Runtime-only like `source`; cleared with it. */
+  references: ImageRef[]
   sourceSetAt: number
   mask: ImageRef | null
   /** Runtime-only: local (Bridge) vs cloud (/api/jobs), derived from session. */
@@ -457,6 +461,9 @@ interface CreateState {
   setMusicLyrics: (l: string) => void
   setMusicHowtoSeen: (v: boolean) => void
   setSource: (img: ImageRef | null) => void
+  addReference: (img: ImageRef) => void
+  removeReference: (index: number) => void
+  setReferences: (refs: ImageRef[]) => void
   setMask: (img: ImageRef | null) => void
   setBackend: (backend: CreateBackend) => void
   setCloudImageModel: (id: string) => void
@@ -621,6 +628,7 @@ export const useCreateStore = create<CreateState>()(
       clipSkip: 0,
       growMaskBy: 6,
       source: null as ImageRef | null,
+      references: [] as ImageRef[],
       sourceSetAt: 0,
       mask: null as ImageRef | null,
       backend: 'local' as CreateBackend,
@@ -750,7 +758,7 @@ export const useCreateStore = create<CreateState>()(
         // removebg/animate keep the source but drop a stale mask. Video/animate
         // mirror setMode's reset so image resolution never leaks into video.
         // A stale error from the previous intent never carries over.
-        const dropAll = { source: null, mask: null, sourceSetAt: 0 }
+        const dropAll = { source: null, mask: null, sourceSetAt: 0, references: [] }
         const base = { removebg: false, utilityOp: null, cloudOp: null, error: null }
         switch (intent) {
           // ── 2.5.8 cloud categories. Inputs specific to each (train set,
@@ -886,7 +894,12 @@ export const useCreateStore = create<CreateState>()(
       setMusicDuration: (s2) => set({ musicDuration: Math.max(5, Math.min(240, Math.floor(s2))) }),
       setMusicLyrics: (musicLyrics) => set({ musicLyrics: musicLyrics.slice(0, 2000) }),
       setMusicHowtoSeen: (musicHowtoSeen) => set({ musicHowtoSeen }),
-      setSource: (source) => set({ source, sourceSetAt: source ? Date.now() : 0, ...(source ? {} : { mask: null }) }),
+      setSource: (source) => set({ source, sourceSetAt: source ? Date.now() : 0, ...(source ? {} : { mask: null, references: [] }) }),
+      // Capped at the most any family takes (lib/edit-references); the UI
+      // offers fewer for a model with fewer slots and the builder slices.
+      addReference: (img) => set((s) => ({ references: [...s.references, img].slice(0, MAX_EXTRA_REFERENCES) })),
+      removeReference: (index) => set((s) => ({ references: s.references.filter((_, i) => i !== index) })),
+      setReferences: (references) => set({ references }),
       setMask: (mask) => set({ mask }),
       // Flipping to local clears the intents that have no local lane
       // (upscale/eraser plus character training — all hosted-only) so the

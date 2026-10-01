@@ -584,7 +584,7 @@ export function useCreate() {
       mode, prompt, negativePrompt, imageModel, videoModel,
       sampler, scheduler, steps, cfgScale, width, height, seed, batchSize, frames, fps, denoise,
       hiresFixEnabled, hiresScale, hiresDenoise, hiresSteps, hiresUpscaleMethod, i2iImage, i2vImage,
-      source, mask, growMaskBy, removebg, selectedLoras, selectedVae, clipSkip,
+      source, references, mask, growMaskBy, removebg, selectedLoras, selectedVae, clipSkip,
       setIsGenerating, setProgress, setCurrentPromptId, setError, addToGallery, addToPromptHistory,
     } = state
 
@@ -963,6 +963,11 @@ export function useCreate() {
         // dropped the source without a word. Edit always keeps the source;
         // 0.95 is the most it repaints (the slider tops out there too).
         ...(isI2I && !isRemoveBg && effInputImage ? { inputImage: effInputImage, denoise: Math.min(denoise, EDIT_MAX_DENOISE) } : {}),
+        // GH #144: further references ride along; the builder keeps only as
+        // many as the model's family takes (lib/edit-references).
+        ...(isI2I && !isRemoveBg && effInputImage && references.some((r) => r.filename)
+          ? { referenceImages: references.map((r) => r.filename).filter(Boolean) }
+          : {}),
         ...(!isRemoveBg && maskFilename ? { maskImage: maskFilename, growMaskBy } : {}),
         // Advanced adjustments. LoRA feeds the builder's `lora`/`loraStrength`
         // contract (string[] + number[]); the old `loras` key was read by nobody,

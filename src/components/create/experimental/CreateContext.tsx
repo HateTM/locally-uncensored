@@ -142,6 +142,11 @@ export function CreateExpProvider({ children }: { children: ReactNode }) {
         .then((ref) => useCreateStore.getState().setSource(ref))
         .catch(() => { /* next generate surfaces the error */ })
     }
+    if (s.references.some((r) => !r.filename)) {
+      Promise.all(s.references.map((r, i) => ensureLocalFilename(r, `reference-${i + 2}.png`)))
+        .then((refs) => useCreateStore.getState().setReferences(refs))
+        .catch(() => { /* next generate surfaces the error */ })
+    }
     if (s.mask && !s.mask.filename) {
       ensureLocalFilename(s.mask, 'mask.png')
         .then((ref) => useCreateStore.getState().setMask(ref))
