@@ -435,6 +435,9 @@ interface CreateState {
   toggleLora: (name: string) => void
   setLoraStrengthFor: (name: string, strength: number) => void
   clearLoras: () => void
+  /** Drops picks whose file ComfyUI no longer lists (GH #146), and the local
+   *  character that rode on one of them. */
+  keepListedLoras: (listed: string[]) => void
   setSelectedVae: (name: string) => void
   setClipSkip: (n: number) => void
   setGrowMaskBy: (n: number) => void
@@ -822,7 +825,17 @@ export const useCreateStore = create<CreateState>()(
       toggleNegative: () => set((s) => ({ showNegative: !s.showNegative })),
       toggleLora: (name) => set((s) => ({ selectedLoras: s.selectedLoras.some((l) => l.name === name) ? s.selectedLoras.filter((l) => l.name !== name) : [...s.selectedLoras, { name, strength: 0.8 }] })),
       setLoraStrengthFor: (name, strength) => set((s) => ({ selectedLoras: s.selectedLoras.map((l) => l.name === name ? { ...l, strength: Math.max(0, Math.min(2, strength)) } : l) })),
-      clearLoras: () => set({ selectedLoras: [] }),
+      clearLoras: () => set((s) => ({
+        selectedLoras: [],
+        selectedCharacter: s.selectedCharacter?.id.startsWith('local:') ? null : s.selectedCharacter,
+      })),
+      keepListedLoras: (listed) => set((s) => {
+        const kept = s.selectedLoras.filter((l) => listed.includes(l.name))
+        const char = s.selectedCharacter
+        const charGone = !!char?.id.startsWith('local:') && !listed.includes(char.id.slice('local:'.length))
+        if (kept.length === s.selectedLoras.length && !charGone) return {}
+        return { selectedLoras: kept, ...(charGone ? { selectedCharacter: null } : {}) }
+      }),
       setSelectedVae: (name) => set({ selectedVae: name || 'auto' }),
       setClipSkip: (n) => set({ clipSkip: Math.max(0, Math.min(12, Math.floor(n))) }),
       setGrowMaskBy: (n) => set({ growMaskBy: Math.max(0, Math.min(64, Math.floor(n))) }),

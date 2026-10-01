@@ -1,4 +1,4 @@
-import { Gauge, Boxes, FlaskConical, RotateCcw, HelpCircle, RectangleHorizontal, RectangleVertical } from 'lucide-react'
+import { Gauge, Boxes, FlaskConical, RotateCcw, HelpCircle, RectangleHorizontal, RectangleVertical, X } from 'lucide-react'
 import { VIDEO_RES_PRESETS, ASPECT_RATIOS, applyAspect, presetForOrientation, matchesPreset } from '../../../lib/create-resolution'
 import { useCreateStore } from '../../../stores/createStore'
 import { useCreateExp } from './CreateContext'
@@ -16,6 +16,7 @@ import { Button } from '../ui/Button'
 import { Tooltip } from '../ui/Tooltip'
 import { cn } from '../ui/cn'
 import { HINWEIS_TEXT } from '../../../lib/hinweis'
+import { lorasForRun, loraFitsModel } from '../../../lib/lora-stack'
 
 // Video families whose dynamic-workflow strategy actually wires a LoRA node:
 // the generic UNET path (wan/hunyuan/ltx/mochi/cosmos) plus Wan 2.2's dedicated
@@ -57,6 +58,10 @@ export function ParamGroups() {
   // LoRA is a local-only knob; for video it's offered only on families whose
   // builder actually applies it (see VIDEO_LORA_FAMILIES). Image always qualifies.
   const loraSupported = !isCloud && (!isVideo || VIDEO_LORA_FAMILIES.has(classifyModel(s.videoModel)))
+  // GH #146: the count is what a run sends, the same rule useCreate applies.
+  const laneModel = isVideo ? s.videoModel : s.imageModel
+  const laneType = (isVideo ? s.videoModelList : s.imageModelList).find((m) => m.name === laneModel)?.type ?? classifyModel(laneModel)
+  const activeLoras = lorasForRun(s.selectedLoras, loraList, laneType).use.length
 
   // On cloud the worker only honours steps for images and guidance_scale for
   // the flux family — hide the sliders elsewhere rather than show a dead
@@ -233,7 +238,13 @@ export function ParamGroups() {
         {loraSupported && (
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
-              <div className="t-control text-gray-400">LoRA stack {s.selectedLoras.length > 0 && <span className="t-mono text-gray-600">· {s.selectedLoras.length} active</span>}</div>
+              <div className="t-control text-gray-400">LoRA stack {activeLoras > 0 && <span className="t-mono text-gray-600">· {activeLoras} active</span>}</div>
+              <div className="flex items-center gap-3">
+              {s.selectedLoras.length > 0 && (
+                <button onClick={s.clearLoras} title="Turn every LoRA off" className="t-control text-gray-500 hover:text-gray-300 inline-flex items-center gap-1">
+                  <X className="w-3 h-3" /> Clear
+                </button>
+              )}
               {/* GH #109: the list loads once per connect, so a file dropped
                   into models/loras later never appeared — and with an empty
                   list the whole section was invisible, which read as "no LoRA
@@ -241,6 +252,7 @@ export function ParamGroups() {
               <button onClick={() => { void refreshModelLists() }} title="Re-scan ComfyUI's models/loras folder" className="t-control text-gray-500 hover:text-gray-300 inline-flex items-center gap-1">
                 <RotateCcw className="w-3 h-3" /> Rescan
               </button>
+              </div>
             </div>
             {loraList.length === 0 ? (
               <div className="t-control text-gray-600">No LoRAs found yet. Drop .safetensors files into ComfyUI&apos;s models/loras folder and hit Rescan. Characters trained in Character Studio land there automatically.</div>
@@ -248,11 +260,12 @@ export function ParamGroups() {
             <div className="space-y-1 max-h-44 overflow-y-auto scrollbar-thin">
               {loraList.map((name) => {
                 const active = s.selectedLoras.find((l) => l.name === name)
+                const fits = loraFitsModel(name, laneType)
                 return (
                   <div key={name} className={cn('rounded-md border transition-colors', active ? 'border-white/15 bg-white/[0.06]' : 'border-white/[0.06]')}>
                     <button onClick={() => s.toggleLora(name)} className="w-full flex items-center justify-between px-2.5 py-1.5 t-control text-left text-gray-300">
                       <span className="truncate">{name.replace(/\.safetensors$/, '')}</span>
-                      <span className={cn('t-mono', active ? 'text-emerald-400' : 'text-gray-600')}>{active ? 'on' : 'off'}</span>
+                      <span className={cn('t-mono', active && fits ? 'text-emerald-400' : 'text-gray-600')}>{active ? (fits ? 'on' : 'Z-Image only') : 'off'}</span>
                     </button>
                     {active && (
                       <div className="px-2.5 pb-2">

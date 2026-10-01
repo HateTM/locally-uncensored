@@ -55,6 +55,12 @@ cloud catalogue. It also fixes the bugs reported on GitHub and Discord since
   bin, because LM Studio offers no way to delete a model from outside, and
   Details showed nothing. Details now says to delete it in LM Studio under
   My Models, and does the same for other local servers.
+- **A LoRA deleted from the loras folder leaves the stack.** Its pick stayed
+  saved, the stack said "2 active" with nothing ticked, and every run sent it
+  until ComfyUI refused with "Value not in list". Rescan and every connect now
+  drop picks whose file is gone, a run leaves out anything ComfyUI does not
+  list, a Character Studio character (a Z-Image LoRA) only goes to Z-Image
+  models, and Clear turns the whole stack off (issue 146).
 - **A missing encoder or VAE no longer ends in "Value not in list".** When a
   Qwen-Image 2.1, MiniMax H3 or other newer model was missing one of its files,
   Create tried the old checkpoint graph and ComfyUI answered with

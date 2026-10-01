@@ -20,6 +20,7 @@ import {
   buildTxt2ImgWorkflow,
   buildTxt2VidWorkflow,
   legacyBuilderFits,
+  listedLoras,
   canRunVideoIntent,
   classifyModel,
   isI2VModel,
@@ -68,6 +69,7 @@ import { useCreateStore, EDIT_MAX_DENOISE } from '../stores/createStore'
 import { useWorkflowStore } from '../stores/workflowStore'
 import { injectParameters } from '../api/workflows'
 import { applyNativeHiresFix } from '../api/hires-fix'
+import { lorasForRun, skippedLorasLine } from '../lib/lora-stack'
 import {
   generateMlxImageDataUrl, isMlxImageHost, isMlxImageModel,
   mlxStatus, listMlxImageModels, buildMlxImageModels, mergeImageModels, mlxModelIdFor,
@@ -954,6 +956,18 @@ export function useCreate() {
     } catch { /* VRAM housekeeping is best-effort */ }
 
     try {
+      // GH #146: the stack is checked against what ComfyUI lists right now.
+      // A deleted file or a Z-Image character on another model is left out
+      // with a line, instead of ComfyUI refusing the whole graph.
+      let runLoras = selectedLoras
+      if (selectedLoras.length) {
+        const listed = await listedLoras().catch(() => null)
+        const pick = lorasForRun(selectedLoras, listed, imageModelType)
+        if (listed && pick.missing.length) useCreateStore.getState().keepListedLoras(listed)
+        const line = skippedLorasLine(pick.missing, pick.otherModel)
+        if (line) setProgress(0, line)
+        runLoras = pick.use
+      }
       let outputWidth = width
       let outputHeight = height
       const baseParams = {
@@ -974,8 +988,8 @@ export function useCreate() {
         // contract (string[] + number[]); the old `loras` key was read by nobody,
         // so LoRA selection was a silent no-op for image too (D#80). VAE/clip-skip
         // stay image-only (the builder ignores them for video).
-        ...(selectedLoras.length
-          ? { lora: selectedLoras.map((l) => l.name), loraStrength: selectedLoras.map((l) => l.strength) }
+        ...(runLoras.length
+          ? { lora: runLoras.map((l) => l.name), loraStrength: runLoras.map((l) => l.strength) }
           : {}),
         ...(selectedVae && selectedVae !== 'auto' ? { vae: selectedVae } : {}),
         ...(clipSkip > 0 ? { clipSkip } : {}),

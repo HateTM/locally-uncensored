@@ -3,7 +3,7 @@ import { useCreate } from '../../../hooks/useCreate'
 import { useCloudCreate, hasActiveCloudRun } from '../../../hooks/useCloudCreate'
 import { useCloudSession } from '../../../hooks/useCloudSession'
 import { useCreateStore, type GalleryItem } from '../../../stores/createStore'
-import { getLoraModels, getVAEModels, checkComfyConnection, refreshComfyModels, bundleForVideoIntent } from '../../../api/comfyui'
+import { listedLoras, getVAEModels, checkComfyConnection, refreshComfyModels, bundleForVideoIntent } from '../../../api/comfyui'
 import { getAllNodeInfo, clearNodeCache } from '../../../api/comfyui-nodes'
 import { installCustomNodes, getImageBundles, getVideoBundles, getAudioBundles, getLipsyncBundles, getMotionBundles, startModelDownload, getDownloadProgress, modelsNotVisibleInComfy, judgeableFolders } from '../../../api/discover'
 import { backendCall, isMacOS, isLinux } from '../../../api/backend'
@@ -204,10 +204,12 @@ export function CreateExpProvider({ children }: { children: ReactNode }) {
   const refreshModelLists = useCallback(async () => {
     if (connected !== true) return
     const [loras, vaes] = await Promise.all([
-      getLoraModels().catch(() => [] as string[]),
+      listedLoras().catch(() => null),
       getVAEModels().catch(() => [] as string[]),
     ])
-    setLoraList(loras)
+    setLoraList(loras ?? [])
+    // A file deleted from models/loras leaves the stack here (GH #146).
+    if (loras) useCreateStore.getState().keepListedLoras(loras)
     setVaeList(['auto', ...vaes])
     try {
       const nodes = await getAllNodeInfo(true)

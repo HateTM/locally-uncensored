@@ -782,7 +782,13 @@ export async function getCLIPModels(): Promise<string[]> {
  * dropped into `<comfyui>/models/loras/`.
  */
 export async function getLoraModels(): Promise<string[]> {
-  return (await folderOptions('loras')) ?? []
+  return (await listedLoras()) ?? []
+}
+
+/** The same list, or null when ComfyUI could not be asked. Only a real list
+ *  may prune the LoRA stack (GH #146). */
+export async function listedLoras(): Promise<string[] | null> {
+  return folderOptions('loras')
 }
 
 /** The five folders the R5 re-measure (2026-08-30) found missing entirely.
