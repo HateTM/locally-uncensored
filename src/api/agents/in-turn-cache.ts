@@ -18,6 +18,7 @@
 
 import { useToolAuditStore } from '../../stores/toolAuditStore'
 import type { ExecutionRequest } from './tool-executor'
+import { toolResultIsFailure } from '../../lib/tool-result-failure'
 
 export interface InTurnCacheOptions {
   convId: string
@@ -124,6 +125,12 @@ export function makeInTurnCacheLookup(opts: InTurnCacheOptions) {
     // as a miss so the model re-reads the whole file instead of a silently
     // truncated slice. Empty strings are a legitimate cached payload.
     if (typeof candidate.fullResult !== 'string') return undefined
+    // A failure is not an answer to keep (bug hunt 01.10.2026, A5). Tools
+    // report most failures as text with status 'completed', so the audit kept
+    // a timed-out web_fetch or a file_read of a file not written yet as a hit,
+    // and every retry in the same turn got the old error back without the
+    // call running again.
+    if (toolResultIsFailure(candidate.fullResult)) return undefined
     return candidate.fullResult
   }
 }
