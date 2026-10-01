@@ -12,6 +12,8 @@
 // (`contain_within`, `check_workspace_root`), mirrored for the dev server in
 // lib/dev-fs-jail.ts. Its wording is pinned there; this only recognises it.
 
+import { isRecovered } from './recovered-failure'
+
 /** Both jail refusals: a path that leaves the working folder, and a working
  *  folder the jail does not accept at all. */
 export const OUTSIDE_WORKSPACE = /escapes the allowed workspace|Not an allowed workspace folder/i
@@ -22,6 +24,15 @@ const FILE_TOOLS = new Set(['file_read', 'file_write', 'file_edit', 'file_list',
 /** Did a file tool fail because the path is outside the chat's folder? */
 export function isOutsideWorkspaceRefusal(toolName: string, error: string | null | undefined): boolean {
   return FILE_TOOLS.has(toolName) && !!error && OUTSIDE_WORKSPACE.test(error)
+}
+
+/** A refused file the run did not get by itself (a later call of the same
+ *  tool on the same file name succeeded). Only then is the line worth
+ *  showing; see lib/recovered-failure.ts. */
+export function hasUnrecoveredOutsideRefusal(
+  steps: readonly { toolName: string; status: string; error?: string | null; args?: unknown }[],
+): boolean {
+  return steps.some((c, i) => c.status === 'failed' && isOutsideWorkspaceRefusal(c.toolName, c.error) && !isRecovered(steps, i))
 }
 
 /** The line above the chat, in the words of the buttons the user sees. */
