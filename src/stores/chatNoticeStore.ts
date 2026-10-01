@@ -30,6 +30,7 @@
 
 import { create } from 'zustand'
 import type { HinweisTon } from '../lib/hinweis'
+import { useChatStore } from './chatStore'
 
 /** Die Zeilen, die es gibt. Kein freier Schluessel: eine Aufzaehlung laesst
  *  sich nachzaehlen, ein String-Schluessel waechst unbemerkt. */
@@ -91,3 +92,17 @@ export const useChatNoticeStore = create<ChatNoticeState>((set, get) => ({
     set({ notices: [] })
   },
 }))
+
+/**
+ * Zeilen ueber die LETZTE Nachricht einer Unterhaltung. Sie gehoeren zu dieser
+ * Unterhaltung: in der 3.0.4-Box blieb "The agent can only open files in this
+ * chat's folder" in einem neuen Chat mit ausgeschaltetem Agent stehen.
+ */
+export const CONVERSATION_BOUND: ReadonlySet<ChatNoticeId> = new Set(['agent-outside-workspace', 'agent-for-local-files'])
+
+// Wechselt die Unterhaltung, gehen sie. Von "keine" zur gerade angelegten
+// nicht: das ist dieselbe Unterhaltung, die erste Nachricht legt sie erst an.
+useChatStore.subscribe((s, prev) => {
+  if (prev.activeConversationId === null || s.activeConversationId === prev.activeConversationId) return
+  for (const id of CONVERSATION_BOUND) useChatNoticeStore.getState().dismiss(id)
+})

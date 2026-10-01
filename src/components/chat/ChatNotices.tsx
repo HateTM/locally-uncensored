@@ -13,7 +13,7 @@
  */
 import { Bot, FolderOpen, ImageOff, Images, Paperclip } from 'lucide-react'
 import { Hinweis } from '../ui/Hinweis'
-import { useChatNoticeStore, type ChatNoticeId } from '../../stores/chatNoticeStore'
+import { useChatNoticeStore, CONVERSATION_BOUND, type ChatNoticeId } from '../../stores/chatNoticeStore'
 import { COMPOSER_MAX_W } from './composer-width'
 
 /** Das Symbol je Zeile. Keine eigene Farbe: die traegt der Ton. */
@@ -25,10 +25,6 @@ const ICON: Record<ChatNoticeId, typeof Paperclip> = {
   'agent-for-local-files': Bot,
 }
 
-/** Zeilen ueber den Agent-Knopf und seinen Ordner im CHAT. Im Code-Bereich
- *  gibt es diesen Knopf nicht, dort waehlt man den Ordner im Dateibaum; die
- *  Anleitung stimmte dort nicht (Gegenprobe 01.10.2026). */
-const CHAT_ONLY: ReadonlySet<ChatNoticeId> = new Set(['agent-outside-workspace', 'agent-for-local-files'])
 
 interface Props {
   /** Die Dokumentenablage oeffnen, fuer die Zeile ueber den fehlgegangenen
@@ -41,7 +37,9 @@ interface Props {
 export function ChatNotices({ onAttachDocs, surface = 'chat' }: Props) {
   const all = useChatNoticeStore((s) => s.notices)
   const dismiss = useChatNoticeStore((s) => s.dismiss)
-  const notices = surface === 'code' ? all.filter((n) => !CHAT_ONLY.has(n.id)) : all
+  // Die Zeilen ueber den Agent-Knopf und seinen Ordner gelten im CHAT. Im
+  // Code-Bereich gibt es diesen Knopf nicht (Gegenprobe 01.10.2026).
+  const notices = surface === 'code' ? all.filter((n) => !CONVERSATION_BOUND.has(n.id)) : all
 
   if (notices.length === 0) return null
 

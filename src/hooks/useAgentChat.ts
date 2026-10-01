@@ -2978,7 +2978,9 @@ export function useAgentChat() {
       // (Gegenprobe 01.10.2026). file_edit returns its refusal as text, and
       // only applyResultToToolCall turned that into the failure read here.
       const steps = runState.blocks.flatMap((b) => (b.phase === 'tool_call' && b.toolCall ? [b.toolCall] : []))
-      if (hasUnrecoveredOutsideRefusal(steps)) {
+      // Only over the conversation it is about: a run that ends after the user
+      // moved on does not put its line over another chat.
+      if (hasUnrecoveredOutsideRefusal(steps) && useChatStore.getState().activeConversationId === convId) {
         useChatNoticeStore.getState().show('agent-outside-workspace', OUTSIDE_WORKSPACE_NOTICE)
       }
       if (abort.signal.aborted || isRunStopped(convId)) noteStoppedIfEmpty(convId, assistantMessage.id)
