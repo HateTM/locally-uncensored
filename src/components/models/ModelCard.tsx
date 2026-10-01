@@ -15,6 +15,8 @@ interface Props {
   onSelect: () => void
   onDelete: () => void
   onInfo: () => void
+  /** Tooltip of the Details button, when the row has more to say there. */
+  infoTitle?: string
   canDelete?: boolean
   /**
    * A16 (A14-4a): the Use button the 2.6.8 notes promise twice on this tile.
@@ -54,7 +56,7 @@ const TYPE_CONFIG = {
   video: { label: 'Video', icon: Video, color: 'text-green-400' },
 }
 
-export function ModelCard({ model, isActive, onSelect, onDelete, onInfo, canDelete = true, onUse, useBusy = false, engineStopped: luEngineRuht = false }: Props) {
+export function ModelCard({ model, isActive, onSelect, onDelete, onInfo, infoTitle, canDelete = true, onUse, useBusy = false, engineStopped: luEngineRuht = false }: Props) {
   const typeInfo = TYPE_CONFIG[model.type] || TYPE_CONFIG.text
   const TypeIcon = typeInfo.icon
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
@@ -175,7 +177,7 @@ export function ModelCard({ model, isActive, onSelect, onDelete, onInfo, canDele
         <button
           onClick={(e) => { e.stopPropagation(); actions.info() }}
           className="p-1 rounded hover:bg-gray-100 dark:hover:bg-white/10 text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
-          title="Details"
+          title={infoTitle ?? 'Details'}
         >
           <Info size={12} />
         </button>
