@@ -28,6 +28,7 @@ import { useAgentTaskStore } from '../stores/agentTaskStore'
 import { useAgentGoalStore, renderGoalSection } from '../stores/agentGoalStore'
 import { endLoopUnlessRearmed, useAgentLoopStore } from '../stores/agentLoopStore'
 import { beginRun, isRunStopped, stopRun } from '../lib/run-stop'
+import { REJECTED_CALL_FOR_MODEL } from '../lib/rejected-call'
 import { noteStoppedIfEmpty } from '../lib/stopped-note'
 import { CODEX_CONFIRM_TOOLS, renderApprovalPreview } from './codexShellGate'
 import { buildHermesToolPrompt, buildHermesToolResult, buildHermesToolCall, parseHermesToolCalls, stripToolCallTags, hasToolCallTags } from '../api/hermes-tool-calling'
@@ -2354,6 +2355,8 @@ export function useCodex() {
           const text =
             r.status === 'completed' || r.status === 'cached'
               ? (r.result ?? '')
+              : r.status === 'rejected'
+                ? REJECTED_CALL_FOR_MODEL
               : r.errorHint
                 ? `${r.error ?? 'Tool failed'}, ${r.errorHint}`
                 : (r.error ?? 'Tool failed')

@@ -79,6 +79,7 @@ import { useAgentGoalStore, renderGoalSection } from '../stores/agentGoalStore'
 import { endLoopUnlessRearmed, useAgentLoopStore } from '../stores/agentLoopStore'
 import { beginRun, isRunStopped, stopRun } from '../lib/run-stop'
 import { noteStoppedIfEmpty } from '../lib/stopped-note'
+import { REJECTED_CALL_FOR_MODEL } from '../lib/rejected-call'
 import { buildLoopRecheck, loopPassSaysDone } from '../lib/agent-commands'
 import { applyStoredCompaction } from '../lib/compact-summary'
 import { maybeAutoCompact } from '../lib/run-compact-command'
@@ -2600,7 +2601,7 @@ export function useAgentChat() {
         const resultTextFor = (r: typeof results[number]): string => {
           const text =
             r.status === 'rejected'
-              ? 'User rejected this action. Try a different approach.'
+              ? REJECTED_CALL_FOR_MODEL
               : r.status === 'completed' || r.status === 'cached'
                 ? (r.result ?? '')
                 : r.errorHint
