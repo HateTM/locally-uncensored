@@ -245,12 +245,6 @@ export function useAgentChat() {
     useChatStore.getState().updateMessageAgentBlocks(convId, msgId, runState.blocks)
   }
 
-  function removeBlock(runState: AgentRunState, convId: string, msgId: string, blockId: string) {
-    runState.blocks = runState.blocks.filter(b => b.id !== blockId)
-    useChatStore.getState().updateMessageAgentBlocks(convId, msgId, runState.blocks)
-  }
-
-
   /**
    * ID-keyed block update — used by the parallel tool executor (Phase 5) so
    * N concurrent tool-call blocks can update independently as their results
@@ -1339,10 +1333,6 @@ export function useAgentChat() {
     // Step number for the decay audit trail. The loop is a while, so it has
     // no index of its own.
     let stepNo = 0
-    // The "Analyzing..." placeholder of the step in flight. A Stop mid-request
-    // never reaches the code that drops it, and it stayed as a "Thinking" chip
-    // above the stop note (Gegenprobe 01.10.2026); the finally takes it out.
-    let placeholderId: string | null = null
     try {
       // ── Agent Loop ──────────────────────────────────────────
       // A separate running flag used to be checked here too; it was only
@@ -1542,13 +1532,10 @@ export function useAgentChat() {
         }
 
         if (strategy === 'native') {
-          // Show thinking indicator while model processes
-          const thinkingBlockId = uuid()
-          placeholderId = thinkingBlockId
-          addBlock(runState, convId!, assistantMessage.id, {
-            id: thinkingBlockId, phase: 'thinking', content: 'Analyzing...',
-            timestamp: Date.now(),
-          })
+          // No placeholder block while the model works: an "Analyzing..."
+          // thinking block showed as a "Thinking" chip, also for models that
+          // do not think, next to the status line that already says Working
+          // (Gegenprobe 01.10.2026). The status line is the one sign of life.
 
           // Intelligent tool selection — keyword for small lists, embedding
           // routing once the total tool count grows past the threshold
@@ -1613,17 +1600,6 @@ export function useAgentChat() {
             // the user stared at a frozen chat for 30-90 s while Gemma
             // thought (no tokens, no 3-dot, just dead air). Now content
             // and thinking land in real time.
-            //
-            // The thinking-indicator block is removed the moment ANY
-            // token arrives, so the user sees the live answer instead
-            // of the placeholder once the model starts producing.
-            let thinkingBlockRemoved = false
-            const dropThinkingBlock = () => {
-              if (!thinkingBlockRemoved) {
-                thinkingBlockRemoved = true
-                removeBlock(runState, convId!, assistantMessage.id, thinkingBlockId)
-              }
-            }
             // Connection-failure retry (David 2026-06-04): right after a VRAM
             // hand-off reloads the text model, the very next call can race the
             // still-warming model and die as "Agent error: Connection failed"
@@ -1651,12 +1627,10 @@ export function useAgentChat() {
                     signal: abort.signal,
                   },
                   (c) => {
-                    dropThinkingBlock()
                     runState.content = c
                     scheduleUIUpdate()
                   },
                   (t) => {
-                    dropThinkingBlock()
                     // The one gate for the whole step. Reading the raw setting
                     // here disagreed with the end-of-turn routing for an
                     // 'always' reasoner: nothing streamed live, then the whole
@@ -1705,7 +1679,6 @@ export function useAgentChat() {
                       signal: abort.signal,
                     },
                     (c) => {
-                      dropThinkingBlock()
                       runState.content = c
                       scheduleUIUpdate()
                     },
@@ -1728,7 +1701,6 @@ export function useAgentChat() {
                 throw thinkErr
               }
             }
-            dropThinkingBlock()
             turn = ollamaTurn
             // Ollama nennt den Grund `done_reason`; `lib/ollama-stream-tools.ts`
             // reicht ihn seit Fehler D durch.
@@ -1747,20 +1719,11 @@ export function useAgentChat() {
             // v2.5.3); a request that races that reload window dies as
             // "LM Studio: Request failed". Retry transient failures a couple
             // of times; a 4xx is deterministic and still surfaces.
-            let thinkingBlockRemoved = false
-            const dropThinkingBlock = () => {
-              if (!thinkingBlockRemoved) {
-                thinkingBlockRemoved = true
-                removeBlock(runState, convId!, assistantMessage.id, thinkingBlockId)
-              }
-            }
             const onLiveContent = (c: string) => {
-              dropThinkingBlock()
               runState.content = c
               scheduleUIUpdate()
             }
             const onLiveThinking = (t: string) => {
-              dropThinkingBlock()
               // Same gate as the end-of-turn routing, see the Ollama branch.
               if (keepThinking) {
                 runState.thinking = t
@@ -1770,9 +1733,6 @@ export function useAgentChat() {
             // A call still being written names itself on the run anchor
             // (stores/runActivityStore, realtime pass R1).
             const onToolProgress = (p: ToolCallProgress) => {
-              // The call is the first output of the step: the "Analyzing..."
-              // placeholder goes, as it does on the first token.
-              dropThinkingBlock()
               useRunActivityStore.getState().setActivity(convId, toolProgressActivity(p))
             }
             const streamOpts = { ...chatOptions, tools }
@@ -1815,7 +1775,6 @@ export function useAgentChat() {
                 throw thinkErr
               }
             }
-            dropThinkingBlock()
             useRunActivityStore.getState().setActivity(convId, null)
             turn = providerTurn
             // Und jeder andere Transport nennt ihn `finish_reason`.
@@ -3019,12 +2978,7 @@ export function useAgentChat() {
       if (hasUnrecoveredOutsideRefusal(steps)) {
         useChatNoticeStore.getState().show('agent-outside-workspace', OUTSIDE_WORKSPACE_NOTICE)
       }
-      if (abort.signal.aborted || isRunStopped(convId)) {
-        if (placeholderId && runState.blocks.some((b) => b.id === placeholderId)) {
-          removeBlock(runState, convId, assistantMessage.id, placeholderId)
-        }
-        noteStoppedIfEmpty(convId, assistantMessage.id)
-      }
+      if (abort.signal.aborted || isRunStopped(convId)) noteStoppedIfEmpty(convId, assistantMessage.id)
       const stillOwnsSlot = activeAgentRuns.get(convId) === runState
       if (stillOwnsSlot) {
         useGenerationStore.getState().clearAborter(convId)

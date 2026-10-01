@@ -337,9 +337,7 @@ function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, o
                     b.phase === 'reflection' ||
                     (b.phase === 'answer' && b.content.trim()) ||
                     // G21-2: per-round thoughts render chronologically between
-                    // the calls. The transient "Analyzing..." placeholder is a
-                    // thinking block too and shows as a live bubble until the
-                    // round's first token replaces it.
+                    // the calls.
                     (b.phase === 'thinking' && b.content.trim()),
                 )
                 .sort((a, b) => a.timestamp - b.timestamp),

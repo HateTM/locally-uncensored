@@ -2,8 +2,9 @@
  * @vitest-environment jsdom
  *
  * Realtime pass 01.10.2026 (R1), end to end through the Agent loop: while the
- * model's tool call is still streaming, the run anchor's store names the call
- * and the "Analyzing..." placeholder is gone; once the step is over the label
+ * model's tool call is still streaming, the run anchor's store names the call;
+ * no placeholder block claims the model is "Thinking" (Gegenprobe 01.10.2026:
+ * that chip showed for models that do not think); once the step is over the label
  * is cleared, so the anchor goes back to "Working" for the tool run and the
  * next step.
  *
@@ -96,12 +97,17 @@ describe('the run names the call it is writing', () => {
     act(() => { run = result.current.sendAgentMessage('note a todo: buy milk') })
     await waitFor(() => expect(calls).toBe(1))
     await waitFor(() => expect(push).toBeTypeOf('function'))
+    // The request is out, nothing has come back: the answer holds no
+    // "Thinking" block, the status line alone says the run is working.
+    const waiting = useChatStore.getState().conversations.find((c) => c.id === convId)!
+      .messages.at(-1)!.agentBlocks ?? []
+    expect(waiting.filter((b) => b.phase === 'thinking')).toEqual([])
 
     push(line({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'c1', function: { name: 'todo_write', arguments: '' } }] } }] }))
     await waitFor(() => expect(useRunActivityStore.getState().activity[convId]?.label).toBe('Preparing todo_write'))
     const blocks = useChatStore.getState().conversations.find((c) => c.id === convId)!
       .messages.at(-1)!.agentBlocks ?? []
-    expect(blocks.some((b) => b.phase === 'thinking' && b.content === 'Analyzing...')).toBe(false)
+    expect(blocks.filter((b) => b.phase === 'thinking')).toEqual([])
 
     push(line({ choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: '{"todos":[{"content":"buy milk","status":"pending"}]}' } }] } }] }))
     push(line({ choices: [{ delta: {}, finish_reason: 'tool_calls' }] }))
