@@ -53,6 +53,7 @@ import { sendsToALanBackend } from '../lib/lan-openai-slot'
 import { useSendSizeStore } from '../stores/sendSizeStore'
 import { resolveAgentNumCtx } from '../lib/agent-num-ctx'
 import { ensureBuiltinAgentCtx } from '../api/builtin-ensure'
+import { approvalIsMoot } from '../api/mcp/builtin-tools'
 import { useMemoryStore } from '../stores/memoryStore'
 import { useVoiceStore } from '../stores/voiceStore'
 import { autoSpeak } from '../lib/ttsBridge'
@@ -2413,7 +2414,8 @@ export function useAgentChat() {
               cloudOptIn: settings.codexCloudConfirmOptIn,
               providerId,
             })
-          const needsApproval = permLevel !== 'auto' || cloudShellConfirm
+          const needsApproval = (permLevel !== 'auto' || cloudShellConfirm)
+            && !(await approvalIsMoot(tc.function.name, tc.function.arguments ?? {}, run))
           // Exec-timeout parity with the Code tab (audit B8): without an
           // injected default the Rust side used its 120 s fallback, so the
           // same npm install that passed in Code died here after 2 minutes.

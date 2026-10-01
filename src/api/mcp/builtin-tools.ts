@@ -54,6 +54,35 @@ function chatCtx(run?: AgentRunContext): { chatId?: string; workingDirectory?: s
   return { chatId: id }
 }
 
+/** The file tools whose `path` the workspace guard decides on. */
+const WORKSPACE_PATH_TOOLS = new Set(['file_read', 'file_write', 'file_edit', 'file_list', 'file_search'])
+
+/**
+ * Whether asking the user about this call makes sense at all.
+ *
+ * Two cases where it does not, both from the 3.0.4 box run:
+ * - plain-chat artifact mode: file_write only shows a preview with a Download
+ *   button, nothing touches the disk, so there is nothing to approve;
+ * - a path the workspace guard refuses: the user approved
+ *   `C:\Users\user\Desktop\poem.txt` and got "Path escapes the allowed
+ *   workspace" right after. The guard (resolve_path, via fs_info) answers
+ *   before the card, the call runs straight into the refusal and the model
+ *   retries inside the folder.
+ * Any other answer from the check (missing file, backend error) keeps the card.
+ */
+export async function approvalIsMoot(toolName: string, args: ToolArgs, run?: AgentRunContext): Promise<boolean> {
+  if (toolName === 'file_write' && isChatArtifactMode(run)) return true
+  if (!WORKSPACE_PATH_TOOLS.has(toolName)) return false
+  const path = typeof args.path === 'string' ? args.path : ''
+  if (!path.trim()) return false
+  try {
+    await backendCall('fs_info', { path, ...chatCtx(run) })
+    return false
+  } catch (e) {
+    return /escapes the allowed workspace/i.test(e instanceof Error ? e.message : String(e))
+  }
+}
+
 /**
  * Argument readers.
  *
