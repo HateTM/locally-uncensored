@@ -78,6 +78,7 @@ import { useAgentTaskStore } from '../stores/agentTaskStore'
 import { useAgentGoalStore, renderGoalSection } from '../stores/agentGoalStore'
 import { endLoopUnlessRearmed, useAgentLoopStore } from '../stores/agentLoopStore'
 import { beginRun, isRunStopped, stopRun } from '../lib/run-stop'
+import { noteStoppedIfEmpty } from '../lib/stopped-note'
 import { buildLoopRecheck, loopPassSaysDone } from '../lib/agent-commands'
 import { applyStoredCompaction } from '../lib/compact-summary'
 import { maybeAutoCompact } from '../lib/run-compact-command'
@@ -3000,6 +3001,8 @@ export function useAgentChat() {
       // to false, and reject B's pending approvals, leaving the NEW run
       // unstoppable through generationStore (Stop button, sign-out, window
       // close, app quit) even though activeAgentRuns still pointed at it.
+      // A Stop before anything was written leaves a line, not an empty bubble.
+      if (abort.signal.aborted || isRunStopped(convId)) noteStoppedIfEmpty(convId, assistantMessage.id)
       const stillOwnsSlot = activeAgentRuns.get(convId) === runState
       if (stillOwnsSlot) {
         useGenerationStore.getState().clearAborter(convId)

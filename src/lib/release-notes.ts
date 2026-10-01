@@ -172,7 +172,7 @@ export const RELEASE_NOTES: ReleaseNote[] = [
       },
       {
         title: 'The run says which tool the model is writing.',
-        detail: 'A model writing a long file sends the call in pieces for many seconds, and the run said only "Working" the whole time. It now shows the tool\'s name and how much of the call has arrived as soon as the first piece is in.',
+        detail: 'A model writing a long file sends the call in pieces for many seconds, and the run said only "Working" the whole time. It now shows the tool\'s name and how much of the call has arrived as soon as the first piece is in. A run waiting for your approval says so in the chat too, and Stop before the first word leaves a note instead of an empty answer.',
       },
       {
         title: 'Code conversations stay in the Code tab.',

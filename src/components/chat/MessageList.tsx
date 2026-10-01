@@ -216,7 +216,13 @@ export function MessageList({ isGenerating, isThisChatGenerating, isLoadingModel
             streams. G14-6: one shimmering "Working" with the clock beside it,
             instead of three dots here and a floating counter elsewhere. */}
         {showTyping && lastMessage?.role === 'assistant' && (
-          <WorkingAnchor isRunning conversationId={conversation?.id} label={isLoadingModel ? 'Loading model' : undefined} />
+          <WorkingAnchor
+            isRunning
+            conversationId={conversation?.id}
+            // A run waiting on the user is not working: same words as the Code
+            // tab (G15b), Gegenprobe 01.10.2026 read "Working 49s" here.
+            label={isLoadingModel ? 'Loading model' : pendingApprovalId ? 'Waiting for your approval' : undefined}
+          />
         )}
       </div>
     </div>

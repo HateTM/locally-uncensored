@@ -28,6 +28,7 @@ import { useAgentTaskStore } from '../stores/agentTaskStore'
 import { useAgentGoalStore, renderGoalSection } from '../stores/agentGoalStore'
 import { endLoopUnlessRearmed, useAgentLoopStore } from '../stores/agentLoopStore'
 import { beginRun, isRunStopped, stopRun } from '../lib/run-stop'
+import { noteStoppedIfEmpty } from '../lib/stopped-note'
 import { CODEX_CONFIRM_TOOLS, renderApprovalPreview } from './codexShellGate'
 import { buildHermesToolPrompt, buildHermesToolResult, buildHermesToolCall, parseHermesToolCalls, stripToolCallTags, hasToolCallTags } from '../api/hermes-tool-calling'
 import { streamProviderTurn, type StreamedProviderTurn } from '../lib/provider-stream'
@@ -2553,6 +2554,8 @@ export function useCodex() {
         })
       }
     } finally {
+      // A Stop before anything was written leaves a line, not an empty bubble.
+      if (convId && (abort.signal.aborted || isRunStopped(convId))) noteStoppedIfEmpty(convId, assistantMsg.id)
       // ── Continue capability (parity with original Codex CLI) ────────
       // Persist the tool-call chain from this turn as hidden messages in
       // the chat store. On the next turn, the history builder includes
