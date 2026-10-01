@@ -146,14 +146,38 @@ export class QuoteChangedError extends CloudJobError {
   }
 }
 
+/** Answers after which nobody knows whether the server booked the job. */
+const SUBMIT_FATE_UNKNOWN = new Set([0, 408, 502, 503, 504])
+const SUBMIT_ATTEMPTS = 3
+/** Pause before a retry, times the attempt number. */
+const SUBMIT_RETRY_MS = 1_000
+
 export async function submitCloudJob(
   submit: CloudJobSubmit,
 ): Promise<CloudJobSubmitResult> {
-  const res = await cloudFetch('/api/jobs', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(submit),
+  // A dropped or timed-out submit may have booked the job anyway (bug hunt
+  // 01.10.2026, K8): it ran, it was charged, and the desktop, which has no job
+  // list, never saw it. The request id was minted for exactly this and never
+  // used: the same body goes out again, and the server replays the booking
+  // it already made instead of charging twice.
+  const body = JSON.stringify({
+    ...submit,
+    params: { ...submit.params, client_request_id: submit.params.client_request_id ?? crypto.randomUUID() },
   })
+  let res: Response
+  for (let attempt = 1; ; attempt++) {
+    try {
+      res = await cloudFetch('/api/jobs', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body,
+      })
+      if (!SUBMIT_FATE_UNKNOWN.has(res.status) || attempt >= SUBMIT_ATTEMPTS) break
+    } catch (err) {
+      if (!(err instanceof CloudJobError) || !SUBMIT_FATE_UNKNOWN.has(err.status) || attempt >= SUBMIT_ATTEMPTS) throw err
+    }
+    await new Promise((r) => setTimeout(r, SUBMIT_RETRY_MS * attempt))
+  }
   if (res.status === 409) {
     // Read by hand rather than through jsonOrError: only this one status
     // carries the extra `credits` figure QuoteChangedError needs, and every
