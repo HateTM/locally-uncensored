@@ -68,7 +68,9 @@ describe('noPromptHint', () => {
   it('names the inputs each lane is waiting for', () => {
     expect(noPromptHint('motion')).toContain('driving dance/pose video')
     expect(noPromptHint('lipsync')).toContain('voice')
-    expect(noPromptHint('character')).toContain('4 to 30 photos')
+    // GH #121: the local trainer takes 100, the cloud job API 30.
+    expect(noPromptHint('character', 'local')).toContain('4 to 100 photos')
+    expect(noPromptHint('character', 'cloud')).toContain('4 to 30 photos')
   })
 
   it('keeps the eraser on its own line instead of the cutout default', () => {

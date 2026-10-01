@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { maxTrainImages } from '../lib/train-image-cap'
 import type { FixupPrompt } from '../lib/render-fixups'
 import { persist } from 'zustand/middleware'
 import { safeJSONStorage } from '../lib/storage-quota'
@@ -818,7 +819,7 @@ export const useCreateStore = create<CreateState>()(
       setGrowMaskBy: (n) => set({ growMaskBy: Math.max(0, Math.min(64, Math.floor(n))) }),
       setTargetResolution: (targetResolution) => set({ targetResolution }),
       setCharacterTab: (characterTab) => set({ characterTab }),
-      // Cap at 30 (the server's image_paths limit) and de-dupe by filename so
+      // Cap at the backend's photo limit (lib/train-image-cap) and de-dupe by filename so
       // a re-drop of the same files doesn't double the set. Both of those
       // THROW REFS AWAY — the caller minted a blob: URL for every file it
       // handed over, including the ones landing in the dedupe and the ones
@@ -827,7 +828,7 @@ export const useCreateStore = create<CreateState>()(
       addTrainImages: (imgs) => {
         const before = get().trainImages
         const have = new Set(before.map((i) => i.name))
-        const trainImages = [...before, ...imgs.filter((i) => !have.has(i.name))].slice(0, 30)
+        const trainImages = [...before, ...imgs.filter((i) => !have.has(i.name))].slice(0, maxTrainImages(get().backend))
         releaseDroppedMediaRefs([...before, ...imgs], trainImages)
         set({ trainImages })
       },

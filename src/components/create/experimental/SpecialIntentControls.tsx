@@ -37,6 +37,7 @@ import { Slider } from '../ui/Slider'
 import { cn } from '../ui/cn'
 import { useClickAway } from '../ui/useClickAway'
 import { Modal } from '../../ui/Modal'
+import { MIN_TRAIN_IMAGES, maxTrainImages } from '../../../lib/train-image-cap'
 
 export function SpecialControls({ intent }: { intent: CreateIntent }) {
   switch (intent) {
@@ -198,7 +199,7 @@ function CharacterPanel() {
             className="t-control w-44 px-2.5 h-[var(--control-h-sm)] rounded-md bg-white/[0.03] border border-white/[0.06] text-gray-200 placeholder-gray-600 focus:outline-none focus:border-white/15"
           />
           <span className="t-label text-gray-600">
-            {trainImages.length}/30 photos added{trainImages.length < 4 ? ', need at least 4' : ''}
+            {trainImages.length}/{maxTrainImages(backend)} photos added{trainImages.length < MIN_TRAIN_IMAGES ? `, need at least ${MIN_TRAIN_IMAGES}` : ''}
           </span>
         </div>
       ) : (
@@ -571,7 +572,7 @@ function LocalTrainControls() {
           options={TRAIN_PRESETS.map((p) => ({ value: String(p.steps), label: p.label }))}
         />
         <span className="t-label text-gray-600">
-          {trainImages.length}/30 photos{trainImages.length < 4 ? ', need at least 4' : ''}
+          {trainImages.length}/{maxTrainImages('local')} photos{trainImages.length < MIN_TRAIN_IMAGES ? `, need at least ${MIN_TRAIN_IMAGES}` : ''}
         </span>
       </div>
       {!isGenerating && (

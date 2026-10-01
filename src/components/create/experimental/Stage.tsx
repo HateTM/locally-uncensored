@@ -21,6 +21,7 @@ import { InstallCancelled } from '../../../lib/bundle-install'
 import { isMlxImageHost } from '../../../api/mlx-image'
 import { bundleForVideoIntent } from '../../../api/comfyui'
 import { getVideoBundles } from '../../../api/discover'
+import { MIN_TRAIN_IMAGES, maxTrainImages } from '../../../lib/train-image-cap'
 
 interface Props {
   displayed?: GalleryItem
@@ -642,7 +643,7 @@ function TrainSetBoard() {
           className="flex-1 rounded-xl border-2 border-dashed border-white/10 hover:border-white/25 transition-colors flex flex-col items-center justify-center gap-2 text-gray-500 hover:text-gray-300"
         >
           <UploadCloud size={28} />
-          <div className="t-body">Drop 4 to 30 photos of your character here</div>
+          <div className="t-body">Drop {MIN_TRAIN_IMAGES} to {maxTrainImages(backend)} photos of your character here</div>
           <div className="t-label text-gray-600">
             One person or character, varied angles and lighting works best
           </div>
@@ -675,7 +676,7 @@ function TrainSetBoard() {
             </div>
           </div>
           <div className="t-label text-gray-500 text-center shrink-0">
-            {trainImages.length}/30 photos. {backend === 'cloud'
+            {trainImages.length}/{maxTrainImages(backend)} photos. {backend === 'cloud'
               ? 'Training runs in the cloud and lands the character on your shelf.'
               : 'Training runs on your GPU and lands the character in your local LoRAs.'}
           </div>

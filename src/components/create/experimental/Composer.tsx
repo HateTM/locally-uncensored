@@ -348,7 +348,7 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
               background"). */}
           {showNoPromptHint && !needsMask && (
             <div className="px-3.5 py-3 t-body text-gray-500">
-              {noPromptHint(meta.id)}
+              {noPromptHint(meta.id, backend)}
             </div>
           )}
           {needsMask && !needPrompt && !isGenerating && (

@@ -40,6 +40,7 @@ import { STUDIO_MODELS, studioFields } from '../lib/render/studio-contract'
 import { modelLabel } from '../lib/render/preset-models'
 import { bookedVideoSeconds } from '../lib/render/video-duration'
 import { studioQuote, StudioQuoteChangedError } from '../api/cloud/studio'
+import { MIN_TRAIN_IMAGES, maxTrainImages } from '../lib/train-image-cap'
 
 // B3 (review-w2ui.md, 18.09.2026): the CSAM floor above runs regardless of
 // tier, but the adult half of safety.ts (ADULT_SOFT_TERMS/ADULT_HARD_TERMS)
@@ -284,8 +285,14 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
       s.setError('This character has no compatible generation model yet.')
       return
     }
-    if (op === 'lora-train' && s.trainImages.length < 4) {
-      s.setError('Add at least 4 photos of your character (more is better, up to 30).')
+    if (op === 'lora-train' && s.trainImages.length < MIN_TRAIN_IMAGES) {
+      s.setError(`Add at least ${MIN_TRAIN_IMAGES} photos of your character (more is better, up to ${maxTrainImages('cloud')}).`)
+      return
+    }
+    // Staged locally, where the limit is higher, then switched to Cloud: the
+    // job API refuses more than its cap, so say how many to remove first.
+    if (op === 'lora-train' && s.trainImages.length > maxTrainImages('cloud')) {
+      s.setError(`Cloud training takes up to ${maxTrainImages('cloud')} photos. Remove ${s.trainImages.length - maxTrainImages('cloud')} and try again.`)
       return
     }
     // A Studio pick names its own required inputs (studio-contract.ts's
