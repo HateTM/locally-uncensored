@@ -80,7 +80,6 @@ async function reconcile(
   change: StagedChange,
 ): Promise<{ content: string; merged: number }> {
   const base = change.oldContent ?? ''
-  let current: string
   let res: { content?: string; encoding?: string } | undefined
   try {
     res = await backendCall<{ content?: string; encoding?: string }>('fs_read', {
@@ -99,7 +98,7 @@ async function reconcile(
       `${change.path} is not a UTF-8 text file on disk, so this edit cannot be checked against it and was not applied. Reject this one and let the model read the file again.`,
     )
   }
-  current = res?.content ?? ''
+  const current = res?.content ?? ''
   // The file on disk decides the form; an empty file inherits the model's.
   const eol = current ? eolOf(current) : eolOf(change.newContent)
   const baseLf = toLf(base)
