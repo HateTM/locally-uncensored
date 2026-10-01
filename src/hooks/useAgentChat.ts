@@ -2285,6 +2285,7 @@ export function useAgentChat() {
         // this turn was allowed to offer it. Proven live on the Code side
         // 2026-07-25, where a read-only /plan created a file while every request
         // carried a read-only catalog.
+        const refusalsFrom = agentMessages.length
         if (opts?.readOnly) {
           const blocked = toolCalls.filter((tc) => !allowedInReadOnlyTurn(tc.function?.name ?? ''))
           if (blocked.length) {
@@ -2325,6 +2326,18 @@ export function useAgentChat() {
               content: `${names} is switched off for this conversation in the tool permissions, so it was not run. Do not call it again. Continue with the tools you have, or say what you would need.`,
             })
           }
+        }
+
+        // Every call of this turn was refused (bug hunt 01.10.2026, A9). The
+        // turn went on with an empty batch and wrote `tool_calls: []` into the
+        // history, which a strict upstream rejects, behind the refusal it
+        // answers. The model's own words go in first, then the refusal, and
+        // the next round answers it.
+        if (toolCalls.length === 0 && agentMessages.length > refusalsFrom) {
+          if (turnContent.trim()) {
+            agentMessages.splice(refusalsFrom, 0, { role: 'assistant', content: turnContent })
+          }
+          continue
         }
 
         // Loop-detector, parity with Codex: narration first (the same line
