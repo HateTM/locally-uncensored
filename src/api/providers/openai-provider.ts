@@ -988,6 +988,8 @@ export class OpenAIProvider implements ProviderClient {
                 args: tc.function?.arguments || '',
               })
             }
+            const call = toolCallAccum.get(key)
+            if (call?.name) yield { content: '', toolProgress: { name: call.name, argsChars: call.args.length }, done: false }
           }
         }
 

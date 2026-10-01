@@ -171,6 +171,10 @@ export const RELEASE_NOTES: ReleaseNote[] = [
         detail: 'An error message is no longer overwritten by the last frame of the answer, and Regenerate no longer deletes your question when nothing can be sent. Cancel on a render a GPU already took says it will finish and be charged, and a submit whose answer got lost no longer leaves a paid job you never see.',
       },
       {
+        title: 'The run says which tool the model is writing.',
+        detail: 'A model writing a long file sends the call in pieces for many seconds, and the run said only "Working" the whole time. It now shows the tool\'s name and how much of the call has arrived as soon as the first piece is in.',
+      },
+      {
         title: 'Code conversations stay in the Code tab.',
         detail: 'After a restart the last Code conversation opened in the Chat tab, where the agent was off and a "continue" ran without tools. The app now starts on an empty chat, and the Code button takes you back to the Code conversation you worked on last, also while a run is going.',
       },

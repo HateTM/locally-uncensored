@@ -55,7 +55,8 @@ import { useStagedChangesStore, flushStagedPersist } from '../stores/stagedChang
 import { log } from '../lib/logger'
 import type { AgentToolCall } from '../types/agent-mode'
 import { isThinkingCompatible, isPlainTextPlanner } from '../lib/model-compatibility'
-import type { ChatMessage, ToolCall, ToolDefinition } from '../api/providers/types'
+import type { ChatMessage, ToolCall, ToolCallProgress, ToolDefinition } from '../api/providers/types'
+import { useRunActivityStore, toolProgressActivity } from '../stores/runActivityStore'
 import { executeParallel, applyResultToToolCall, resultFailed, APPROVE_ALL, type ExecutionRequest } from '../api/agents/tool-executor'
 import { useToolAuditStore } from '../stores/toolAuditStore'
 import { makeInTurnCacheLookup } from '../api/agents/in-turn-cache'
@@ -970,6 +971,8 @@ export function useCodex() {
     // realtime counter show only in the coding chat that's actually running,
     // not in every chat the user switches to (David 2026-06-12). Cleared below.
     useGenerationStore.getState().setGenerating(convId, true)
+    // A run that threw mid-call left its label behind; this run starts clean.
+    useRunActivityStore.getState().setActivity(convId, null)
     // Register the abort in the STORE, not just in hook refs (audit A2). The
     // Code view unmounts on a tab switch and the remounted hook starts with
     // empty refs — before this, a run that survived the switch had no working
@@ -1564,16 +1567,22 @@ export function useCodex() {
                 useChatStore.getState().updateMessageThinking(convId!, assistantMsg.id, combined)
               }
             }
+            // A call still being written names itself on the run anchor
+            // (stores/runActivityStore, realtime pass R1).
+            const onToolProgress = (p: ToolCallProgress) => {
+              useRunActivityStore.getState().setActivity(convId, toolProgressActivity(p))
+            }
             try {
-              turn = await streamProviderTurn(provider, modelToUse, sendMessages, streamOpts, liveContent, liveThinking)
+              turn = await streamProviderTurn(provider, modelToUse, sendMessages, streamOpts, liveContent, liveThinking, onToolProgress)
             } catch (thinkErr) {
               if (shouldDowngradeThinking(streamOpts.thinking, thinkErr)) {
-                turn = await streamProviderTurn(provider, modelToUse, sendMessages, { ...streamOpts, thinking: undefined as unknown as boolean }, liveContent, () => {})
+                turn = await streamProviderTurn(provider, modelToUse, sendMessages, { ...streamOpts, thinking: undefined as unknown as boolean }, liveContent, () => {}, onToolProgress)
               } else {
                 throw thinkErr
               }
             }
             settleLivePaint()
+            useRunActivityStore.getState().setActivity(convId, null)
             toolCalls = turn.toolCalls
             turnContent = turn.content || ''
             turnFinishReason = turn.finishReason

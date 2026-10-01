@@ -28,6 +28,11 @@ cloud catalogue.
   a request of its own. It now keeps a plan in Plan mode, when you ask for a
   plan, or while a plan is still open. The plan panel, the approval bar and the
   file explorer are dark instead of blue.
+- **The run says which tool the model is writing.** A model writing a long
+  file sends the call in pieces for many seconds, and the run said only
+  "Working" the whole time. It now shows the tool's name and how much of the
+  call has arrived, for example "Preparing file_write 3 kB", as soon as the
+  first piece is in.
 - **Code conversations stay in the Code tab.** After a restart the last Code
   conversation opened in the Chat tab, where the agent was off and a
   "continue" ran without tools. The app now starts on an empty chat, and the

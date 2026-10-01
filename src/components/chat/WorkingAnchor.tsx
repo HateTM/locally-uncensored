@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { formatElapsed } from '../../lib/format-elapsed'
 import { useGenerationStore } from '../../stores/generationStore'
+import { useRunActivityStore } from '../../stores/runActivityStore'
 
 interface Props {
   isRunning: boolean
@@ -27,6 +28,9 @@ interface Props {
 export function WorkingAnchor({ isRunning, label, conversationId }: Props) {
   const [elapsed, setElapsed] = useState(0)
   const bookedAt = useGenerationStore((s) => (conversationId ? s.runs[conversationId]?.bookedAt : undefined))
+  // What the run reports it is doing (a tool call being written). An explicit
+  // label from the surface still wins: an approval wait is the more urgent fact.
+  const activity = useRunActivityStore((s) => (conversationId ? s.activity[conversationId] : undefined))
 
   // The clock resets in the render where `isRunning` flips, not in an effect
   // afterwards. Two things were wrong with the effect version: `useRef(Date.now())`
@@ -93,7 +97,12 @@ export function WorkingAnchor({ isRunning, label, conversationId }: Props) {
           aria-hidden="true"
           className="lu-band-dot w-1.5 h-1.5 rounded-full bg-lu-accent-edge dark:bg-lu-accent shrink-0"
         />
-        <span className="lu-tool-shimmer t-control">{label ?? 'Working'}</span>
+        <span className="lu-tool-shimmer t-control">{label ?? activity?.label ?? 'Working'}</span>
+        {!label && activity?.detail && (
+          <span aria-hidden="true" className="lu-hud-num t-micro text-gray-500 dark:text-gray-500">
+            {activity.detail}
+          </span>
+        )}
         {elapsed >= 1 && (
           <span aria-hidden="true" className="lu-hud-num t-micro text-gray-500 dark:text-gray-500">
             {formatElapsed(elapsed)}

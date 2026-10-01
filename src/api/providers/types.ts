@@ -228,10 +228,21 @@ export interface ChatOptions {
 
 // ── Streaming Chunk (unified output) ──────────────────────────
 
+export interface ToolCallProgress {
+  name: string
+  argsChars: number
+}
+
 export interface ChatStreamChunk {
   content: string
   thinking?: string    // Model reasoning (Ollama thinking field, <think> tags)
   toolCalls?: ToolCall[]
+  // A tool call the model is still writing: its name and how much of its
+  // arguments has arrived. The finished calls still come only on the done
+  // chunk; this is what the run shows in the meantime instead of "Working"
+  // (a 4 kB file_write streams for ~11 s on Mistral Small, measured
+  // 01.10.2026).
+  toolProgress?: ToolCallProgress
   done: boolean
   // Why generation ended, on the final done:true chunk. 'stop' | 'length'
   // (token budget exhausted, e.g. the whole budget went into reasoning) |

@@ -1,5 +1,6 @@
 import { useRef, useState, useCallback, useEffect } from 'react'
 import { frameFlush } from '../lib/frame-flush'
+import { useRunActivityStore, toolProgressActivity } from '../stores/runActivityStore'
 import { markCannotThink } from '../lib/model-compatibility'
 import {
   type ApprovalEntry,
@@ -86,7 +87,7 @@ import { toolFailureNote } from '../lib/tool-failure-note'
 import { toolCallCapMs, raceWithToolTimeout, SHELL_EXECUTE_DEFAULT_TIMEOUT_MS } from '../lib/tool-timeout'
 import { AgentLoopGuard } from '../lib/agent-loop-guard'
 import { budgetFromSettings } from '../api/agents/budget'
-import type { ChatMessage, ToolCall, ToolDefinition } from '../api/providers/types'
+import type { ChatMessage, ToolCall, ToolCallProgress, ToolDefinition } from '../api/providers/types'
 import type { WorkflowEngineCallbacks } from '../types/agent-workflows'
 import { renderWorkflowStepList, workflowProgressHeader, type WorkflowStepView } from '../lib/workflow-progress-view'
 import { executeParallel, applyResultToToolCall, resultFailed, type ExecutionRequest } from '../api/agents/tool-executor'
@@ -1147,6 +1148,8 @@ export function useAgentChat() {
     // Bind the generating flag to THIS conversation so the typing indicator
     // shows only in the chat whose turn is in flight (David 2026-06-12).
     useGenerationStore.getState().setGenerating(convId, true)
+    // A run that threw mid-call left its label behind; this run starts clean.
+    useRunActivityStore.getState().setActivity(convId, null)
     // Register so deleting/closing this chat stops the agent loop (Bug C).
     // requestGenerationCancel too, so a ComfyUI gen the agent kicked off is
     // interrupted when the chat is deleted mid-generation (gated to a no-op when
@@ -1751,13 +1754,21 @@ export function useAgentChat() {
                 scheduleUIUpdate()
               }
             }
+            // A call still being written names itself on the run anchor
+            // (stores/runActivityStore, realtime pass R1).
+            const onToolProgress = (p: ToolCallProgress) => {
+              // The call is the first output of the step: the "Analyzing..."
+              // placeholder goes, as it does on the first token.
+              dropThinkingBlock()
+              useRunActivityStore.getState().setActivity(convId, toolProgressActivity(p))
+            }
             const streamOpts = { ...chatOptions, tools }
             // Dasselbe wie im Ollama-Zweig, aus demselben Grund.
             let providerTurn!: Awaited<ReturnType<typeof streamProviderTurn>>
             let connRetries = 0
             for (;;) {
               try {
-                providerTurn = await streamProviderTurn(provider, modelToUse, sendMessages, streamOpts, onLiveContent, onLiveThinking)
+                providerTurn = await streamProviderTurn(provider, modelToUse, sendMessages, streamOpts, onLiveContent, onLiveThinking, onToolProgress)
                 break
               } catch (thinkErr) {
                 // G22 parity with the Ollama branch: heal a wrong vision
@@ -1776,7 +1787,7 @@ export function useAgentChat() {
                 // number used to be in useChat.ts only, so this branch ended
                 // the whole run where plain chat just retried.
                 if (shouldDowngradeThinking(streamOpts.thinking, thinkErr)) {
-                  providerTurn = await streamProviderTurn(provider, modelToUse, sendMessages, { ...streamOpts, thinking: undefined as unknown as boolean }, onLiveContent, () => {})
+                  providerTurn = await streamProviderTurn(provider, modelToUse, sendMessages, { ...streamOpts, thinking: undefined as unknown as boolean }, onLiveContent, () => {}, onToolProgress)
                   break
                 }
                 const transient = asString(prop(thinkErr, 'name')) !== 'AbortError' && !isTerminalModelError(thinkErr)
@@ -1792,6 +1803,7 @@ export function useAgentChat() {
               }
             }
             dropThinkingBlock()
+            useRunActivityStore.getState().setActivity(convId, null)
             turn = providerTurn
             // Und jeder andere Transport nennt ihn `finish_reason`.
             turnFinishReason = providerTurn.finishReason

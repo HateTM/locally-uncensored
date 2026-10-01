@@ -11,7 +11,8 @@
  *
  * Callbacks receive the CUMULATIVE text first (what the existing UI paths
  * paint directly) and the raw delta second (what the Hermes display filter
- * feeds on).
+ * feeds on). `onToolProgress` hears about a call while its arguments are still
+ * arriving, so the run can name it before the done chunk.
  */
 
 import type {
@@ -19,6 +20,7 @@ import type {
   ChatOptions,
   ProviderClient,
   ToolCall,
+  ToolCallProgress,
 } from '../api/providers/types'
 
 export interface StreamedProviderTurn {
@@ -48,6 +50,7 @@ export async function streamProviderTurn(
   options: ChatOptions,
   onContent?: (full: string, delta: string) => void,
   onThinking?: (full: string, delta: string) => void,
+  onToolProgress?: (progress: ToolCallProgress) => void,
 ): Promise<StreamedProviderTurn> {
   let content = ''
   let thinking = ''
@@ -61,6 +64,7 @@ export async function streamProviderTurn(
       thinking += chunk.thinking
       onThinking?.(thinking, chunk.thinking)
     }
+    if (chunk.toolProgress) onToolProgress?.(chunk.toolProgress)
     if (chunk.done) {
       if (chunk.toolCalls?.length) turn.toolCalls = chunk.toolCalls
       turn.promptEvalCount = chunk.promptEvalCount
