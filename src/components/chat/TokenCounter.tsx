@@ -60,16 +60,19 @@ export function TokenCounter() {
   const rawUsed = fill.used
 
   if (!activeConversationId || messages.length === 0) return null
+  // No window known yet (the very first probe of this model in this session):
+  // no number rather than a made-up one. A 16384 stand-in read as a real "16K"
+  // (Gegenprobe 01.10.2026).
+  if (ctx.sendWindow <= 0 && ctx.contextWindow <= 0) return null
 
-  // Resolved real context window; fall back to the VRAM-safe default only while
-  // the provider probe is still in flight (ctx not resolved yet). On a paid
-  // provider the denominator is the SEND window, not the model window: a
+  // The resolved real context window (known here, see the return above). On a
+  // paid provider the denominator is the SEND window, not the model window: a
   // 262k-context model whose steps are capped at 64k would otherwise sit quiet
   // at 25 percent forever, the red warning would never fire, and every support
   // case would arrive with a healthy meter next to a drained wallet (plan A2,
   // meter honesty).
   const window = ctx.sendWindow > 0 ? ctx.sendWindow : ctx.contextWindow
-  const maxTokens = window > 0 ? window : 16384
+  const maxTokens = window
   // Cap the numerator at the active window: a long chat carried onto a
   // smaller-context model shows "8.0k/8.0k" (full), not "20k/8k".
   const usedTokens = Math.min(rawUsed, maxTokens)
@@ -134,12 +137,9 @@ export function TokenCounter() {
         window: maxTokens,
         source: fill.source,
         real: fill.real,
-        // `maxTokens > 0` war immer wahr — auch fuer den 16384er-Notnagel
-        // weiter oben, den es nur gibt, solange die Anbieter-Abfrage laeuft.
-        // Der Zaehler behauptete damit sekundenlang ein bekanntes Fenster:
-        // 14k belegt auf einem 128k-Modell las sich als "triggers on the next
-        // message", bis die Antwort kam. `window` ist die Zahl VOR dem
-        // Notnagel und damit die ehrliche Auskunft.
+        // Ein unbekanntes Fenster kommt hier nicht mehr an (frueher stand
+        // dafuer ein 16384er-Notnagel, und 14k auf einem 128k-Modell las sich
+        // sekundenlang als "triggers on the next message").
         windowIsTrue: window > 0,
         messageCount: sichtbareAnzahl,
         threshold: autoSchwelle,

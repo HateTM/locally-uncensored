@@ -107,6 +107,16 @@ export function remoteWindowSource(
   return providerId === 'lu-cloud' && max > 0 ? 'probe' : 'guess'
 }
 
+/**
+ * The last window each model resolved to, for the whole app session. The
+ * counter mounts with a conversation's first message, and a fresh mount used
+ * to start unresolved: for the length of the provider probe it divided by a
+ * stand-in and read "18/16K", then "30/32K" (Gegenprobe 01.10.2026). A mount
+ * now starts from what this model last resolved to and the probe refreshes
+ * it, so the number only changes when the window really did.
+ */
+const lastResolved = new Map<string, ActiveContext>()
+
 export function useActiveContextWindow(reloadTick = 0): ActiveContext {
   const activeModel = useModelStore((s) => s.activeModel)
   const override = useSettingsStore((s) => s.settings.contextWindowOverride)
@@ -122,7 +132,10 @@ export function useActiveContextWindow(reloadTick = 0): ActiveContext {
   // about the counter never lying, and "62k of 262k" under a model that has
   // 8k is exactly the lie. Unresolved reads as unknown, which is the state
   // every consumer already handles on mount.
-  const [resolved, setResolved] = useState<{ model: string; ctx: ActiveContext } | null>(null)
+  const [resolved, setResolved] = useState<{ model: string; ctx: ActiveContext } | null>(() => {
+    const known = activeModel ? lastResolved.get(activeModel) : undefined
+    return activeModel && known ? { model: activeModel, ctx: known } : null
+  })
 
   // Re-read whenever a model reload finishes anywhere (the Context dropdown
   // fires this), so every consumer — counter AND dropdown — reflects the new
@@ -138,7 +151,10 @@ export function useActiveContextWindow(reloadTick = 0): ActiveContext {
     if (!activeModel) return
     let cancelled = false
     const providerId = getProviderIdFromModel(activeModel)
-    const setState = (ctx: ActiveContext) => setResolved({ model: activeModel, ctx })
+    const setState = (ctx: ActiveContext) => {
+      lastResolved.set(activeModel, ctx)
+      setResolved({ model: activeModel, ctx })
+    }
 
     ;(async () => {
       // ── Ollama: num_ctx is per-request, so what we send == what runs. ──
