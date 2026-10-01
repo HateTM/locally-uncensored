@@ -62,6 +62,14 @@ describe('what the model is told', () => {
     expect(explainError(tool, NOT_A_ROOT)).toMatch(/working folder/)
   })
 
+  it('a NEW file outside the folder: write it inside instead of asking for a path (3.0.4 box run)', () => {
+    expect(explainError('file_write', ESCAPE)).toMatch(/Write the file inside it instead/)
+    // NEGATIVE CONTROL: a refused working folder is not fixed by writing inside it,
+    // and a read of a file that lives elsewhere still needs the user's folder.
+    expect(explainError('file_write', NOT_A_ROOT)).not.toMatch(/Write the file inside it instead/)
+    expect(explainError('file_read', ESCAPE)).not.toMatch(/Write the file inside it instead/)
+  })
+
   it('never sends the model to the user home, which the jail refuses', () => {
     for (const tool of ['file_read', 'file_list']) {
       expect(explainError(tool, 'EACCES: permission denied')).not.toMatch(/home/i)

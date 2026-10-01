@@ -37,4 +37,4 @@ export function hasUnrecoveredOutsideRefusal(
 
 /** The line above the chat, in the words of the buttons the user sees. */
 export const OUTSIDE_WORKSPACE_NOTICE =
-  'The agent can only open files in this chat\'s folder. To let it use yours, click the Sandbox or folder button next to Agent, choose "Pick a folder…" and select the folder that holds them, then ask again.'
+  'The agent can only work with files in this chat\'s folder. To let it use another place, click the Sandbox or folder button next to Agent, choose "Pick a folder…" and select that folder, then ask again.'

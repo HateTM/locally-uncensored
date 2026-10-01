@@ -32,6 +32,16 @@ const OUTSIDE_WORKSPACE_HINT: HintRule = {
   hint: 'Outside this chat\'s working folder. Ask the user to choose the folder that holds it as the working folder, then try again.',
 }
 
+/**
+ * A NEW file has no reason to live outside the folder. Asked to write
+ * C:\Users\Public\Desktop\poem.txt, Mistral asked the user for another path
+ * and wrote nothing (3.0.4 box run). The customer wanted the poem.
+ */
+const OUTSIDE_WORKSPACE_WRITE_HINT: HintRule = {
+  pattern: /escapes the allowed workspace/i,
+  hint: 'Outside this chat\'s working folder. Write the file inside it instead, same name as a relative path (e.g. poem.txt), and tell the user.',
+}
+
 /** Shared across any tool — checked last as a catch-all. */
 const GENERIC_HINTS: HintRule[] = [
   { pattern: /ECONNREFUSED|fetch failed|network/i, hint: 'Network unreachable. Check connectivity or retry once.' },
@@ -49,6 +59,7 @@ const TOOL_HINTS: Record<string, HintRule[]> = {
     { pattern: /file too large|large file/i, hint: 'File too large to read whole. Use file_search for targeted grep instead.' },
   ],
   file_write: [
+    OUTSIDE_WORKSPACE_WRITE_HINT,
     OUTSIDE_WORKSPACE_HINT,
     { pattern: /EACCES|EPERM|permission denied|access is denied/i, hint: 'Permission denied. Pick a writable directory, e.g. the agent workspace.' },
     { pattern: /ENOSPC|no space left/i, hint: 'Disk full. Cannot write. Surface this to the user and stop.' },
