@@ -54,8 +54,9 @@ cloud catalogue.
   backtick or asterisks, the context counter shows the right size from the
   first message, and the mode menu in the Code tab is no longer cut off. No
   approval card appears for a file outside the agent's folder, which it could
-  never open anyway, and the agent tries again inside the folder. A new Code
-  session lists its still empty folder as empty instead of reporting an error,
+  never open anyway. Asked to write a new file somewhere outside, the agent
+  writes it inside its folder and tells you. A new Code session lists its
+  still empty folder as empty instead of reporting an error,
   a failed step shows its error once, and pressing New again on an untouched
   Code session adds no extra empty entry. The hint about the agent's folder
   stays with the chat it belongs to, and asking the chat to put a file name in
