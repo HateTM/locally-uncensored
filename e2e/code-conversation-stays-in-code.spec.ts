@@ -112,3 +112,24 @@ test('the Chat button goes back to the chat, and so does the start after a Code 
   await expect(page.getByText(CHAT_MARKE)).toBeVisible()
   await expect(page.getByTestId('codex-transcript')).toHaveCount(0)
 })
+
+test('New on an untouched Code session adds no second empty entry', async ({ page }) => {
+  // 3.0.4 box run: every click on New added another empty "Coding Agent".
+  await bootCode(page)
+  const codeConvs = () => page.evaluate(async () => {
+    const chatPath = '/src/stores/chatStore.ts'
+    const chat = await import(/* @vite-ignore */ chatPath) as typeof import('../src/stores/chatStore')
+    return chat.useChatStore.getState().conversations.filter((c) => c.mode === 'codex').length
+  })
+  const newButton = page.getByRole('button', { name: 'New', exact: true })
+  await newButton.click()
+  const before = await codeConvs()
+  await newButton.click()
+  await newButton.click()
+  expect(await codeConvs()).toBe(before)
+
+  // NEGATIVE CONTROL: once the session has a message, New starts a fresh one.
+  await codeVerlauf(page)
+  await newButton.click()
+  expect(await codeConvs()).toBe(before + 1)
+})

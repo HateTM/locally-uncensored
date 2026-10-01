@@ -198,6 +198,12 @@ export function CodexView() {
   const startNewSession = () => {
     stopCodex()
     if (!activeModel) return
+    // An untouched session IS a new session. Each click used to add another
+    // empty "Coding Agent" to the list (3.0.4 box run: two clicks, two rows).
+    const { conversations: convs, activeConversationId: current } = useChatStore.getState()
+    const open = convs.find((c) => c.id === current)
+    if (open?.mode === 'codex' && open.messages.length === 0
+      && !(useCodexStore.getState().threads[open.id]?.events.length)) return
     const convId = createConversation(activeModel, '', 'codex')
     // "New" keeps the Ask/Bypass the user last picked (Gegenprobe 01.10.2026).
     useCodexStore.getState().startConversationMode(convId)
