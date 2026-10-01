@@ -176,7 +176,11 @@ export const RELEASE_NOTES: ReleaseNote[] = [
       },
       {
         title: 'Code conversations stay in the Code tab.',
-        detail: 'After a restart the last Code conversation opened in the Chat tab, where the agent was off and a "continue" ran without tools. The app now starts on an empty chat, and the Code button takes you back to the Code conversation you worked on last, also while a run is going.',
+        detail: 'After a restart the last Code conversation opened in the Chat tab, where the agent was off and a "continue" ran without tools. The app now opens the chat you worked on last, and the Chat and Code buttons each take you back to the conversation you worked on last there, also while a run is going.',
+      },
+      {
+        title: 'Fewer interruptions while the agent works.',
+        detail: 'New in the Code tab keeps Ask or Bypass, whichever you picked last. In the agent chat, reading, listing and searching files in the agent\'s own folder no longer asks for approval; writing still does. When the agent fixes a failed step on its own, the steps no longer show a red mark and no line asks you to try again. After you say No to a tool, the model is told its other tools are still there, so it carries on instead of saying it has none. The clock next to "Waiting for your approval" counts the wait, and a tool\'s time no longer includes the time the card waited for you. No "Thinking" label shows while a model that does not think is working, an answer that is still arriving shows no stray backtick or asterisks, the context counter shows the right size from the first message, and the mode menu in the Code tab is no longer cut off.',
       },
     ],
   },
