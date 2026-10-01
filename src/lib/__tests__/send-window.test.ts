@@ -125,7 +125,11 @@ describe('A2: the counter divides by the send window', () => {
     expect(src).toMatch(
       /const window = ctx\.sendWindow > 0 \? ctx\.sendWindow : ctx\.contextWindow/,
     )
-    expect(src).toMatch(/const maxTokens = window > 0 \? window : 16384/)
+    expect(src).toMatch(/const maxTokens = window\n/)
+    // No stand-in denominator any more: an unknown window shows no counter
+    // (Gegenprobe 01.10.2026, "18/16K" then "30/32K").
+    expect(src).not.toMatch(/: 16384/)
+    expect(src).toMatch(/if \(ctx\.sendWindow <= 0 && ctx\.contextWindow <= 0\) return null/)
   })
 
   it('feeds the built-request size in as the numerator', () => {
