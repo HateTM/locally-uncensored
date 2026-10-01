@@ -41,6 +41,8 @@ export interface ComponentRequirements {
   clip?: ComponentSpec
   /** A second required text encoder (FLUX v1's clip_l alongside its T5). */
   clipSecondary?: ComponentSpec
+  /** A separate sound autoencoder (MiniMax H3 decodes its audio with it). */
+  audioVae?: ComponentSpec
   /** The CLIPLoader `type` widget value for this architecture, when the
    *  loader is CLIPLoader (single encoder). */
   clipType?: string
@@ -121,6 +123,7 @@ export const COMPONENT_REGISTRY: Record<string, ComponentRequirements> = {
     loader: 'UNETLoader', needsSeparateVAE: true, needsSeparateCLIP: true, clipType: 'minimax',
     vae: { matchPatterns: ['minimax_h3_video_vae', 'minimax'], downloadFilename: 'minimax_h3_video_vae_int8_convrot.safetensors', downloadUrl: 'https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/vae/minimax_h3_video_vae_int8_convrot.safetensors', subfolder: 'vae', sizeGB: 2.8 },
     clip: { matchPatterns: ['minimax_h3_nvfp4', 'minimax'], downloadFilename: 'qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors', downloadUrl: 'https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors', subfolder: 'text_encoders', sizeGB: 15.7 },
+    audioVae: { matchPatterns: ['minimax_h3_audio_vae'], downloadFilename: 'minimax_h3_audio_vae_fp32.safetensors', downloadUrl: 'https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/vae/minimax_h3_audio_vae_fp32.safetensors', subfolder: 'vae', sizeGB: 0.6 },
   },
   mochi: {
     loader: 'UNETLoader', needsSeparateVAE: true, needsSeparateCLIP: true, clipType: 'mochi',

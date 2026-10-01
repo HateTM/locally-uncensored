@@ -17,6 +17,7 @@ import { isRecord, asString, asRecordArray } from '../types/json-guards'
 // Bundle-Daten gehören weder hierher noch nach discover.ts — sie liegen
 // jetzt in model-bundles.ts, das beide Seiten statisch lesen.
 import { getImageBundles, getVideoBundles } from './model-bundles'
+import { COMPONENT_REGISTRY, type ComponentSpec } from './component-registry'
 
 // ─── Control-plane fetch timeouts ───
 //
@@ -1554,9 +1555,17 @@ function isMinimaxEncoder(name: string): boolean {
   return name.toLowerCase().includes('minimax')
 }
 
+/** An empty ComfyUI list still names the file this family needs, so Create
+ *  can offer it as a download instead of "a VAE for your model type". */
+function nothingInstalled(kind: 'VAE' | 'text encoder', specs: (ComponentSpec | undefined)[]): Error {
+  const files = specs.filter((x): x is ComponentSpec => !!x).map((x) => `"${x.downloadFilename}"`)
+  if (files.length === 0) return new Error(`No ${kind} models found. Download a ${kind} for your model type from the Model Manager.`)
+  return new Error(`No ${kind} models found. Download ${files.join(' and ')} from the Model Manager.`)
+}
+
 export async function findMatchingVAE(modelType: ModelType): Promise<string> {
   const vaes = await getVAEModels()
-  if (vaes.length === 0) throw new Error('No VAE models found. Download a VAE for your model type from the Model Manager.')
+  if (vaes.length === 0) throw nothingInstalled('VAE', [COMPONENT_REGISTRY[modelType]?.vae])
   const lower = (s: string) => s.toLowerCase()
 
   if (modelType === 'zimage') {
@@ -1693,7 +1702,7 @@ export async function findMatchingVAE(modelType: ModelType): Promise<string> {
  */
 export async function findFluxCLIPPair(): Promise<{ t5: string; clipL: string }> {
   const clips = await getCLIPModels()
-  if (clips.length === 0) throw new Error('No text encoder models found. Download a CLIP/T5 model for your model type from the Model Manager.')
+  if (clips.length === 0) throw nothingInstalled('text encoder', [COMPONENT_REGISTRY.flux?.clip, COMPONENT_REGISTRY.flux?.clipSecondary])
   const lower = (s: string) => s.toLowerCase()
   const t5 = clips.find(c => lower(c).includes('t5') && !lower(c).includes('umt5') && !lower(c).includes('oldt5'))
   const clipL = clips.find(c => lower(c).includes('clip_l'))
@@ -1713,7 +1722,7 @@ export async function findFluxCLIPPair(): Promise<{ t5: string; clipL: string }>
  */
 export async function findFramePackCLIPPair(): Promise<{ clipL: string; llavaLlama3: string }> {
   const clips = await getCLIPModels()
-  if (clips.length === 0) throw new Error('No text encoder models found. Download a CLIP/T5 model for your model type from the Model Manager.')
+  if (clips.length === 0) throw nothingInstalled('text encoder', [COMPONENT_REGISTRY.framepack?.clip, COMPONENT_REGISTRY.framepack?.clipSecondary])
   const lower = (s: string) => s.toLowerCase()
   const clipL = clips.find(c => lower(c).includes('clip_l'))
   const llavaLlama3 = clips.find(c => lower(c).includes('llava'))
@@ -1745,7 +1754,7 @@ export async function findMiniMaxAudioVAE(): Promise<string> {
  */
 export async function findMatchingCLIP(modelType: ModelType, activeModelName?: string): Promise<string> {
   const clips = await getCLIPModels()
-  if (clips.length === 0) throw new Error('No text encoder models found. Download a CLIP/T5 model for your model type from the Model Manager.')
+  if (clips.length === 0) throw nothingInstalled('text encoder', [COMPONENT_REGISTRY[modelType]?.clip])
   const lower = (s: string) => s.toLowerCase()
   const modelLc = activeModelName ? lower(activeModelName) : ''
   const modelIsFp4 = /fp4|nf4/.test(modelLc)
@@ -2392,6 +2401,15 @@ export async function buildFluxImgWorkflow(params: GenerateParams): Promise<Comf
 }
 
 // ─── Auto-select Image Workflow ───
+
+/** The fixed graphs below know four image families and two video ones. Any
+ *  other family handed to them becomes a checkpoint or Wan 2.1 graph that
+ *  ComfyUI refuses with "Value not in list" (Discord 2026-10-01, Qwen-Image
+ *  2.1 and MiniMax H3), so the caller keeps the builder's own error instead. */
+export function legacyBuilderFits(modelType: ModelType, video: boolean): boolean {
+  if (video) return modelType === 'wan' || modelType === 'animatediff' || modelType === 'sd15'
+  return modelType === 'sd15' || modelType === 'sdxl' || modelType === 'flux' || modelType === 'flux2' || modelType === 'unknown'
+}
 
 export async function buildTxt2ImgWorkflow(params: GenerateParams, modelType: ModelType): Promise<ComfyApiGraph> {
   if (modelType === 'flux' || modelType === 'flux2') return buildFluxImgWorkflow(params)

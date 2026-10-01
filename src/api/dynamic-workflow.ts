@@ -405,7 +405,7 @@ const LUMINA2_NEGATIVE_SYSTEM = 'You are an assistant designed to generate low-q
 function registrySpecsNamedIn(type: ModelType, message: string): ComponentSpec[] {
   const req = COMPONENT_REGISTRY[type]
   if (!req) return []
-  return [req.vae, req.clip, req.clipSecondary].filter(
+  return [req.vae, req.clip, req.clipSecondary, req.audioVae].filter(
     (s): s is ComponentSpec => !!s?.downloadUrl && message.includes(s.downloadFilename),
   )
 }
@@ -635,17 +635,29 @@ export async function buildDynamicWorkflow(
 
   // ─── Wrapper Strategies (custom node pipelines — completely different node chains) ───
 
+  // A wrapper builder looks up its own encoder and VAEs. A file it cannot
+  // find has to reach Create as that sentence plus its download, never as a
+  // reason to try the old checkpoint graph (Discord 2026-09-29 and 10-01:
+  // "CheckpointLoaderSimple: Value not in list" for MiniMax H3).
+  const wrapper = async (build: () => Promise<ComfyApiGraph> | ComfyApiGraph) => {
+    try {
+      return await build()
+    } catch (err) {
+      if (!(err instanceof Error) || err instanceof WorkflowUnavailableError) throw err
+      throw new WorkflowUnavailableError(err.message, strategy, undefined, { missing: registrySpecsNamedIn(type, err.message) })
+    }
+  }
   if (strategy === 'svd') {
-    return buildSVDWorkflow(params as VideoParams, seed, nodes)
+    return wrapper(() => buildSVDWorkflow(params as VideoParams, seed, nodes))
   }
   if (strategy === 'wan22') {
-    return await buildWan22Workflow(params as VideoParams, seed, nodes, allNodes)
+    return wrapper(() => buildWan22Workflow(params as VideoParams, seed, nodes, allNodes))
   }
   if (strategy === 'framepack') {
-    return await buildFramePackWorkflow(params as VideoParams, seed, nodes)
+    return wrapper(() => buildFramePackWorkflow(params as VideoParams, seed, nodes))
   }
   if (strategy === 'minimaxh3') {
-    return await buildMiniMaxH3Workflow(params as VideoParams, seed, allNodes)
+    return wrapper(() => buildMiniMaxH3Workflow(params as VideoParams, seed, allNodes))
   }
 
   // ─── Standard Strategies (UNET/Checkpoint → CLIP → Latent → KSampler → VAEDecode) ───

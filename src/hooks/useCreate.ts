@@ -19,6 +19,7 @@ import {
   isPromptQueued,
   buildTxt2ImgWorkflow,
   buildTxt2VidWorkflow,
+  legacyBuilderFits,
   canRunVideoIntent,
   classifyModel,
   isI2VModel,
@@ -1081,6 +1082,7 @@ export function useCreate() {
           if (dynErr instanceof Error && dynErr.name === 'WorkflowUnavailableError') {
             throw dynErr
           }
+          if (!legacyBuilderFits(imageModelType, mode === 'video')) throw dynErr
           // Fallback to legacy builders if dynamic fails
           console.warn('[useCreate] Dynamic builder failed, using legacy:', dynErr)
           builderUsed = 'legacy'
