@@ -3,6 +3,7 @@ import { motion } from 'framer-motion'
 import { User, Copy, Check, Pencil, RefreshCw, X, Wrench, Trash2, Scissors, Unlink } from 'lucide-react'
 import { useState, useRef, useEffect, useMemo, memo } from 'react'
 import { MarkdownRenderer } from './MarkdownRenderer'
+import { closeOpenMarkdown } from '../../lib/streaming-markdown'
 import { ThinkingBlock } from './ThinkingBlock'
 import { ToolCallBand } from './ToolCallBand'
 import { ReflectionBlock } from './ReflectionBlock'
@@ -391,7 +392,7 @@ function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, o
                   return (
                     <div key={block.id} className="px-1 py-0.5">
                       <div className={'text-[0.8rem] leading-relaxed' + (isStreaming && istSchluss ? ' lu-caret' : '')}>
-                        <MarkdownRenderer content={clean} />
+                        <MarkdownRenderer content={isStreaming && istSchluss ? closeOpenMarkdown(clean) : clean} />
                       </div>
                     </div>
                   )
@@ -471,7 +472,9 @@ function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, o
                 // kein Zustand, kein Timer, keine Subscription, also auch
                 // kein Rerender, den der Stream nicht ohnehin ausloest.
                 <div className={'text-[0.78rem] leading-relaxed' + (isStreaming ? ' lu-caret' : '')}>
-                  <MarkdownRenderer content={cleanContent} />
+                  {/* While it streams, an open ` or ** is closed for the frame
+                      (lib/streaming-markdown.ts); the stored text is untouched. */}
+                  <MarkdownRenderer content={isStreaming ? closeOpenMarkdown(cleanContent) : cleanContent} />
                   {/* Cut-off marker: a turn the model did not finish on its own
                       terms (length budget / dropped connection). The benchmark
                       screen has always flagged cut-offs; the chat did not, so a

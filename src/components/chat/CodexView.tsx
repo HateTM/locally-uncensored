@@ -10,6 +10,7 @@ import { ToolCallBand } from './ToolCallBand'
 import { groupAgentBlocks } from '../../lib/tool-call-groups'
 import { ThinkingBlock } from './ThinkingBlock'
 import { MarkdownRenderer } from './MarkdownRenderer'
+import { closeOpenMarkdown } from '../../lib/streaming-markdown'
 import { TokenCounter } from './TokenCounter'
 import { ContextDropdown } from './ContextDropdown'
 import { SmallModelModeToggle } from './SmallModelModeToggle'
@@ -445,6 +446,9 @@ export function CodexView() {
                       )}
                       {(() => {
                         const running = codexGenerating && msg.id === messages[messages.length - 1]?.id
+                        // While this message streams, an open ` or ** is closed
+                        // for the frame (lib/streaming-markdown.ts).
+                        const shown = (text: string) => (running ? closeOpenMarkdown(text) : text)
                         const hasBlocks = !!(msg.role === 'assistant' && msg.agentBlocks && msg.agentBlocks.length > 0)
                         const stepCount = msg.agentBlocks?.filter((b) => b.phase === 'tool_call' && b.toolCall).length ?? 0
                         const hasAnswerBlock = !!(msg.agentBlocks && msg.agentBlocks.some((b) => b.phase === 'answer' && b.content.trim()))
@@ -541,7 +545,7 @@ export function CodexView() {
                                         return (
                                           <div key={block.id} className="px-1 py-0.5">
                                             <div className="text-[12px] leading-relaxed">
-                                              <MarkdownRenderer content={answer} />
+                                              <MarkdownRenderer content={shown(answer)} />
                                             </div>
                                           </div>
                                         )
@@ -576,7 +580,7 @@ export function CodexView() {
                               {msg.role === 'user' ? (
                                 <p className="text-gray-800 dark:text-gray-200 whitespace-pre-wrap">{cleanContent}</p>
                               ) : (
-                                <MarkdownRenderer content={cleanContent} />
+                                <MarkdownRenderer content={shown(cleanContent)} />
                               )}
                             </div>
                           </div>
@@ -641,7 +645,7 @@ export function CodexView() {
                               {finalAnswerText && (
                                 <div className="px-1 py-0.5">
                                   <div className="text-[12px] leading-relaxed">
-                                    <MarkdownRenderer content={finalAnswerText} />
+                                    <MarkdownRenderer content={shown(finalAnswerText)} />
                                   </div>
                                 </div>
                               )}
