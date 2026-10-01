@@ -146,6 +146,10 @@ cloud catalogue. It also fixes the bugs reported on GitHub and Discord since
 
 ### Changed
 
+- **The setup offers models without refusals.** The two chat models the
+  first start suggests are now the abliterated builds of Qwen 2.5 7B and
+  Qwen 3.5 9B, same size and speed as before. The 9B refused some requests
+  (Discord).
 - **A character trained on your own machine takes up to 100 photos.** The limit
   was 30 everywhere. Cloud training keeps 30 and says how many photos to
   remove (issue 121).

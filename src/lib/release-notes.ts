@@ -147,6 +147,10 @@ export const RELEASE_NOTES: ReleaseNote[] = [
         detail: 'A MiniMax H3 file showed up as an image model. It now sits in the video list, also under a CivitAI name, and renders picture and sound together, from a prompt or from a first frame. The Model Manager offers it as one download.',
       },
       {
+        title: 'The setup offers models without refusals.',
+        detail: 'The two chat models the first start suggests are now the abliterated builds of Qwen 2.5 7B and Qwen 3.5 9B, same size and speed as before. The 9B refused some requests.',
+      },
+      {
         title: 'A download speed limit, and usage numbers for the Local API.',
         detail: 'Settings, Model Storage takes a limit in MB/s for the model files LU downloads, shared by all downloads at once. While the Local API runs, its panel shows requests, failures, tokens in and out as the model server reports them, and the last model.',
       },
