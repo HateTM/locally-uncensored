@@ -125,6 +125,17 @@ const FILE_NOUN_RE = /\b(a\s+|an\s+|the\s+|eine?\s+|die\s+)?(file|files|datei(en
 const FILENAME_RE = /\b[\w.-]+\.(txt|md|markdown|html?|css|js|ts|json|csv|xml|yaml|yml|py|sh|rs|toml|ini|log|svg|sql)\b/i
 const SAVE_TO_FILE_RE = /\b(save|write|export|dump|speicher\w*|schreib\w*)\b[^.?!]*\b(to|into|as|in)\b[^.?!]*\b(file|datei|disk|\.\w{1,5})\b/i
 
+// A file name the user only MENTIONS as text is not a file to write. The 3.0.4
+// box run sent "Write two short sentences. Put the file name `notes.md` in
+// backticks and the word **important** in bold." with Agent off and got a
+// file_write approval card. Two shapes are text, not targets: "the file name
+// X" / "der Dateiname X", and "X in backticks / in bold / as code".
+const NAMED_AS_TEXT_RE = /\b(the\s+|der\s+|den\s+)?(file\s*name|dateiname[n]?)\s+[`'"]?[\w.-]+[`'"]?/gi
+const FORMATTED_AS_TEXT_RE = /[`'"]?[\w.-]+\.\w{1,8}[`'"]?\s+(in|as|als)\s+(backticks?|bold|italics?|quotes|(inline\s+)?code|fett|kursiv)\b/gi
+function withoutMentionedNames(t: string): string {
+  return t.replace(NAMED_AS_TEXT_RE, ' ').replace(FORMATTED_AS_TEXT_RE, ' ')
+}
+
 /**
  * Returns the capability a plain-chat message is asking for, or null if the
  * message is ordinary conversation that should stay on the plain path.
@@ -147,9 +158,10 @@ export function detectChatToolCapability(text: string, hasImages = false): ChatT
   if (INHERENT_IMAGE_VERB_RE.test(t)) return 'image'
 
   // FILE WRITE
-  if (FILENAME_RE.test(t) && FILE_VERB_RE.test(t)) return 'file'
-  if (SAVE_TO_FILE_RE.test(t)) return 'file'
-  if (FILE_VERB_RE.test(t) && FILE_NOUN_RE.test(t)) return 'file'
+  const f = withoutMentionedNames(t)
+  if (FILENAME_RE.test(f) && FILE_VERB_RE.test(f)) return 'file'
+  if (SAVE_TO_FILE_RE.test(f)) return 'file'
+  if (FILE_VERB_RE.test(f) && FILE_NOUN_RE.test(f)) return 'file'
 
   // WEB FETCH (explicit page/url) — before generic search so a URL routes to
   // fetch, not search.
