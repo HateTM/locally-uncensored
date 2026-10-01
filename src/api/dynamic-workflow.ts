@@ -1,5 +1,5 @@
 import {
-  classifyModel, findMatchingVAE, findMatchingCLIP, findFluxCLIPPair,
+  classifyModel, findMatchingVAE, findMatchingCLIP, findFluxCLIPPair, findMiniMaxAudioVAE,
   findMatchingAudioEncoder, findMatchingClipVision, findFramePackCLIPPair,
 } from './comfyui'
 import type { ModelType, GenerateParams, VideoParams } from './comfyui'
@@ -84,6 +84,7 @@ export type WorkflowStrategy =
   | 'unet_cosmos'     // Cosmos: UNETLoader + CLIPLoader(oldt5) + VAELoader + EmptyCosmosLatentVideo
   | 'svd'             // SVD: ImageOnlyCheckpointLoader + SVD_img2vid_Conditioning
   | 'framepack'       // FramePack: Kijai wrapper + image input
+  | 'minimaxh3'       // MiniMax H3: UNET + CLIPLoader(minimax) + video VAE + audio VAE, picture and sound in one pass
   // cogvideo / pyramidflow / allegro are gone on purpose (2026-07-24). Their
   // builders emitted node names no wrapper registers, so those model types now
   // resolve to 'unavailable' with an honest reason instead of a ComfyUI 400.
@@ -196,6 +197,17 @@ export function determineStrategy(
       return { strategy: 'unet_ltx', reason: 'LTX Video → UNETLoader + EmptyLTXVLatentVideo' }
     }
     return { strategy: 'unavailable', reason: 'LTX Video requires UNETLoader + CLIPLoader nodes' }
+  }
+
+  // MiniMax H3 → its own encode node, which also builds the joint
+  // picture-and-sound latent. The nodes arrived with ComfyUI PR #15224, so an
+  // older install gets the update sentence (fixable in place) instead of a 400.
+  if (modelType === 'minimaxh3') {
+    const hasH3 = nodes.latentInit.includes('MiniMaxH3ImageToVideo')
+    if (hasUNET && hasCLIPLoader && hasVAELoader && hasH3) {
+      return { strategy: 'minimaxh3', reason: 'MiniMax H3 → UNETLoader + CLIPLoader(minimax) + MiniMaxH3ImageToVideo' }
+    }
+    return { strategy: 'unavailable', reason: 'MiniMax H3 needs a newer ComfyUI. Update ComfyUI in Settings.' }
   }
 
   // Wan 2.2 TI2V-5B → UNET + CLIP + Wan 2.2 VAE + Wan22ImageToVideoLatent (T2V & I2V)
@@ -631,6 +643,9 @@ export async function buildDynamicWorkflow(
   }
   if (strategy === 'framepack') {
     return await buildFramePackWorkflow(params as VideoParams, seed, nodes)
+  }
+  if (strategy === 'minimaxh3') {
+    return await buildMiniMaxH3Workflow(params as VideoParams, seed, allNodes)
   }
 
   // ─── Standard Strategies (UNET/Checkpoint → CLIP → Latent → KSampler → VAEDecode) ───
@@ -1761,6 +1776,106 @@ async function buildWan22Workflow(params: VideoParams, seed: number, nodes: Cate
   workflow[decodeId] = videoDecodeNode([samplerId, 0], [vaeId, 0], nodes.decoders.includes('VAEDecodeTiled'))
 
   addVideoOutput(workflow, n, decodeId, params.fps, nodes, params.prompt)
+  return workflow
+}
+
+/** MiniMax H3 counts frames in blocks of 17 plus 5 (124 is about five
+ *  seconds at 24 fps). Rounds UP, as the official template does, so a request
+ *  never comes back shorter than asked. */
+export function snapMiniMaxH3Length(frames: number): number {
+  const f = Math.max(5, Number.isFinite(frames) ? Math.round(frames) : 124)
+  return f + ((5 - (f % 17)) + 17) % 17
+}
+
+/**
+ * MiniMax H3 (Discord, throwaway 2026-09-26: "shows up as an image model").
+ * One model writes picture and sound together, wired as the official
+ * Comfy-Org t2v/i2v and r2v templates do: the encode node builds the joint
+ * latent, BasicGuider and SamplerCustomAdvanced sample it, and VAEDecode and
+ * VAEDecodeAudio each pull their half back out before CreateVideo muxes them.
+ *
+ * Two sets of weights share the family. fl2va takes the source image as the
+ * first frame; ref2va takes it as a reference the prompt can call
+ * <Picture 1>.
+ */
+async function buildMiniMaxH3Workflow(params: VideoParams, seed: number, allNodes: NodePresence): Promise<ComfyApiGraph> {
+  const isRef2va = /ref2va/i.test(params.model)
+  const encodeNode = isRef2va ? 'MiniMaxH3ReferenceToVideo' : 'MiniMaxH3ImageToVideo'
+  requireNodes(allNodes, [encodeNode, 'BasicGuider', 'SamplerCustomAdvanced', 'VAEDecodeAudio'], 'MiniMax H3')
+
+  const workflow: ComfyApiGraph = {}
+  let n = 1
+  const snap32 = (v: number | undefined, def: number) => Math.max(32, Math.round(((v && v > 0) ? v : def) / 32) * 32)
+  const width = snap32(params.width, 1344)
+  const height = snap32(params.height, 768)
+  const length = snapMiniMaxH3Length(params.frames || 124)
+
+  const [clipName, vaeName, audioVaeName] = await Promise.all([
+    findMatchingCLIP('minimaxh3', params.model),
+    findMatchingVAE('minimaxh3'),
+    findMiniMaxAudioVAE(),
+  ])
+
+  const unetId = String(n++)
+  const clipId = String(n++)
+  const vaeId = String(n++)
+  const audioVaeId = String(n++)
+  addUnetLoader(workflow, unetId, params.model, allNodes)
+  workflow[clipId] = { class_type: 'CLIPLoader', inputs: { clip_name: clipName, type: 'minimax', device: 'default' } }
+  workflow[vaeId] = { class_type: 'VAELoader', inputs: { vae_name: vaeName } }
+  workflow[audioVaeId] = { class_type: 'VAELoader', inputs: { vae_name: audioVaeName } }
+
+  // Video LoRAs (the turbo ones included) patch the model only.
+  let modelSrc = unetId
+  const loras = normalizeLoraList(params.lora)
+  const strengths = normalizeLoraStrengths(params.loraStrength, loras.length)
+  loras.forEach((loraName, i) => {
+    const loraId = String(n++)
+    workflow[loraId] = {
+      class_type: 'LoraLoaderModelOnly',
+      inputs: { lora_name: loraName, strength_model: strengths[i], model: [modelSrc, 0] },
+    }
+    modelSrc = loraId
+  })
+
+  const encodeInputs: ComfyNodeInputs = { clip: [clipId, 0], vae: [vaeId, 0], prompt: params.prompt, width, height, length }
+  if (params.inputImage) {
+    // The node stretches a first frame to the canvas; a center crop keeps
+    // the picture's proportions instead.
+    const imageId = String(n++)
+    const scaleId = String(n++)
+    workflow[imageId] = { class_type: 'LoadImage', inputs: { image: params.inputImage } }
+    workflow[scaleId] = { class_type: 'ImageScale', inputs: { image: [imageId, 0], upscale_method: 'lanczos', width, height, crop: 'center' } }
+    if (isRef2va) encodeInputs['ref_images.ref_image_0'] = [scaleId, 0]
+    else encodeInputs.first_frame = [scaleId, 0]
+  }
+  if (isRef2va) {
+    encodeInputs.audio_vae = [audioVaeId, 0]
+    encodeInputs.ref_image_size = 'match'
+  }
+  const encodeId = String(n++)
+  workflow[encodeId] = { class_type: encodeNode, inputs: encodeInputs }
+
+  const guiderId = String(n++)
+  const schedulerId = String(n++)
+  const samplerSelectId = String(n++)
+  const noiseId = String(n++)
+  const sampleId = String(n++)
+  workflow[guiderId] = { class_type: 'BasicGuider', inputs: { model: [modelSrc, 0], conditioning: [encodeId, 0] } }
+  workflow[schedulerId] = { class_type: 'BasicScheduler', inputs: { model: [modelSrc, 0], scheduler: params.scheduler || 'simple', steps: params.steps, denoise: 1 } }
+  workflow[samplerSelectId] = { class_type: 'KSamplerSelect', inputs: { sampler_name: params.sampler || 'res_multistep' } }
+  workflow[noiseId] = { class_type: 'RandomNoise', inputs: { noise_seed: seed } }
+  workflow[sampleId] = {
+    class_type: 'SamplerCustomAdvanced',
+    inputs: { noise: [noiseId, 0], guider: [guiderId, 0], sampler: [samplerSelectId, 0], sigmas: [schedulerId, 0], latent_image: [encodeId, 1] },
+  }
+
+  const decodeId = String(n++)
+  const decodeAudioId = String(n++)
+  workflow[decodeId] = { class_type: 'VAEDecode', inputs: { samples: [sampleId, 0], vae: [vaeId, 0] } }
+  workflow[decodeAudioId] = { class_type: 'VAEDecodeAudio', inputs: { samples: [sampleId, 0], vae: [audioVaeId, 0] } }
+
+  addVideoWithAudioOutput(workflow, n, decodeId, params.fps || 24, [decodeAudioId, 0], allNodes, params.prompt)
   return workflow
 }
 

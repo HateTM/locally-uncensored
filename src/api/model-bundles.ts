@@ -803,6 +803,50 @@ export function getVideoBundles(): ModelBundle[] {
         },
       ],
     },
+    // MiniMax H3 (Discord, throwaway 2026-09-26). The files and the int8
+    // tier are the official Comfy-Org templates' (video_minimax_h3_t2v/_i2v);
+    // sizes read from Hugging Face on 2026-10-01. The 21 GB model alone sets
+    // the VRAM line.
+    {
+      name: 'MiniMax H3 · Video with Sound',
+      description: 'Video with its own sound track, speech, effects and music in one pass. From a prompt alone or from a first frame. Up to about 15 seconds at 24 fps.',
+      tags: ['MiniMax H3', 'Audio', '768p'],
+      verified: true,
+      totalSizeGB: 40.1,
+      vramRequired: '24+ GB',
+      workflow: 'minimaxh3',
+      url: 'https://huggingface.co/Comfy-Org/MiniMax-H3',
+      files: [
+        {
+          name: 'MiniMax H3 fl2va (int8)',
+          description: 'Main model, text or first frame to video with sound.',
+          pulls: '', tags: ['Model', '21 GB'], updated: 'New',
+          downloadUrl: 'https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors',
+          filename: 'minimax_h3_fl2va_pruned_int8_convrot.safetensors', subfolder: 'diffusion_models', sizeGB: 21.0,
+        },
+        {
+          name: 'Qwen3-VL 32B Text Encoder (NVFP4)',
+          description: 'Required text encoder for MiniMax H3. Runs on any NVIDIA card, not only Blackwell.',
+          pulls: '', tags: ['Text Encoder', '15.7 GB'], updated: 'New',
+          downloadUrl: 'https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors',
+          filename: 'qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors', subfolder: 'text_encoders', sizeGB: 15.7,
+        },
+        {
+          name: 'MiniMax H3 Video VAE',
+          description: 'Required, decodes the picture.',
+          pulls: '', tags: ['VAE', '2.8 GB'], updated: 'New',
+          downloadUrl: 'https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/vae/minimax_h3_video_vae_int8_convrot.safetensors',
+          filename: 'minimax_h3_video_vae_int8_convrot.safetensors', subfolder: 'vae', sizeGB: 2.8,
+        },
+        {
+          name: 'MiniMax H3 Audio VAE',
+          description: 'Required, decodes the sound.',
+          pulls: '', tags: ['VAE', '605 MB'], updated: 'New',
+          downloadUrl: 'https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/vae/minimax_h3_audio_vae_fp32.safetensors',
+          filename: 'minimax_h3_audio_vae_fp32.safetensors', subfolder: 'vae', sizeGB: 0.6,
+        },
+      ],
+    },
     // ─── NEW VIDEO BUNDLES ───
     {
       name: 'AnimateDiff Lightning',

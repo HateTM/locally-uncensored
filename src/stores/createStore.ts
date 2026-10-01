@@ -152,6 +152,7 @@ export const MODEL_TYPE_DEFAULTS: Record<ModelType, {
   wan22:       { steps: 30, cfgScale: 5.0, sampler: 'euler',           scheduler: 'simple', width: 1024, height: 576, frames: 49, fps: 24 },
   hunyuan:     { steps: 30, cfgScale: 6.0, sampler: 'euler',           scheduler: 'normal', width: 848,  height: 480, frames: 45, fps: 15 },
   ltx:         { steps: 20, cfgScale: 1.0, sampler: 'euler',           scheduler: 'simple', width: 768,  height: 512, frames: 97, fps: 24 },
+  minimaxh3:   { steps: 20, cfgScale: 1.0, sampler: 'res_multistep',   scheduler: 'simple', width: 1344, height: 768, frames: 124, fps: 24 },
   mochi:       { steps: 40, cfgScale: 4.5, sampler: 'euler',           scheduler: 'normal', width: 848,  height: 480, frames: 49, fps: 24 },
   cosmos:      { steps: 30, cfgScale: 7.0, sampler: 'euler',           scheduler: 'normal', width: 1280, height: 704, frames: 57, fps: 24 },
   cogvideo:    { steps: 50, cfgScale: 6.0, sampler: 'euler',           scheduler: 'normal', width: 720,  height: 480, frames: 49, fps: 8  },

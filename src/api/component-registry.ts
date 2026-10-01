@@ -114,6 +114,14 @@ export const COMPONENT_REGISTRY: Record<string, ComponentRequirements> = {
     loader: 'UNETLoader', needsSeparateVAE: false, needsSeparateCLIP: true, clipType: 'ltxv',
     clip: { matchPatterns: ['gemma'], downloadFilename: 'gemma_3_12B_it_fp8_scaled.safetensors', downloadUrl: 'https://huggingface.co/Comfy-Org/ltx-2/resolve/main/split_files/text_encoders/gemma_3_12B_it_fp8_scaled.safetensors', subfolder: 'text_encoders' },
   },
+  // MiniMax H3 (Discord, throwaway 2026-09-26): one model for picture and sound. The
+  // video VAE comes from here, the audio VAE is a second file the builder
+  // finds through findMiniMaxAudioVAE.
+  minimaxh3: {
+    loader: 'UNETLoader', needsSeparateVAE: true, needsSeparateCLIP: true, clipType: 'minimax',
+    vae: { matchPatterns: ['minimax_h3_video_vae', 'minimax'], downloadFilename: 'minimax_h3_video_vae_int8_convrot.safetensors', downloadUrl: 'https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/vae/minimax_h3_video_vae_int8_convrot.safetensors', subfolder: 'vae', sizeGB: 2.8 },
+    clip: { matchPatterns: ['minimax_h3_nvfp4', 'minimax'], downloadFilename: 'qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors', downloadUrl: 'https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors', subfolder: 'text_encoders', sizeGB: 15.7 },
+  },
   mochi: {
     loader: 'UNETLoader', needsSeparateVAE: true, needsSeparateCLIP: true, clipType: 'mochi',
     vae: { matchPatterns: ['mochi'], downloadFilename: 'mochi_vae.safetensors', downloadUrl: 'https://huggingface.co/Comfy-Org/mochi_preview_repackaged/resolve/main/split_files/vae/mochi_vae.safetensors', subfolder: 'vae' },

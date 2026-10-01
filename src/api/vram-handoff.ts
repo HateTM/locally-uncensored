@@ -1364,9 +1364,11 @@ async function generateVideo(
     // opens on it). Handle it HERE, before the SVD/FramePack I2V branch — wan22 now
     // matches isI2VModel(), but that branch's 25-frame / 8-fps tuning would butcher
     // it (wan22 is 24 fps, up to ~7 s). buildDynamicWorkflow routes to buildWan22.
-    if (type === 'wan22') {
+    // MiniMax H3 takes the same road: its encode node has an optional first
+    // frame, so one graph serves both modes, at 24 fps and up to ~15 s.
+    if (type === 'wan22' || type === 'minimaxh3') {
       const { buildDynamicWorkflow } = await import('./dynamic-workflow')
-      const d = MODEL_TYPE_DEFAULTS.wan22
+      const d = MODEL_TYPE_DEFAULTS[type]
       const av = args as Record<string, unknown>
 
       // Optional source still (I2V). A wrong/hallucinated name falls back to the
@@ -1393,8 +1395,9 @@ async function generateVideo(
 
       const frameRej = videoFrameReject(model, args, caps)
       if (frameRej) return frameRej
-      // 24 fps native; up to ~7 s (169 frames). resolveClip honors `seconds`/`frames`.
-      const vMax = caps?.frameRange?.max ?? 169
+      // 24 fps native; Wan up to ~7 s (169 frames), MiniMax H3 up to ~15 s
+      // (362, the top of its trained range). resolveClip honors `seconds`/`frames`.
+      const vMax = caps?.frameRange?.max ?? (type === 'minimaxh3' ? 362 : 169)
       const { frames, fps } = resolveClip(args, { defFps: d.fps, defFrames: d.frames, maxFrames: vMax })
       const tun = resolveTunables(args, caps, { steps: d.steps, cfg: d.cfg, sampler: d.sampler, scheduler: d.scheduler })
       if (tun.reject) return `Cannot generate: ${tun.reject}`
@@ -1407,7 +1410,7 @@ async function generateVideo(
       const tunCfg = (avq.cfg ?? avq.cfg_scale ?? avq.cfgScale) !== undefined ? tun.cfg : d.cfg
 
       // I2V → resolution from the source aspect (faithful framing); T2V → model default.
-      const base = inputImage ? resolveI2VResolution('wan22', srcW, srcH) : { width: d.width, height: d.height }
+      const base = inputImage ? resolveI2VResolution(type, srcW, srcH) : { width: d.width, height: d.height }
       const snapped = snapToVideoGrid(clampInt(av.width, base.width, 64, 2048), clampInt(av.height, base.height, 64, 2048))
       const seed = (typeof av.seed === 'number' && Number.isFinite(av.seed)) ? Math.floor(av.seed) : -1
 
@@ -1430,7 +1433,7 @@ async function generateVideo(
         },
         type,
       )
-      log.info('vram_handoff.video.submit', { model, mode: inputImage ? 'i2v' : 't2v', wan22: true, steps: tunSteps, cfg: tunCfg })
+      log.info('vram_handoff.video.submit', { model, mode: inputImage ? 'i2v' : 't2v', family: type, steps: tunSteps, cfg: tunCfg })
       const submitted = await submitCancellable(workflow, seq)
       if (submitted === CANCELLED) return `${label('video')} generation cancelled.`
       const promptId = submitted
@@ -2039,12 +2042,27 @@ export function resolveI2VResolution(
 ): { width: number; height: number } {
   const landscapeDefault = { width: 1024, height: 576 }
   if (!srcW || !srcH || srcW <= 0 || srcH <= 0) {
+    if (type === 'minimaxh3') return { width: 1344, height: 768 }
     return (type === 'svd' || type === 'wan22') ? landscapeDefault : { width: 768, height: 768 }
   }
   const aspect = srcW / srcH
   if (type === 'svd') {
     // Square is closer to landscape than portrait; center-crop handles the rest.
     return aspect >= 0.95 ? { width: 1024, height: 576 } : { width: 576, height: 1024 }
+  }
+  if (type === 'minimaxh3') {
+    // The official templates' canvas: a 768 short edge, capped at 1344x768
+    // worth of pixels, snapped to 32. Keeps the source aspect.
+    const MAX_PX = 1344 * 768
+    let w = aspect >= 1 ? 768 * aspect : 768
+    let h = aspect >= 1 ? 768 : 768 / aspect
+    if (w * h > MAX_PX) {
+      const s = Math.sqrt(MAX_PX / (w * h))
+      w *= s
+      h *= s
+    }
+    const snap = (v: number) => Math.max(32, Math.round(v / 32) * 32)
+    return { width: snap(w), height: snap(h) }
   }
   if (type === 'wan22') {
     // Wan 2.2 5B trains at 1280×704 / 704×1280. Keep the SOURCE aspect (faithful

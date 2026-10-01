@@ -47,6 +47,8 @@ export const TYPE_BADGE: Record<ModelType, { label: string; color: string }> = {
   wan22: { label: 'Wan 2.2', color: 'bg-orange-500/15 text-orange-300' },
   hunyuan: { label: 'Hunyuan', color: 'bg-red-500/15 text-red-300' },
   ltx: { label: 'LTX', color: 'bg-cyan-500/15 text-cyan-300' },
+  // Video with sound like LTX, so it shares LTX's row.
+  minimaxh3: { label: 'MiniMax H3', color: 'bg-cyan-500/15 text-cyan-300' },
   mochi: { label: 'Mochi', color: 'bg-pink-500/15 text-pink-300' },
   cosmos: { label: 'Cosmos', color: 'bg-emerald-500/15 text-emerald-300' },
   cogvideo: { label: 'CogVideo', color: 'bg-stone-500/15 text-stone-300' },

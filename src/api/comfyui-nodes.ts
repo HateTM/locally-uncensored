@@ -142,6 +142,9 @@ export function categorizeNodes(allNodes: Record<string, NodeMetadata>): Categor
     CogVideoXEmptyLatents: 'latentInit',
     // Wan 2.2 TI2V-5B unified latent (optional start_image → I2V, absent → T2V)
     Wan22ImageToVideoLatent: 'latentInit',
+    // MiniMax H3: the encode node also builds the joint picture-and-sound
+    // latent, so it stands in for the empty latent (ComfyUI PR #15224).
+    MiniMaxH3ImageToVideo: 'latentInit',
     // Conditioning
     ConditioningZeroOut: 'textEncoders',
     // Text encoding

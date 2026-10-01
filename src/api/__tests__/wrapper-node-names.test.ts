@@ -61,7 +61,12 @@ const CORE_NODES = new Set([
   'EmptyLatentImage', 'EmptyLTXVLatentVideo', 'Wan22ImageToVideoLatent', 'TrimVideoLatent',
   'WanSoundImageToVideo', 'WanAnimateToVideo', 'WanVaceToVideo',
   // sampling
-  'KSampler',
+  // BasicGuider, BasicScheduler, KSamplerSelect, RandomNoise and
+  // SamplerCustomAdvanced: comfy_extras/nodes_custom_sampler.py; the two
+  // MiniMax H3 encode nodes: comfy_extras/nodes_minimax_h3.py, listed in
+  // nodes.py's extras. Both read in ComfyUI master on 2026-10-01.
+  'KSampler', 'BasicGuider', 'BasicScheduler', 'KSamplerSelect', 'RandomNoise', 'SamplerCustomAdvanced',
+  'MiniMaxH3ImageToVideo', 'MiniMaxH3ReferenceToVideo',
   // lora
   'LoraLoader', 'LoraLoaderModelOnly',
   // decode + image ops

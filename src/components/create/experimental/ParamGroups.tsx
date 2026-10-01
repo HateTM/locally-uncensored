@@ -22,7 +22,7 @@ import { HINWEIS_TEXT } from '../../../lib/hinweis'
 // builder (LoraLoaderModelOnly insert). The remaining families (cogvideo/svd/
 // framepack/pyramidflow/allegro) use wrapper nodes with no LoRA seam, so we hide
 // the stack for them rather than offer a control that silently does nothing.
-const VIDEO_LORA_FAMILIES = new Set(['wan', 'wan22', 'hunyuan', 'ltx', 'mochi', 'cosmos'])
+const VIDEO_LORA_FAMILIES = new Set(['wan', 'wan22', 'hunyuan', 'ltx', 'mochi', 'cosmos', 'minimaxh3'])
 
 // The full param surface, reorganized into 3 frequency-ranked Sections.
 // Sampler/scheduler/LoRA/VAE lists come live from ComfyUI via CreateContext,

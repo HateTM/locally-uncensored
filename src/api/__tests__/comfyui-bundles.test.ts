@@ -17,8 +17,9 @@ describe('Video Bundle Definitions', () => {
     // uncensored GGUF finetunes (NSFW Wan 14B t2v + Wan 2.2 Rapid AIO i2v).
     // 2026-07-24 removes three that could never run: both CogVideoX bundles
     // (21 GB each) and Pyramid Flow, whose builders emitted node class names no
-    // wrapper registers. See wrapper-node-names.test.ts.
-    expect(bundles.length).toBe(13)
+    // wrapper registers. See wrapper-node-names.test.ts. 2026-10-01 adds
+    // MiniMax H3 (video with sound).
+    expect(bundles.length).toBe(14)
   })
 
   it('every bundle has required fields', () => {
@@ -91,7 +92,7 @@ describe('Video Bundle Definitions', () => {
 
   it('every workflow type is a known strategy', () => {
     const knownWorkflows = ['wan', 'wan22', 'hunyuan', 'ltx', 'animatediff', 'cogvideo', 'framepack',
-      'svd', 'mochi', 'cosmos', 'pyramidflow', 'allegro']
+      'svd', 'mochi', 'cosmos', 'pyramidflow', 'allegro', 'minimaxh3']
     for (const b of bundles) {
       expect(knownWorkflows).toContain(b.workflow)
     }

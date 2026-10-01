@@ -93,7 +93,11 @@ pub fn classify<'a>(tensors: impl IntoIterator<Item = (&'a str, Option<&'a [u64]
         }
     }
     let has = |s: &str| stems.contains(s);
-    let arch = if has("double_stream_modulation_img") {
+    let arch = if has("audio_patch_proj") && has("video_patch_proj") {
+        // MiniMax H3: picture and sound from one model (Discord 2026-09-26,
+        // a CivitAI repack listed as an image model).
+        Some("minimaxh3")
+    } else if has("double_stream_modulation_img") {
         Some("flux2")
     } else if has("distilled_guidance_layer") {
         Some("chroma")
@@ -259,6 +263,9 @@ mod tests {
         assert_eq!(arch(&["double_stream_blocks.0.x", "caption_projection.0.x"]).as_deref(), Some("hidream"));
         assert_eq!(arch(&["model.diffusion_model.joint_blocks.0.x", "text_encoders.clip_l.x"]).as_deref(), Some("sd3"));
         assert_eq!(arch(&["blocks.0.x", "patch_embedding.weight", "text_embedding.0.weight"]).as_deref(), Some("wan"));
+        assert_eq!(arch(&["blocks.0.attn.qkv_proj.weight", "token_refiner.0.x", "audio_patch_proj.weight", "video_patch_proj.weight", "adaln_t_table"]).as_deref(), Some("minimaxh3"));
+        // One half alone is not H3.
+        assert_eq!(arch(&["blocks.0.x", "video_patch_proj.weight"]), None);
         assert_eq!(arch(&["foo.weight"]), None);
         assert_eq!(arch(&["encoder.conv_in.weight", "decoder.conv_out.weight"]).as_deref(), Some("vae"));
         assert_eq!(arch(&["model.layers.0.mlp.weight", "model.embed_tokens.weight"]).as_deref(), Some("text_encoder"));

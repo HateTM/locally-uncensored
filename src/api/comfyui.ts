@@ -159,7 +159,7 @@ export function galleryTypeForFile(
 // 2.5.8: ace / wans2v / wananimate / wanvace are the specialized local-lane
 // architectures (music, talking character, motion control). They are neither
 // image nor video picker material — each lane has its own model list.
-export type ModelType = 'flux' | 'flux2' | 'krea2' | 'zimage' | 'ernie_image' | 'qwenimage' | 'qwenimage1' | 'chroma' | 'hidream' | 'sd3' | 'lumina2' | 'sdxl' | 'sd15' | 'wan' | 'wan22' | 'hunyuan' | 'ltx' | 'mochi' | 'cosmos' | 'cogvideo' | 'svd' | 'framepack' | 'pyramidflow' | 'allegro' | 'ace' | 'wans2v' | 'wananimate' | 'wanvace' | 'animatediff' | 'unknown'
+export type ModelType = 'flux' | 'flux2' | 'krea2' | 'zimage' | 'ernie_image' | 'qwenimage' | 'qwenimage1' | 'chroma' | 'hidream' | 'sd3' | 'lumina2' | 'sdxl' | 'sd15' | 'wan' | 'wan22' | 'hunyuan' | 'ltx' | 'mochi' | 'cosmos' | 'cogvideo' | 'svd' | 'framepack' | 'pyramidflow' | 'allegro' | 'ace' | 'wans2v' | 'wananimate' | 'wanvace' | 'animatediff' | 'minimaxh3' | 'unknown'
 export type VideoBackend = 'wan' | 'animatediff' | 'none'
 
 export interface ClassifiedModel {
@@ -254,6 +254,11 @@ export function classifyModel(name: string | null | undefined): ModelType {
   // architecture: classic WanImageToVideo graph + wan_2.1_vae — NOT the
   // TI2V-5B path the wan2.2 tag would otherwise route them onto.
   if (lower.includes('rapid') && lower.includes('aio')) return 'wan'
+
+  // MiniMax H3 (Comfy-Org/MiniMax-H3): video with its own sound track, from
+  // text, a first/last frame (fl2va) or references (ref2va). Before every
+  // generic tag: its CivitAI repacks carry anything in their names.
+  if (lower.includes('minimax_h3') || lower.includes('minimaxh3') || lower.includes('minimax-h3')) return 'minimaxh3'
 
   // Video models — most specific first (order matters: specific before generic)
   if (lower.includes('cogvideo')) return 'cogvideo'
@@ -363,6 +368,7 @@ export function isImageModelType(type: ModelType): boolean {
 export function isVideoModelType(type: ModelType): boolean {
   return type === 'wan' || type === 'wan22' || type === 'hunyuan' || type === 'ltx' || type === 'mochi' || type === 'cosmos'
     || type === 'cogvideo' || type === 'svd' || type === 'framepack' || type === 'pyramidflow' || type === 'allegro'
+    || type === 'minimaxh3'
 }
 
 /**
@@ -376,7 +382,7 @@ export function isI2VModel(name: string): boolean {
   const lower = name.toLowerCase()
   return lower.includes('i2v') || lower.includes('svd') || lower.includes('framepack')
     || lower.includes('ti2v') || lower.includes('wan2.2') || lower.includes('wan2_2') || lower.includes('wan22')
-    || lower.includes('ltx') || lower.includes('video2world')
+    || lower.includes('ltx') || lower.includes('video2world') || classifyModel(name) === 'minimaxh3'
 }
 
 /**
@@ -503,6 +509,10 @@ export const MODEL_TYPE_DEFAULTS: Record<string, ModelTypeDefaults> = {
   wan22: { steps: 30, cfg: 5.0, sampler: 'euler', scheduler: 'simple', width: 1024, height: 576, frames: 49, fps: 24 },
   hunyuan: { steps: 30, cfg: 6.0, sampler: 'euler', scheduler: 'normal', width: 848, height: 480, frames: 45, fps: 24 },
   ltx: { steps: 20, cfg: 3.0, sampler: 'euler', scheduler: 'normal', width: 768, height: 512, frames: 97, fps: 24 },
+  // Official templates video_minimax_h3_t2v / _i2v (Comfy-Org/workflow_templates,
+  // read 2026-10-01): res_multistep / simple, 20 steps, BasicGuider (no CFG),
+  // 1344x768 native canvas, 24 fps, 124 frames is the node's ~5 s default.
+  minimaxh3: { steps: 20, cfg: 1.0, sampler: 'res_multistep', scheduler: 'simple', width: 1344, height: 768, frames: 124, fps: 24 },
   mochi: { steps: 30, cfg: 4.5, sampler: 'euler', scheduler: 'normal', width: 848, height: 480, frames: 84, fps: 24 },
   cosmos: { steps: 35, cfg: 7.0, sampler: 'euler', scheduler: 'normal', width: 1024, height: 1024, frames: 121, fps: 24 },
   cogvideo: { steps: 50, cfg: 6.0, sampler: 'euler_ancestral', scheduler: 'normal', width: 480, height: 480, frames: 49, fps: 8 },
@@ -955,7 +965,7 @@ export function isStrayAddonFile(name: string): boolean {
 const SNIFF_TYPES: Record<string, ModelType> = {
   flux: 'flux', flux2: 'flux2', krea2: 'krea2', zimage: 'zimage', ernie_image: 'ernie_image',
   qwenimage: 'qwenimage', qwenimage1: 'qwenimage1', chroma: 'chroma', hidream: 'hidream',
-  sd3: 'sd3', lumina2: 'lumina2', sdxl: 'sdxl', sd15: 'sd15', wan: 'wan',
+  sd3: 'sd3', lumina2: 'lumina2', sdxl: 'sdxl', sd15: 'sd15', wan: 'wan', minimaxh3: 'minimaxh3',
 }
 
 /** Name types the header may overrule: the image families and 'unknown'. A
@@ -1536,6 +1546,14 @@ function isQwen3vl8b(name: string): boolean {
   return /qwen3[._-]?vl[._-]?8b/.test(name.toLowerCase())
 }
 
+/** MiniMax H3's own encoder (qwen3vl_32b_minimax_h3_*). It is a Qwen3-VL file
+ *  too, so every family that matches its encoder on a generic qwen / qwen3vl
+ *  stem has to step around it, or a box holding both loads a 32B encoder
+ *  into a 4B slot. */
+function isMinimaxEncoder(name: string): boolean {
+  return name.toLowerCase().includes('minimax')
+}
+
 export async function findMatchingVAE(modelType: ModelType): Promise<string> {
   const vaes = await getVAEModels()
   if (vaes.length === 0) throw new Error('No VAE models found. Download a VAE for your model type from the Model Manager.')
@@ -1623,6 +1641,14 @@ export async function findMatchingVAE(modelType: ModelType): Promise<string> {
     if (match) return match
     return vaes[0]
   }
+  if (modelType === 'minimaxh3') {
+    // The VIDEO autoencoder; the audio one is a second file of its own
+    // (findMiniMaxAudioVAE), and the two are not interchangeable.
+    const match = vaes.find(v => lower(v).includes('minimax_h3_video_vae'))
+      || vaes.find(v => lower(v).includes('minimax') && lower(v).includes('video'))
+    if (match) return match
+    throw new Error(`No MiniMax H3 video VAE found. Download "minimax_h3_video_vae_int8_convrot.safetensors" from the Model Manager.`)
+  }
   if (modelType === 'mochi') {
     const match = vaes.find(v => lower(v).includes('mochi'))
     if (match) return match
@@ -1696,6 +1722,16 @@ export async function findFramePackCLIPPair(): Promise<{ clipL: string; llavaLla
   return { clipL, llavaLlama3 }
 }
 
+/** MiniMax H3's audio autoencoder. The model writes picture and sound into
+ *  one latent and decodes the sound half with this file. */
+export async function findMiniMaxAudioVAE(): Promise<string> {
+  const vaes = await getVAEModels()
+  const match = vaes.find(v => v.toLowerCase().includes('minimax_h3_audio_vae'))
+    || vaes.find(v => v.toLowerCase().includes('minimax') && v.toLowerCase().includes('audio'))
+  if (match) return match
+  throw new Error(`No MiniMax H3 audio VAE found. Download "minimax_h3_audio_vae_fp32.safetensors" from the Model Manager.`)
+}
+
 /**
  * Pick the right text encoder for a model.
  *
@@ -1732,9 +1768,9 @@ export async function findMatchingCLIP(modelType: ModelType, activeModelName?: s
     // filename of the active UNet (see `modelIsFp4` above). Fallback
     // order ensures we never hard-fail when the "ideal" encoder isn't
     // installed: we try the paired one first, then the other.
-    const qwenFp4  = clips.find(c => lower(c).includes('qwen') && (lower(c).includes('fp4') || lower(c).includes('nf4')) && !lower(c).includes('qwen_2.5_vl'))
+    const qwenFp4  = clips.find(c => lower(c).includes('qwen') && (lower(c).includes('fp4') || lower(c).includes('nf4')) && !lower(c).includes('qwen_2.5_vl') && !isMinimaxEncoder(c))
     const qwenFull = clips.find(c => lower(c).includes('qwen_3_4b') && !lower(c).includes('fp4') && !lower(c).includes('nf4') && !lower(c).includes('vl'))
-    const qwenAny  = clips.find(c => lower(c).includes('qwen') && !lower(c).includes('qwen_2.5_vl'))
+    const qwenAny  = clips.find(c => lower(c).includes('qwen') && !lower(c).includes('qwen_2.5_vl') && !isMinimaxEncoder(c))
     const mistral  = clips.find(c => lower(c).includes('mistral'))
     const match = modelIsFp4
       ? (qwenFp4 || qwenFull || qwenAny || mistral)
@@ -1765,8 +1801,8 @@ export async function findMatchingCLIP(modelType: ModelType, activeModelName?: s
     // The 8B file is excluded throughout: it belongs to Qwen-Image 2.1, and
     // since that bundle landed in the Model Manager a box can hold both.
     const match = clips.find(c => /qwen3[._-]?vl[._-]?4b/.test(lower(c)))
-      || clips.find(c => (lower(c).includes('qwen3vl') || lower(c).includes('qwen3_vl')) && !isQwen3vl8b(c))
-      || clips.find(c => lower(c).includes('qwen') && lower(c).includes('vl') && !isQwen3vl8b(c))
+      || clips.find(c => (lower(c).includes('qwen3vl') || lower(c).includes('qwen3_vl')) && !isQwen3vl8b(c) && !isMinimaxEncoder(c))
+      || clips.find(c => lower(c).includes('qwen') && lower(c).includes('vl') && !isQwen3vl8b(c) && !isMinimaxEncoder(c))
     if (match) return match
     throw new Error(`No Krea 2 text encoder found. Download "qwen3vl_4b_fp8_scaled.safetensors" from the Model Manager.`)
   }
@@ -1778,7 +1814,7 @@ export async function findMatchingCLIP(modelType: ModelType, activeModelName?: s
   }
   if (modelType === 'hunyuan') {
     // HunyuanVideo 1.5 uses Qwen 2.5 VL, older versions use llava_llama3
-    const match = clips.find(c => lower(c).includes('qwen'))
+    const match = clips.find(c => lower(c).includes('qwen') && !isMinimaxEncoder(c))
       || clips.find(c => lower(c).includes('llava'))
       || clips.find(c => lower(c).includes('umt5'))
     if (match) return match
@@ -1794,6 +1830,14 @@ export async function findMatchingCLIP(modelType: ModelType, activeModelName?: s
     const match = clips.find(c => lower(c).includes('gemma'))
     if (match) return match
     throw new Error(`No LTX Video text encoder found. Download "gemma_3_12B_it_fp8_scaled.safetensors" from the Model Manager.`)
+  }
+  if (modelType === 'minimaxh3') {
+    // Qwen3-VL 32B, tuned for H3 and shipped only under H3's own names. The
+    // nvfp4 tier is the one the official templates load (15.7 GB).
+    const match = clips.find(c => isMinimaxEncoder(c) && lower(c).includes('nvfp4'))
+      || clips.find(c => isMinimaxEncoder(c))
+    if (match) return match
+    throw new Error(`No MiniMax H3 text encoder found. Download "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors" from the Model Manager.`)
   }
   if (modelType === 'mochi') {
     const match = clips.find(c => lower(c).includes('t5') && !lower(c).includes('umt5') && !lower(c).includes('oldt5'))
@@ -1812,7 +1856,7 @@ export async function findMatchingCLIP(modelType: ModelType, activeModelName?: s
     throw new Error(`No CogVideoX text encoder found. Download "t5xxl_fp16.safetensors" from the Model Manager.`)
   }
   if (modelType === 'framepack') {
-    const match = clips.find(c => lower(c).includes('llava') || lower(c).includes('qwen'))
+    const match = clips.find(c => lower(c).includes('llava') || (lower(c).includes('qwen') && !isMinimaxEncoder(c)))
       || clips.find(c => lower(c).includes('umt5'))
     if (match) return match
     throw new Error(`No FramePack text encoder found. Download "llava_llama3_fp8_scaled.safetensors" from the Model Manager.`)
