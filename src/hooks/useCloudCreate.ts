@@ -191,6 +191,10 @@ export function dataUrlToBlob(dataUrl: string): Blob {
 // died with the Create view's remount, leaving the Cancel button a no-op
 // mid-render. At most one cloud job runs per app (the store-level isGenerating
 // gate), so a singleton is correct.
+/** Shown when Cancel reaches a job a GPU already took. */
+export const RENDER_CANNOT_STOP =
+  "This render already started and can't be stopped. It will finish, is charged, and lands in your gallery."
+
 let activeJobId: string | null = null
 let activeAbort: AbortController | null = null
 
@@ -686,13 +690,24 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
 
   const cancel = useCallback(async () => {
     const id = activeJobId
-    activeAbort?.abort() // stop polling immediately either way
-    if (!id) return
+    if (!id) {
+      activeAbort?.abort()
+      return
+    }
     try {
       await cancelJob(id)
+      activeAbort?.abort()
       onQuotaChange?.() // queued-cancel refunds
-    } catch {
-      // 409 (already running/finished) — poll stop is all the client can do
+    } catch (err) {
+      // 409: a GPU already took the job (bug hunt 01.10.2026, K7). The cancel
+      // used to stop the polling and say nothing, so it looked cancelled while
+      // it finished and kept its credits, and the desktop has no job list to
+      // bring it back later. Say so, and keep polling so the result lands.
+      if (err instanceof CloudJobError && err.status === 409) {
+        useCreateStore.getState().setError(RENDER_CANNOT_STOP)
+        return
+      }
+      activeAbort?.abort()
     }
   }, [onQuotaChange])
 
