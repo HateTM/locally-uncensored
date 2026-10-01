@@ -22,7 +22,6 @@ import { ModelGridSkeleton } from '../layout/ViewSkeletons'
 import { useProviderStore } from '../../stores/providerStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useModelStore } from '../../stores/modelStore'
-import { getProviderIdFromModel } from '../../api/providers'
 import { activateDownloadedBundledModel } from '../../lib/bundled-download-activation'
 import { diagnoseBuiltinEngine } from '../../api/builtin-ensure'
 import type { InstalledModelLike } from '../../lib/lmstudio-match'
@@ -30,7 +29,7 @@ import { findInstalledForDiscoverModel } from '../../lib/discover-installed'
 import { isBuiltinEngineEntry } from '../../lib/lmstudio-match'
 import { ensureLuEngineIsChatProvider, announceLuEngineSwitch } from '../../api/lu-engine-switch'
 import { LuEngineSwitchBar } from '../chat/LuEngineSwitchBar'
-import { resolveTextDownloadTarget } from '../../lib/text-download-target'
+import { ollamaOnlyDownloadBlock, resolveTextDownloadTarget } from '../../lib/text-download-target'
 import { hfUrlToOllamaRef, hfUrlToLmStudioSubdir, parseHfUrl, extractGgufQuant, isShardedOrIncompatibleGguf } from '../../lib/hf-to-provider'
 import { HINWEIS_TEXT } from '../../lib/hinweis'
 import { GlowButton } from '../ui/GlowButton'
@@ -607,12 +606,11 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
     // chat side. Fix: derive the target backend from the *active chat
     // model*. If no active model yet (first run, brand new install), fall
     // back to the previous enabled-wins logic so the download still works.
-    const activeProviderId = activeChatModel ? getProviderIdFromModel(activeChatModel) : null
     // Built-in engine lives in the managed `openai` slot. A second chat model
     // downloaded here goes flat into the app-owned models dir and boots
     // llama-server, mirroring onboarding — never nested like LM Studio.
     //
-    // GH #118: the three flags below used to be read off `activeProviderId`
+    // GH #118: the three flags below used to be read off the active provider
     // alone, so a fresh install (no chat model picked yet) matched none of
     // them and the file went down the LM Studio branch into a nested folder
     // the built-in engine never scans. resolveTextDownloadTarget keeps the
@@ -626,18 +624,11 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
     const isActiveLmStudio = downloadTarget === 'lmstudio'
     const isActiveOllama = downloadTarget === 'ollama'
 
-    // Ollama-native models: only meaningful with Ollama present. If the user
-    // is chatting on LM Studio and clicks one of these (e.g. Qwen3.6 35B
-    // listed only by Ollama tag), warn instead of silently pulling into a
-    // backend the user can't see from chat.
+    // Ollama-native models land in Ollama whatever the picker holds.
     if (model.ollamaModel) {
-      const ollamaOn = !!providers.ollama?.enabled
-      if (!ollamaOn) {
-        setInstallError(`${model.name} only runs on Ollama. Enable the Ollama provider (Settings → Providers) before downloading.`)
-        return
-      }
-      if (activeProviderId && !isActiveOllama) {
-        setInstallError(`${model.name} can only run on Ollama. Switch the chat picker to an Ollama model first, then download.`)
+      const blocked = ollamaOnlyDownloadBlock(model.name, !!providers.ollama?.enabled)
+      if (blocked) {
+        setInstallError(blocked)
         return
       }
       try {
