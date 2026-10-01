@@ -406,7 +406,7 @@ export async function buildSubAgentGates(run?: AgentRunContext): Promise<SubAgen
         status: 'pending_approval',
         timestamp: Date.now(),
       }
-      const entry: ApprovalEntry = { toolCall, resolve }
+      const entry: ApprovalEntry = { toolCall, resolve, owner: abortSignal }
       approvals.enqueueApproval(convId, entry)
       // Stop has to answer a question nobody clicked, or the delegation (and
       // with it the parent turn) waits forever, same lesson as audit A4.

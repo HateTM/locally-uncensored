@@ -21,6 +21,10 @@ import type { AgentToolCall } from '../types/agent-mode'
 export interface ApprovalEntry {
   toolCall: AgentToolCall
   resolve: (approved: boolean) => void
+  /** The run that asked, as its abort signal. A run's end drains only its own
+   *  entries: a background sub-agent shares the conversation's queue but
+   *  outlives the turn that started it. */
+  owner?: AbortSignal
 }
 
 const queues = new Map<string, ApprovalEntry[]>()
@@ -75,12 +79,23 @@ export function removeApproval(convId: string, entry: ApprovalEntry): boolean {
   return true
 }
 
-/** Answer every waiting tool with "no" and empty the queue (turn end, Stop). */
-export function drainApprovals(convId: string | null | undefined): void {
+/**
+ * Answer waiting tools with "no". With `owner`, only that run's entries (turn
+ * end); without, the whole conversation's queue (Stop).
+ *
+ * The turn end used to empty the whole queue (bug hunt 01.10.2026, A8), so a
+ * background sub-agent still at work was told "User rejected tool call" for a
+ * question the user never saw.
+ */
+export function drainApprovals(convId: string | null | undefined, owner?: AbortSignal): void {
   if (!convId) return
   const q = queues.get(convId)
-  queues.delete(convId)
-  if (q) for (const entry of q) entry.resolve(false)
+  if (!q) return
+  const drained = owner ? q.filter((e) => e.owner === owner) : q
+  const kept = owner ? q.filter((e) => e.owner !== owner) : []
+  if (kept.length) queues.set(convId, kept)
+  else queues.delete(convId)
+  for (const entry of drained) entry.resolve(false)
   notify()
 }
 

@@ -219,7 +219,7 @@ export function useAgentChat() {
         resolve(false)
         return
       }
-      const entry: ApprovalEntry = { toolCall, resolve }
+      const entry: ApprovalEntry = { toolCall, resolve, owner: signal }
       enqueueApproval(convId, entry)
       signal?.addEventListener(
         'abort',
@@ -3045,7 +3045,7 @@ export function useAgentChat() {
       // but only THIS run's: a replaced slot means a NEW run's approvals are
       // waiting under the same convId, and they must survive.
       if (stillOwnsSlot) {
-        drainApprovals(convId)
+        drainApprovals(convId, abort.signal)
       }
 
       // Auto-read the finished response when the user opted in (#77). Default
