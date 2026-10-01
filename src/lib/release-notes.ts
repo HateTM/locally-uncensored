@@ -136,8 +136,20 @@ export const RELEASE_NOTES: ReleaseNote[] = [
   // unveraendert. Veroeffentlicht wird erst auf Davids Go.
   {
     version: '3.0.4',
-    headline: 'A fix for the Code agent on LU Cloud: long file writes no longer end the run, "continue" picks up where the run stopped, and the agent no longer spends requests on steps you did not ask for.',
+    headline: 'A fix for the Code agent on LU Cloud: long file writes no longer end the run, "continue" picks up where the run stopped, and the agent no longer spends requests on steps you did not ask for. Plus the bugs reported on GitHub and Discord since 3.0.3.',
     lines: [
+      {
+        title: 'Edit takes more than one image.',
+        detail: 'With Qwen-Image 2.1 or Qwen-Image-Edit on your own machine, small tiles under the source image take up to three more images (two for Qwen-Image-Edit). Name them in the prompt as image 2, image 3, for example "put the jacket from image 2 on the person".',
+      },
+      {
+        title: 'MiniMax H3 runs as a video model with sound.',
+        detail: 'A MiniMax H3 file showed up as an image model. It now sits in the video list, also under a CivitAI name, and renders picture and sound together, from a prompt or from a first frame. The Model Manager offers it as one download.',
+      },
+      {
+        title: 'Fixes from GitHub and Discord.',
+        detail: 'A group chat answers with every LU Engine model in it, also when the models sit in your Model Storage folder. Ollama models download without one already installed. A GGUF from the CivitAI search lands where ComfyUI reads it. A fresh ComfyUI install on Windows gets its own Python environment, which fixes "hipdnn_backend.dll Bad Image" on AMD cards. The window no longer disappears on Linux. A character trained on your own machine takes up to 100 photos.',
+      },
       {
         title: 'Writing a long file no longer ends the run.',
         detail: 'While a model writes a file, the app receives the file in pieces but shows no text. After five minutes without text it treated the connection as stalled and ended the run in the middle of the write, and the next run started that step again. The app now ends a run only when no data arrives at all.',

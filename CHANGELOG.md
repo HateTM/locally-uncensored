@@ -8,9 +8,45 @@ A fix for the Code agent and the agent in chat on LU Cloud. Long file writes
 no longer end the run, "continue" picks up where a run stopped, and the agent
 no longer spends requests on steps nobody asked for. The open-model counts
 from 3.0.2 still hold: fourteen video models and seven image models in the
-cloud catalogue.
+cloud catalogue. It also fixes the bugs reported on GitHub and Discord since
+3.0.3, and Edit in Create can now take more than one image.
+
+### Added
+
+- **Edit takes more than one image.** With Qwen-Image 2.1 or Qwen-Image-Edit
+  on your own machine, small tiles under the source image take up to three
+  more images (two for Qwen-Image-Edit). Name them in the prompt as image 2,
+  image 3, for example "put the jacket from image 2 on the person". Asked on
+  GitHub (issue 144) and in Discord.
+- **MiniMax H3 runs as a video model with sound.** A MiniMax H3 file showed up
+  as an image model. It now sits in the video list, also under a CivitAI name,
+  and renders picture and sound together, from a prompt or from a first frame.
+  The Model Manager offers it as one download with its text encoder and both
+  decoders.
 
 ### Fixed
+
+- **A group chat answers with every LU Engine model in it.** When the models
+  sat in the folder set under Settings, Model Storage, only the loaded one
+  answered. The others got "The LU Engine has X loaded" instead of the engine
+  switching to them.
+- **Ollama models download without one already installed.** The Download
+  button asked you to pick an Ollama model in the chat first, which is not
+  possible before the first download.
+- **A GGUF from the CivitAI search lands where ComfyUI reads it.** It went to
+  the checkpoints folder, so the download finished and the model never showed
+  up. It now goes to diffusion_models, and the ComfyUI-GGUF nodes are installed
+  with it when they are missing.
+- **ComfyUI installs into its own Python environment on Windows.** A fresh
+  install could put PyTorch into the system Python, where an AMD card failed
+  with "hipdnn_backend.dll Bad Image". Every new install now gets its own
+  environment in the ComfyUI folder.
+- **The window no longer disappears on Linux.** On Bazzite and other Linux
+  systems with an AMD card the main window could vanish, under Wayland and
+  X11. The window is no longer transparent on Linux (issue 145).
+- **Installing the MLX engine in a browser dev build says what is wrong.** It
+  said "Unknown backend command". It now says that the engine install needs the
+  desktop app (issue 135).
 
 - **Writing a long file no longer ends the run.** While a model writes a file,
   the app receives the file in pieces but has no text to show. After five
@@ -99,6 +135,9 @@ cloud catalogue.
 
 ### Changed
 
+- **A character trained on your own machine takes up to 100 photos.** The limit
+  was 30 everywhere. Cloud training keeps 30 and says how many photos to
+  remove (issue 121).
 - **Fewer requests for the same work.** The agent is now told to read several
   files in one step instead of one request per file. file_edit changes several
   places in a file in one call, all or nothing, can replace every occurrence of
