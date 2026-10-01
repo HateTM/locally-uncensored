@@ -43,6 +43,10 @@ export function PresetWorkshop({preset,onClose,onGenerate}:{preset:CreatePreset;
   // clears `quote` for an unrelated reason (model switch, step change).
   const [rateLimited,setRateLimited]=useState(false)
   const lock=useRef(false),requestId=useRef<string|null>(null)
+  // Asks for a fresh quote although the inputs did not change: after a result
+  // is dropped (redo) the price key is the same, and Generate stayed disabled
+  // (bug hunt 01.10.2026, K3).
+  const [quoteRound,setQuoteRound]=useState(0)
   const previewsRef=useRef<Record<string,{url:string;type:'image'|'video'}>>({})
   const carried=useRef<number|null>(null)
   // Gemessene Laufzeiten, einmal pro geoeffnetem Fenster geholt. Fehlt das
@@ -235,7 +239,7 @@ export function PresetWorkshop({preset,onClose,onGenerate}:{preset:CreatePreset;
     return ()=>{clearTimeout(timer);controller.abort()}
     // The key contains every input affecting the quote.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[priceKey])
+  },[priceKey,quoteRound])
   // Review B5: usable when there is genuinely something to price, and it is
   // fresh for the CURRENT key, or the only thing between here and a fresh
   // confirmation is a rate limit (the last confirmed number stands in, see
@@ -254,6 +258,10 @@ export function PresetWorkshop({preset,onClose,onGenerate}:{preset:CreatePreset;
       const runLabel=index===preset.steps.length-1?preset.title:`${preset.title} · ${step.title}`
       const submitted=await submitCloudJob({kind:step.kind,model:step.model,prompt,params:{...params(),label:runLabel,max_credits:quote,client_request_id:requestId.current??undefined}})
       setActive(submitted.id)
+      // The id served its purpose once a job stands for it. A second Generate
+      // is a new request: with the old id the server handed back the failed or
+      // cancelled job instead of starting one (K3).
+      requestId.current=crypto.randomUUID()
       const job=await pollJob(submitted.id,{timeoutMs:125*60_000})
       if(job.status!=='succeeded')throw new Error(job.error??`Generation ${job.status}. Completed earlier steps remain in your gallery.`)
       // Prompt und Titel stehen hier im Browser; der Auftrag vom Server
@@ -276,10 +284,10 @@ export function PresetWorkshop({preset,onClose,onGenerate}:{preset:CreatePreset;
   /** Drop this step's result and stand where it was made, prompt and uploads
    *  still there. A second run of the same step is one word away, not a
    *  reopened preset that silently resumes on a finished picture. */
-  function redo(){setCompleted(c=>{const n={...c};delete n[index];return n});setError('');setQuote(null);setQuotedKey('');setRateLimited(false)}
+  function redo(){setCompleted(c=>{const n={...c};delete n[index];return n});setError('');setQuote(null);setQuotedKey('');setRateLimited(false);setQuoteRound(r=>r+1)}
   /** Back to an empty first step. Nothing carried over, model choice included.
    *  Everything already generated stays in the gallery. */
-  function startOver(){carried.current=null;setIndex(0);setPrompt('');setOptions({});setPaths({});dropPreviews();setCompleted({});setPicked({});setMeasurement(null);setError('');setQuote(null);setQuotedKey('');setAdvanced(false);setRateLimited(false)}
+  function startOver(){carried.current=null;setIndex(0);setPrompt('');setOptions({});setPaths({});dropPreviews();setCompleted({});setPicked({});setMeasurement(null);setError('');setQuote(null);setQuotedKey('');setAdvanced(false);setRateLimited(false);setQuoteRound(r=>r+1)}
   const touched=index>0||Object.keys(completed).length>0||!!prompt||Object.keys(paths).length>0
   const ideas=promptIdeas(raw.role,preset.category)
   const runtime=runtimes[step.model]

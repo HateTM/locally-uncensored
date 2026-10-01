@@ -574,3 +574,34 @@ it('das X schliesst die Werkstatt', async () => {
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
   expect(closed).toHaveBeenCalledTimes(1)
 })
+
+// Bug hunt 01.10.2026 (K3). The request id was only renewed with a new quote,
+// so Generate after a failed step sent the old one, and the server handed the
+// failed job back instead of starting a new one.
+it('sends a new request id when Generate is pressed again after a failed step', async () => {
+  render(<PresetWorkshop preset={CREATE_PRESETS[1]} onClose={() => {}} onGenerate={() => {}} />)
+  fireEvent.change(screen.getByLabelText('Preset prompt'), { target: { value: 'A misty forest creature' } })
+  const generate = () => screen.getByRole('button', { name: 'Generate' }) as HTMLButtonElement
+  await waitFor(() => expect(generate().disabled).toBe(false), { timeout: 3000 })
+  fireEvent.click(generate())
+  await waitFor(() => expect(screen.getAllByText(/Stopped before provider call/).length).toBeGreaterThan(0))
+  await waitFor(() => expect(generate().disabled).toBe(false))
+  fireEvent.click(generate())
+  await waitFor(() => expect(mocks.submit).toHaveBeenCalledTimes(2))
+  const ids = mocks.submit.mock.calls.map((c) => c[0].params.client_request_id)
+  expect(ids[0]).toBeTruthy()
+  expect(ids[1]).toBeTruthy()
+  expect(ids[1]).not.toBe(ids[0])
+})
+
+// Same hunt: after a success the quote is dropped, and Try again left the same
+// inputs, so no new quote came and Generate stayed disabled.
+it('can generate again after Try again on a finished step', async () => {
+  mocks.poll.mockResolvedValue({ id: 'test-job', status: 'succeeded', kind: 'image', model: 'preset-chroma', result_url: 'https://x/y.png', created_at: '2026-10-01T00:00:00Z' })
+  render(<PresetWorkshop preset={CREATE_PRESETS[1]} onClose={() => {}} onGenerate={() => {}} />)
+  fireEvent.change(screen.getByLabelText('Preset prompt'), { target: { value: 'A misty forest creature' } })
+  await waitFor(() => expect((screen.getByRole('button', { name: 'Generate' }) as HTMLButtonElement).disabled).toBe(false), { timeout: 3000 })
+  fireEvent.click(screen.getByRole('button', { name: 'Generate' }))
+  fireEvent.click(await screen.findByRole('button', { name: /Try again/ }))
+  await waitFor(() => expect((screen.getByRole('button', { name: 'Generate' }) as HTMLButtonElement).disabled).toBe(false), { timeout: 3000 })
+})
