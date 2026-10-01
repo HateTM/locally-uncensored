@@ -18,6 +18,16 @@ interface Props {
 }
 
 /**
+ * When the explicit label of a conversation's run appeared, so the clock next
+ * to "Waiting for your approval" says how long the card has been waiting, not
+ * how long the run has been going ("Waiting for your approval 6s" the moment
+ * the card came up, Gegenprobe 01.10.2026). Module scope, like the run's
+ * booked start, so a tab switch does not start the wait at 0 again.
+ */
+const labelSince = new Map<string, number>()
+const labelKey = (conversationId: string, label: string) => `${conversationId}\u0000${label}`
+
+/**
  * THE bottom-of-run status line (G14-6, David 2026-08-07): the word "Working"
  * carrying the same shimmer as a live tool name, with the elapsed clock
  * beside it. It replaces the three bouncing dots AND the floating
@@ -39,23 +49,41 @@ export function WorkingAnchor({ isRunning, label, conversationId }: Props) {
   // lands AFTER paint — so the first quarter second of a new run showed the
   // previous run's time. React's documented "adjust state while rendering"
   // shape re-runs only this component, before anything paints.
+  // Same render-time reset when the clock switches between the run and an
+  // explicit label, so the old count never paints under the new word.
   const [wasRunning, setWasRunning] = useState(isRunning)
-  if (wasRunning !== isRunning) {
+  const [wasLabel, setWasLabel] = useState(label)
+  if (wasRunning !== isRunning || wasLabel !== label) {
     setWasRunning(isRunning)
+    setWasLabel(label)
     setElapsed(0)
   }
 
   useEffect(() => {
+    // A label that is gone (or a run that ended under it) gives its start up,
+    // so the next approval of this conversation counts from its own start.
+    if (conversationId && (!isRunning || !label)) {
+      for (const k of labelSince.keys()) if (k.startsWith(`${conversationId}\u0000`)) labelSince.delete(k)
+    }
     if (!isRunning) return
-    // The run's booked start when there is one; otherwise the start belongs
-    // to this mount, in the effect's own closure, with nothing left over from
-    // the previous run to read back.
-    const start = bookedAt ?? Date.now()
+    // An explicit label counts from when it appeared; otherwise the run's
+    // booked start; otherwise the start belongs to this mount, in the effect's
+    // own closure, with nothing left over from the previous run to read back.
+    let start: number
+    if (label && conversationId) {
+      const key = labelKey(conversationId, label)
+      if (!labelSince.has(key)) labelSince.set(key, Date.now())
+      start = labelSince.get(key)!
+    } else if (label) {
+      start = Date.now()
+    } else {
+      start = bookedAt ?? Date.now()
+    }
     const interval = setInterval(() => {
       setElapsed(Math.max(0, Math.floor((Date.now() - start) / 1000)))
     }, 250)
     return () => clearInterval(interval)
-  }, [isRunning, bookedAt])
+  }, [isRunning, bookedAt, label, conversationId])
 
   if (!isRunning) return null
 

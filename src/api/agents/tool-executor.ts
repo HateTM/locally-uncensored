@@ -235,6 +235,10 @@ async function runSingle(
   opts: ExecutorOptions
 ): Promise<ExecutionResult> {
   const startedAt = Date.now()
+  // What the duration counts from. Moves to the end of the approval wait: the
+  // time a call sat on the user's card is not the tool's time, and a 20 ms
+  // file_write read "21.6s" next to its tick (Gegenprobe 01.10.2026).
+  let clockFrom = startedAt
   const argsHash = stableArgsHash(req.args ?? {})
 
   opts.onStart?.(req)
@@ -250,7 +254,7 @@ async function runSingle(
 
   const finalize = (partial: Omit<ExecutionResult, 'completedAt' | 'durationMs'>): ExecutionResult => {
     const completedAt = Date.now()
-    const durationMs = completedAt - startedAt
+    const durationMs = completedAt - clockFrom
     const result: ExecutionResult = { ...partial, completedAt, durationMs }
     runtime.recordAudit?.({
       kind: 'complete',
@@ -349,6 +353,7 @@ async function runSingle(
   // User approval. Unconditional: a runtime that does not want a prompt says
   // so with APPROVE_ALL, it does not get there by forgetting the field.
   const approved = await runtime.awaitApproval(req, tool)
+  clockFrom = Date.now()
   if (!approved) {
     return finalize({
       id: req.id,
