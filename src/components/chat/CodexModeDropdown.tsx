@@ -16,9 +16,10 @@ import {
  *
  * Lives in the CODE composer only, hooked in through ChatInput's
  * `composerActions` so ChatInput itself stays surface-neutral and the Chat tab
- * inherits nothing. The mode is remembered per conversation, with
- * settings.codexDefaultMode as the fallback; picking one here NEVER writes the
- * global settings, so another conversation and the Agent surface are untouched.
+ * inherits nothing. The mode is remembered per conversation; a new one is
+ * created in the last Ask/Bypass picked here (codexStore.startConversationMode),
+ * otherwise settings.codexDefaultMode applies. Picking one here NEVER writes the global settings,
+ * so a running conversation and the Agent surface are untouched.
  *
  * A switch takes effect from the NEXT send. While a run is in flight the
  * trigger says so and the pick is parked, because the running turn resolved its

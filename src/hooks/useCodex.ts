@@ -394,6 +394,7 @@ export function useCodex() {
     let convId = store.activeConversationId
     if (!convId) {
       convId = store.createConversation(activeModel, persona?.systemPrompt || '', 'codex')
+      useCodexStore.getState().startConversationMode(convId)
     }
 
     // ── Re-entry guard (double-submit), PER CONVERSATION ─────────────────

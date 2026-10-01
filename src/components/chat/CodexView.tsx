@@ -196,7 +196,10 @@ export function CodexView() {
   // folder; a brand-new conversation means a brand-new thread on next send.
   const startNewSession = () => {
     stopCodex()
-    if (activeModel) createConversation(activeModel, '', 'codex')
+    if (!activeModel) return
+    const convId = createConversation(activeModel, '', 'codex')
+    // "New" keeps the Ask/Bypass the user last picked (Gegenprobe 01.10.2026).
+    useCodexStore.getState().startConversationMode(convId)
   }
 
   return (
