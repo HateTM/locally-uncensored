@@ -699,7 +699,7 @@ export function CodexView() {
             als Geschwister UEBER dem Kasten statt darin; die Wartezeile und
             die Composer-Hinweise sind Hinweise und stehen jetzt hier. Die
             Zeile ueber das MODELL ist in den Modellwaehler gezogen. */}
-        <ChatNotices />
+        <ChatNotices surface="code" />
         <LoopBar onStop={stopCodex} />
         <GoalBar />
         <LocalLaneWaitLine waiting={!!queuedForLocalLane} queuePosition={localLaneQueuePosition} />

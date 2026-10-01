@@ -25,15 +25,23 @@ const ICON: Record<ChatNoticeId, typeof Paperclip> = {
   'agent-for-local-files': Bot,
 }
 
+/** Zeilen ueber den Agent-Knopf und seinen Ordner im CHAT. Im Code-Bereich
+ *  gibt es diesen Knopf nicht, dort waehlt man den Ordner im Dateibaum; die
+ *  Anleitung stimmte dort nicht (Gegenprobe 01.10.2026). */
+const CHAT_ONLY: ReadonlySet<ChatNoticeId> = new Set(['agent-outside-workspace', 'agent-for-local-files'])
+
 interface Props {
   /** Die Dokumentenablage oeffnen, fuer die Zeile ueber den fehlgegangenen
    *  Anhang. Fehlt sie, faellt der Knopf weg und der Satz bleibt wahr. */
   onAttachDocs?: () => void
+  /** Wo gezeichnet wird. Im Code-Bereich fallen die Chat-Agent-Zeilen weg. */
+  surface?: 'chat' | 'code'
 }
 
-export function ChatNotices({ onAttachDocs }: Props) {
-  const notices = useChatNoticeStore((s) => s.notices)
+export function ChatNotices({ onAttachDocs, surface = 'chat' }: Props) {
+  const all = useChatNoticeStore((s) => s.notices)
   const dismiss = useChatNoticeStore((s) => s.dismiss)
+  const notices = surface === 'code' ? all.filter((n) => !CHAT_ONLY.has(n.id)) : all
 
   if (notices.length === 0) return null
 
