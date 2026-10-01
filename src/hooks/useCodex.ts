@@ -2385,16 +2385,19 @@ export function useCodex() {
             messages.push(rememberResult({ role: 'tool', content: resultTextFor(result), tool_call_id: tc.id }, tc))
           }
         } else if (strategy === 'native') {
+          // Ids kept here too (bug hunt 01.10.2026, A7): Ollama ignores them,
+          // and a later switch to LU Cloud in the same conversation needs them.
           messages.push({
             role: 'assistant',
             content: turnContent || '',
             tool_calls: batch.map((e) => ({
+              id: e.tc.id,
               function: { name: e.ac.toolName, arguments: e.injectedArgs },
             })),
           })
           for (const { tc } of batch) {
             const result = results.find((r) => r.id === batch.find((b) => b.tc === tc)?.ac.id)!
-            messages.push(rememberResult({ role: 'tool', content: resultTextFor(result) }, tc))
+            messages.push(rememberResult({ role: 'tool', content: resultTextFor(result), tool_call_id: tc.id }, tc))
           }
         } else {
           // Ollama on a non-native strategy that is not hermes_xml. Same

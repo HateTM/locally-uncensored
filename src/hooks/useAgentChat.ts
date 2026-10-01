@@ -2704,10 +2704,16 @@ export function useAgentChat() {
             }, tc))
           }
         } else if (strategy === 'native') {
+          // Ids kept on the native channel too (bug hunt 01.10.2026, A7). Ollama
+          // ignores them, but this chain is saved as hidden history: a switch to
+          // LU Cloud in the same conversation sent id-less calls and results,
+          // which a strict upstream 422s, or at best a prompt prefix that changed
+          // every step and missed the upstream cache.
           agentMessages.push({
             role: 'assistant',
             content: turnContent || '',
             tool_calls: toolCalls.map((tc) => ({
+              id: tc.id,
               function: { name: tc.function.name, arguments: tc.function.arguments },
             })),
           })
@@ -2716,6 +2722,7 @@ export function useAgentChat() {
             agentMessages.push(rememberResult({
               role: 'tool',
               content: resultTextFor(result) + mediaNote(tc.function.name, result),
+              tool_call_id: tc.id,
             }, tc))
           }
         } else {
