@@ -1600,8 +1600,12 @@ export function useChat() {
    * per click and the model was asked it twice.
    */
   const resend = useCallback((conversationId: string, targetId: string, override?: string) => {
-    // sendMessage bails without a model; deleting first would eat the question.
-    if (!useModelStore.getState().activeModel) return
+    // sendMessage bails without a model, with a model from the other mode, and
+    // while this conversation's run is in flight; deleting first would eat
+    // the question. The last two were missing (bug hunt 01.10.2026, H9).
+    const { activeModel } = useModelStore.getState()
+    if (!activeModel || modelOutOfMode(activeModel, useSettingsStore.getState().settings.appMode)) return
+    if (activeChatRuns.has(conversationId)) return
     const conv = useChatStore.getState().conversations.find(c => c.id === conversationId)
     if (!conv) return
     const plan = planResend(conv.messages, targetId, override)
