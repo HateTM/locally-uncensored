@@ -298,16 +298,11 @@ export interface Settings {
    */
   codexRepoMapLimit: number
   /**
-   * Multi-File Stage-and-Approve. When on, Codex `file_write` calls don't
-   * touch the disk — they queue as "pending changes" the user reviews and
-   * applies (or rejects) per-file.
-   */
-  codexStageMode: boolean
-  /**
-   * Auto-apply staged changes when the run finishes. Only meaningful while
-   * codexStageMode is on: every diff is still recorded and visible, but the
-   * user is not asked to click Apply per file — "auto on everything" then
-   * really means auto (first customer feedback, Morgan 2026-07-26).
+   * Auto-apply the changes a run staged when it finishes. Whether a run
+   * stages at all is its mode's call (Ask stages, Bypass and Plan do not,
+   * lib/codex-mode). Every diff is still recorded and visible, but the user is
+   * not asked to click Apply per file, so "auto on everything" really means
+   * auto (first customer feedback, Morgan 2026-07-26).
    */
   codexAutoApply: boolean
   /**

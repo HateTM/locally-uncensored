@@ -175,16 +175,17 @@ export async function applyStagedChange(chatId: string, change: StagedChange): P
   return true
 }
 
-/** Apply every pending change for a chat, sequentially (fs_write serializes
- *  per path anyway). Failures stay in the queue for manual retry and are
- *  reported by path instead of throwing, so one bad write never blocks the
- *  rest. */
+/** Apply the pending changes of a chat staged at or after `since` (all of
+ *  them without it), sequentially (fs_write serializes per path anyway).
+ *  Failures stay in the queue for manual retry and are reported by path
+ *  instead of throwing, so one bad write never blocks the rest. */
 export async function applyAllStagedChanges(
   chatId: string,
+  since = 0,
 ): Promise<{ applied: string[]; failed: string[] }> {
   const applied: string[] = []
   const failed: string[] = []
-  for (const change of [...useStagedChangesStore.getState().list(chatId)]) {
+  for (const change of useStagedChangesStore.getState().list(chatId).filter((c) => c.stagedAt >= since)) {
     try {
       if (await applyStagedChange(chatId, change)) applied.push(change.path)
     } catch {

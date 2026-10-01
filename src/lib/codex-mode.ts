@@ -134,7 +134,6 @@ export interface CodexModeKnobInput {
   settings: {
     codexConfirmShell?: boolean
     codexCloudConfirmOptIn?: boolean
-    codexStageMode?: boolean
     codexReviewMode?: boolean
   }
   /** Provider driving this run, for the cloud arm of the shell gate. */

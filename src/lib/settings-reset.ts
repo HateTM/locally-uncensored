@@ -26,7 +26,7 @@ export const SETTINGS_TAB_RESET_KEYS: Record<SettingsTab, (keyof Settings)[]> = 
     'agentMaxToolCalls', 'agentMaxIterations',
     'searchProvider', 'braveApiKey', 'tavilyApiKey',
     'codexArchitectMode', 'codexArchitectModel', 'codexArchitectAllowCloud',
-    'codexRepoMapEnabled', 'codexRepoMapLimit', 'codexStageMode', 'codexAutoApply', 'codexReviewMode',
+    'codexRepoMapEnabled', 'codexRepoMapLimit', 'codexAutoApply', 'codexReviewMode',
   ],
   'voice-remote': [],
 }

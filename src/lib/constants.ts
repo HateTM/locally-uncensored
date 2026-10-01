@@ -123,7 +123,6 @@ export const DEFAULT_SETTINGS: Settings = {
   codexArchitectAllowCloud: false,
   codexRepoMapEnabled: false,
   codexRepoMapLimit: 20,
-  codexStageMode: false,
   codexAutoApply: false,
   codexReviewMode: false,
   // H2 security gate. OFF by default = the autonomous coding agent keeps

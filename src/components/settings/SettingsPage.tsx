@@ -1469,18 +1469,14 @@ function CodexAgentSettings() {
 
       {/* Stage + Review */}
       <div className="pt-1.5 border-t border-white/[0.04]" />
+      {/* Staging is the mode's call (Ask stages file edits for review). The
+          switch that used to sit here no longer decided anything and only
+          hid this one, bug hunt 01.10.2026 (C5). */}
       <InlineToggle
-        label="Stage file_write changes (review before apply)"
-        enabled={settings.codexStageMode}
-        onChange={() => updateSettings({ codexStageMode: !settings.codexStageMode })}
+        label="Auto-apply changes staged in Ask mode when the run finishes (no per-file clicking)"
+        enabled={settings.codexAutoApply}
+        onChange={() => updateSettings({ codexAutoApply: !settings.codexAutoApply })}
       />
-      {settings.codexStageMode && (
-        <InlineToggle
-          label="Auto-apply staged changes when the run finishes (no per-file clicking)"
-          enabled={settings.codexAutoApply}
-          onChange={() => updateSettings({ codexAutoApply: !settings.codexAutoApply })}
-        />
-      )}
       <InlineToggle
         label="Code-Review mode (read-only)"
         enabled={settings.codexReviewMode}

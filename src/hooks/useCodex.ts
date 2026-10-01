@@ -679,7 +679,6 @@ export function useCodex() {
       settings: {
         codexConfirmShell: settings.codexConfirmShell,
         codexCloudConfirmOptIn: settings.codexCloudConfirmOptIn,
-        codexStageMode: settings.codexStageMode,
         codexReviewMode: settings.codexReviewMode,
       },
       providerId,
@@ -2462,10 +2461,16 @@ export function useCodex() {
       // aborted run did not produce it, it was interrupted producing it. The
       // queue survives, so nothing is lost: the Pending panel still offers
       // every change for review.
-      if (settings.codexStageMode && settings.codexAutoApply && convId && !isRunStopped(convId)) {
-        const pending = useStagedChangesStore.getState().list(convId)
+      //
+      // Bug hunt 01.10.2026 (C5): the gate read settings.codexStageMode, a
+      // switch the modes had replaced. Ask stages whatever that switch says,
+      // so with it off the opt-in never fired, and with it on a Bypass run
+      // applied what an EARLIER Ask run had left in the queue for review. The
+      // mode decides now, and only what this run staged lands.
+      if (knobs.stageWrites && settings.codexAutoApply && convId && !isRunStopped(convId)) {
+        const pending = useStagedChangesStore.getState().list(convId).filter((c) => c.stagedAt >= turnStartMs)
         if (pending.length > 0) {
-          const applied = await applyAllStagedChanges(convId)
+          const applied = await applyAllStagedChanges(convId, turnStartMs)
           if (applied.applied.length > 0) {
             fullContent += `\n\n_(auto-applied ${applied.applied.length} staged change${applied.applied.length === 1 ? '' : 's'}: ${applied.applied.join(', ')})_`
           }
