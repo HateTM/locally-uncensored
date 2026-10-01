@@ -159,6 +159,18 @@ export const RELEASE_NOTES: ReleaseNote[] = [
         detail: 'Cloud models now send at most 32K of context by default instead of 64K. You can change it per model in the context menu in the header. Once you set it above the default, a small triangle shows that every message then sends more and costs more credits.',
       },
       {
+        title: 'The agent stops repeating a tool that fails.',
+        detail: 'Tools report most failures as text, and the loop guard only counted an unknown tool as failed, so a run could repeat a failing call until its round limit. Failed calls now count, and a call the model was cut off in the middle of is not run half-written.',
+      },
+      {
+        title: 'Ask mode asks before tests, commits, pushes and pull requests.',
+        detail: 'It used to ask only before shell commands. The card shows every argument, two approvals at once wait in line, and a tool you switched off in the permissions is refused. The "Stage writes for review" setting is gone: the mode decides, and auto-apply only applies what the finished run staged.',
+      },
+      {
+        title: 'Fixes in Chat and Create.',
+        detail: 'An error message is no longer overwritten by the last frame of the answer, and Regenerate no longer deletes your question when nothing can be sent. Cancel on a render a GPU already took says it will finish and be charged, and a submit whose answer got lost no longer leaves a paid job you never see.',
+      },
+      {
         title: 'Code conversations stay in the Code tab.',
         detail: 'After a restart the last Code conversation opened in the Chat tab, where the agent was off and a "continue" ran without tools. The app now starts on an empty chat, and the Code button takes you back to the Code conversation you worked on last, also while a run is going.',
       },

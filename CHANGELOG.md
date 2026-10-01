@@ -33,6 +33,33 @@ cloud catalogue.
   "continue" ran without tools. The app now starts on an empty chat, and the
   Code button takes you back to the Code conversation you worked on last, also
   while a run is going.
+- **The agent stops repeating a tool that fails.** Tools report most failures
+  as text, and the loop guard only counted an unknown tool as failed, so a run
+  could repeat a failing call until its round limit. Failed calls now count. A
+  failure is no longer served again from the cache within the same run, and a
+  call the model was cut off in the middle of is not run half-written.
+- **Ask mode asks before tests, commits, pushes and pull requests.** It used to
+  ask only before shell commands. The approval card shows every argument. Two
+  approvals at once wait in line instead of the second one rejecting the first,
+  and the end of a run no longer rejects a question from a background
+  sub-agent. A tool you switched off in the tool permissions is refused instead
+  of offered for approval.
+- **Pending changes are written only when you mean it.** A change you reject
+  during "Apply all" is no longer written. Auto-apply follows the mode and
+  applies only the changes of the run that just finished. A file that is not
+  UTF-8 text is no longer shown as a new file and then overwritten.
+- **Chat keeps its error messages.** An error, or the note for an empty answer,
+  was sometimes overwritten by the last frame of the answer. Regenerate and Edit
+  no longer delete your question when the message cannot be sent.
+- **Create tells you what happened to a render.** Cancel on a render that a GPU
+  already took now says that it will finish and be charged, and the result
+  still lands in your gallery. A submit whose answer got lost is sent again with
+  the same request id instead of leaving a paid job you never see. The preset
+  workshop can generate again after a failed step and after Try again.
+- **The free Flash allowance lasts as long as on the web.** The app asked LU
+  Cloud to hold room for 32K answer tokens on every request, so a stopped Flash
+  request used four times as much of the daily allowance as the same request
+  on the web. LU Cloud now sizes the answer itself.
 - **Smaller fixes in Chat, Agent and Code.** The Working clock counts from the
   start of the run, also after you switch tabs. The answer header names the
   model the way the model picker does. Cloud models no longer show "Loading
@@ -49,6 +76,9 @@ cloud catalogue.
   places in a file in one call, all or nothing, can replace every occurrence of
   a string, and still finds the place when the indentation in the file differs
   slightly from the model's copy.
+- **The "Stage writes for review" setting is gone.** The mode decides whether
+  writes wait for review (Ask mode does). The auto-apply switch is always shown
+  and applies what Ask mode staged when the run finishes.
 - **Cloud context is 32K by default and can be set per model.** Cloud models
   now send at most 32K of context by default instead of 64K. You can change it
   per model in the context menu in the header. Once you set it above the
