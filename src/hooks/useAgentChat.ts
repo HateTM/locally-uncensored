@@ -740,6 +740,12 @@ export function useAgentChat() {
     const abort = new AbortController()
     const runState: AgentRunState = { convId, content: '', thinking: '', blocks: [], abort }
     activeAgentRuns.set(convId, runState)
+    // A brand-new instruction clears a previous stop; a /loop pass inherits it,
+    // which is what makes Stop end the LOOP and not just the pass in flight.
+    // Cleared HERE, in the same beat as the claim, because the Stop button is
+    // live from the next line on: cleared after the awaits below, it wiped a
+    // Stop pressed right after Send and the run went on (Gegenprobe 01.10.2026).
+    if (!opts?.loop) beginRun(convId)
     // Flip the INPUT gate true in the SAME synchronous beat as the claim
     // above (David 2026-06-16, bug A). The input shows Send vs Stop off
     // `isAgentRunning`, which used to flip true only ~80 lines down, AFTER
@@ -781,11 +787,6 @@ export function useAgentChat() {
     } catch { /* run with whatever the engine has */ }
 
     const memoryScope = store.conversations.find(c => c.id === convId)?.memoryScope
-    // A brand-new instruction clears a previous stop; a /loop pass inherits it,
-    // which is what makes Stop end the LOOP and not just the pass in flight.
-    // The old per-instance ref was set by stopAgent and never cleared anywhere,
-    // so after one Stop every later /loop ran exactly one pass, in silence.
-    if (!opts?.loop) beginRun(convId)
 
     // Publish a HUMAN-READABLE slug ("create-an-index-7f2c3d") so
     // built-in tools land in `~/agent-workspace/<slug>/`. Previously
@@ -1148,7 +1149,13 @@ export function useAgentChat() {
     run.heldLocalLane = heldLocalLane
     // Bind the generating flag to THIS conversation so the typing indicator
     // shows only in the chat whose turn is in flight (David 2026-06-12).
-    useGenerationStore.getState().setGenerating(convId, true)
+    // A Stop that landed before this point already released the slot, so the
+    // finally below will not clear what is set here: marking the run as
+    // generating now left "Working" counting with nothing behind it until a
+    // second Stop (Gegenprobe 01.10.2026). The loop below sees the aborted
+    // signal and ends without a request.
+    const stoppedBeforeStart = abort.signal.aborted
+    if (!stoppedBeforeStart) useGenerationStore.getState().setGenerating(convId, true)
     // A run that threw mid-call left its label behind; this run starts clean.
     useRunActivityStore.getState().setActivity(convId, null)
     // Register so deleting/closing this chat stops the agent loop (Bug C).
@@ -1158,7 +1165,7 @@ export function useAgentChat() {
     // review-lanes.md): passed bare this used to cancel whichever generation
     // happened to be running app-wide, so Stop in conversation B could kill an
     // image/video conversation A's agent was still producing.
-    useGenerationStore.getState().registerAborter(convId, () => { abort.abort(); requestGenerationCancel(convId) })
+    if (!stoppedBeforeStart) useGenerationStore.getState().registerAborter(convId, () => { abort.abort(); requestGenerationCancel(convId) })
     // A refusal no retry can fix has to end the loop as well. `return` in the
     // catch does not skip the finally, so without this the driver fires the
     // next pass into the same refusal and the credits dialog reopens every
@@ -1332,6 +1339,10 @@ export function useAgentChat() {
     // Step number for the decay audit trail. The loop is a while, so it has
     // no index of its own.
     let stepNo = 0
+    // The "Analyzing..." placeholder of the step in flight. A Stop mid-request
+    // never reaches the code that drops it, and it stayed as a "Thinking" chip
+    // above the stop note (Gegenprobe 01.10.2026); the finally takes it out.
+    let placeholderId: string | null = null
     try {
       // ── Agent Loop ──────────────────────────────────────────
       // A separate running flag used to be checked here too; it was only
@@ -1533,6 +1544,7 @@ export function useAgentChat() {
         if (strategy === 'native') {
           // Show thinking indicator while model processes
           const thinkingBlockId = uuid()
+          placeholderId = thinkingBlockId
           addBlock(runState, convId!, assistantMessage.id, {
             id: thinkingBlockId, phase: 'thinking', content: 'Analyzing...',
             timestamp: Date.now(),
@@ -2846,7 +2858,9 @@ export function useAgentChat() {
       // tool-call rows but no closing line. Build a concise summary
       // from the actually-completed blocks so there is always a final
       // answer at the bottom of the bubble.
-      if (!runState.content.trim()) {
+      // A stopped run gets the stop note in the finally instead: "rephrase, or
+      // turn off Think" blamed the prompt for the user's own Stop.
+      if (!runState.content.trim() && !abort.signal.aborted) {
         // Closing line when the model said nothing itself. Pure logic lives in
         // summarizeTurn so the D#81 rules (a failed picture is not a completed
         // task, and its reason gets shown) are locked by tests.
@@ -3002,7 +3016,12 @@ export function useAgentChat() {
       // unstoppable through generationStore (Stop button, sign-out, window
       // close, app quit) even though activeAgentRuns still pointed at it.
       // A Stop before anything was written leaves a line, not an empty bubble.
-      if (abort.signal.aborted || isRunStopped(convId)) noteStoppedIfEmpty(convId, assistantMessage.id)
+      if (abort.signal.aborted || isRunStopped(convId)) {
+        if (placeholderId && runState.blocks.some((b) => b.id === placeholderId)) {
+          removeBlock(runState, convId, assistantMessage.id, placeholderId)
+        }
+        noteStoppedIfEmpty(convId, assistantMessage.id)
+      }
       const stillOwnsSlot = activeAgentRuns.get(convId) === runState
       if (stillOwnsSlot) {
         useGenerationStore.getState().clearAborter(convId)

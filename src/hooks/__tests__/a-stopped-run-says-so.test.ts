@@ -100,6 +100,9 @@ describe('a stopped run says so', () => {
     await waitFor(() => expect(s.ready()).toBe(true))
     await act(async () => { result.current.stopAgent(); await run() })
     expect(answer(convId).content).toBe(STOPPED_NOTE)
+    // The step's "Analyzing..." placeholder does not stay behind as a
+    // "Thinking" chip above the note.
+    expect((answer(convId).agentBlocks ?? []).filter((b) => b.phase === 'thinking')).toEqual([])
   })
 
   it('Stop after text arrived: the text stays, no note on top', async () => {

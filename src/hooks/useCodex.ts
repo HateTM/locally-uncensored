@@ -412,6 +412,12 @@ export function useCodex() {
     }
     const runToken = Symbol('codex-run')
     activeCodexRuns.set(convId, runToken)
+    // A brand-new instruction clears a previous stop; a /loop pass inherits it,
+    // which is what makes Stop end the LOOP and not just the pass in flight.
+    // Cleared HERE, in the same beat as the claim: cleared after the awaits
+    // below, it wiped a Stop pressed right after Send and the run went on as if
+    // nothing had been pressed (Gegenprobe 01.10.2026).
+    if (!opts?.loop) beginRun(convId)
     // A wrapping try/catch, not just the identity-checked cleanup deep in the
     // body's own finally (below): the body has many awaited calls BEFORE that
     // inner try (resolveChatWorkspaceSlug, runCompactForConversation,
@@ -440,9 +446,6 @@ export function useCodex() {
       async (heldLocalLane) => {
 
     const memoryScope = store.conversations.find(c => c.id === convId)?.memoryScope
-    // A brand-new instruction clears a previous stop; a /loop pass inherits it,
-    // which is what makes Stop end the LOOP and not just the pass in flight.
-    if (!opts?.loop) beginRun(convId)
 
     // Mode of THIS conversation (plan 2.6.6, C1). A pick made while the
     // previous run was still going has been parked; a send is where it takes
@@ -966,12 +969,21 @@ export function useCodex() {
     // delegate_task threads this straight back into runInLane instead of
     // guessing it holds the lane.
     run.heldLocalLane = heldLocalLane
-    setIsRunning(true)
-    codexStore.setThreadStatus(convId, 'running')
-    // Bind the generating flag to THIS conversation so the typing indicator +
-    // realtime counter show only in the coding chat that's actually running,
-    // not in every chat the user switches to (David 2026-06-12). Cleared below.
-    useGenerationStore.getState().setGenerating(convId, true)
+    // A Stop that landed before this controller existed had nothing to abort
+    // and already released the slot, so the finally below will not undo what
+    // is set here: marking the run as running now left "Working" counting with
+    // nothing behind it. The stop is recorded, so the run ends here without a
+    // request (Gegenprobe 01.10.2026).
+    const stoppedBeforeStart = isRunStopped(convId) || activeCodexRuns.get(convId) !== runToken
+    if (stoppedBeforeStart) abort.abort()
+    if (!stoppedBeforeStart) {
+      setIsRunning(true)
+      codexStore.setThreadStatus(convId, 'running')
+      // Bind the generating flag to THIS conversation so the typing indicator +
+      // realtime counter show only in the coding chat that's actually running,
+      // not in every chat the user switches to (David 2026-06-12). Cleared below.
+      useGenerationStore.getState().setGenerating(convId, true)
+    }
     // A run that threw mid-call left its label behind; this run starts clean.
     useRunActivityStore.getState().setActivity(convId, null)
     // Register the abort in the STORE, not just in hook refs (audit A2). The
@@ -980,7 +992,7 @@ export function useCodex() {
     // Stop button and a second instruction could start a parallel loop on the
     // same conversation. With the store aborter, stopCodex (any instance) and
     // chat deletion both reach the real controller. Cleared in finally.
-    useGenerationStore.getState().registerAborter(convId, () => {
+    if (!stoppedBeforeStart) useGenerationStore.getState().registerAborter(convId, () => {
       abort.abort()
       // Blocker 4 (review-lanes.md): scoped to THIS conversation's own media
       // generation. Passed bare (no arg) this used to cancel whichever

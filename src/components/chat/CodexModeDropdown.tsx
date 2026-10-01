@@ -119,7 +119,11 @@ export function CodexModeDropdown({ openUpward = false }: { openUpward?: boolean
       {open && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className={`absolute right-0 z-50 w-60 rounded-lg lu-elevated py-1.5 ${openUpward ? 'bottom-full mb-1' : 'top-full mt-1'}`}>
+          {/* left-0: the trigger sits at the LEFT of the composer row, so a
+              menu hung off its right edge ran 240px to the left and the panel
+              cut off the first letters ("ypass permissions", Gegenprobe
+              01.10.2026). The room is to the right. */}
+          <div className={`absolute left-0 z-50 w-60 rounded-lg lu-elevated py-1.5 ${openUpward ? 'bottom-full mb-1' : 'top-full mt-1'}`}>
             {!activeConvId ? (
               <p className="px-3 py-1.5 text-[0.5rem] text-gray-400">
                 Open a coding chat first, the mode lives on the conversation.

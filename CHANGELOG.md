@@ -34,7 +34,8 @@ cloud catalogue.
   call has arrived, for example "Preparing file_write 3 kB", as soon as the
   first piece is in. A run that waits for your approval says so in the
   chat too, and Stop before the first word leaves a short note instead of an
-  empty answer.
+  empty answer. Stop pressed right after Send ends the run on the first
+  press; before, the run could keep going or hang on "Working".
 - **Code conversations stay in the Code tab.** After a restart the last Code
   conversation opened in the Chat tab, where the agent was off and a
   "continue" ran without tools. The app now starts on an empty chat, and the
