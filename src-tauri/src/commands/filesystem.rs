@@ -558,21 +558,15 @@ fn resolve_path(path: &str, chat_id: Option<&str>, working_dir: Option<&str>) ->
     contain_within(&root, &candidate)
 }
 
-/// True when `path` LOOKS like the workspace ROOT itself ("", ".", "./",
-/// trailing slashes) rather than a named subpath. Used to decide whether a
-/// missing directory answers as the empty per-chat sandbox root.
-///
-/// A guess on the raw string, and it is wrong in both directions: it misses
-/// `"unterordner/.."` (which resolves to the root) and it claims `"  "` and
-/// `".\\"` (which resolve to ordinary files inside it, on a platform where a
-/// backslash is an ordinary character). That is affordable for its ONE caller —
-/// `fs_list`, where the answer only decides whether a missing directory reads
-/// as an empty listing or as "Not a directory", and either way nothing is
-/// written. It is NOT affordable for a write; see `reject_root_as_write_target`.
-fn is_workspace_root_path(path: &str) -> bool {
-    let t = path.trim().replace('\\', "/");
-    let t = t.trim_end_matches('/');
-    t.is_empty() || t == "."
+/// True when `dir`, already resolved, IS the workspace root of this chat.
+/// `fs_list` and `fs_search` answer a root that does not exist yet as empty
+/// (a fresh workspace has no files), every other missing path stays an error.
+/// Mutual containment like `reject_root_as_write_target`, so `"./."`,
+/// `"a/.."` and the absolute spelling all count, and case folds on Windows.
+fn resolves_to_workspace_root(dir: &Path, chat_id: Option<&str>, working_dir: Option<&str>) -> bool {
+    let root = lexical_normalize(&workspace_root(chat_id, working_dir));
+    let dir = lexical_normalize(dir);
+    is_within(&root, &dir) && is_within(&dir, &root)
 }
 
 /// KF-15 / KF-12: refuse a write whose target IS the workspace root.
@@ -587,10 +581,8 @@ fn is_workspace_root_path(path: &str) -> bool {
 /// a 6-byte file containing `GEHEIM` at the workspace root. The caller chose
 /// both the place and the content.
 ///
-/// ON THE RESOLVED PATH, NOT ON THE STRING. `is_workspace_root_path` above is a
-/// string guess with errors in both directions; a write cannot pay for either.
-/// The resolved path has already been through `contain_within`, so comparing it
-/// to the root is exact.
+/// ON THE RESOLVED PATH, NOT ON THE STRING. The resolved path has already been
+/// through `contain_within`, so comparing it to the root is exact.
 ///
 /// MUTUAL CONTAINMENT, NOT `==`. Same idiom as `may_be_a_picked_root`'s `same`
 /// closure — it is the only comparison in this file that folds case on Windows
@@ -860,8 +852,12 @@ pub fn fs_list(
         // measures this function, and
         // `the_dev_server_answers_the_root_the_same_way` reads the dev-server's
         // own source so the two cannot drift apart again.
-        let cleaned = normalize_duplicate_drive_prefix(&path);
-        if is_workspace_root_path(&cleaned) && !Path::new(&cleaned).is_absolute() {
+        //
+        // The root is recognised on the RESOLVED path, not on the string. The
+        // string guess knew "", "." and "./" only; Mistral listed "./." in the
+        // 3.0.4 box run and got "Not a directory" for its own fresh Code
+        // workspace, then told the user to check the path.
+        if resolves_to_workspace_root(&dir, chatId.as_deref(), workingDirectory.as_deref()) {
             return Ok(serde_json::json!({ "entries": [], "count": 0 }));
         }
         return Err(format!("Not a directory: {}", dir.display()));
@@ -942,6 +938,10 @@ pub fn fs_search(
 ) -> Result<serde_json::Value, String> {
     let dir = resolve_path(&path, chatId.as_deref(), workingDirectory.as_deref())?;
     if !dir.is_dir() {
+        // Same answer as fs_list: a workspace that has no file yet has no match.
+        if resolves_to_workspace_root(&dir, chatId.as_deref(), workingDirectory.as_deref()) {
+            return Ok(serde_json::json!({ "results": [], "count": 0 }));
+        }
         return Err(format!("Not a directory: {}", dir.display()));
     }
 
@@ -1108,7 +1108,7 @@ pub async fn save_binary_file_dialog(
 
 #[cfg(test)]
 mod tests {
-    use super::{allow_root_for_test, is_workspace_root_path, normalize_to_existing_style, resolve_path};
+    use super::{allow_root_for_test, normalize_to_existing_style, resolve_path};
     use crate::os_paths::test_dir;
     use std::path::Path;
 
@@ -1185,20 +1185,6 @@ mod tests {
     fn no_bom_stays_no_bom() {
         let existing = b"plain\n";
         assert_eq!(normalize_to_existing_style(Some(existing), "x\n"), b"x\n");
-    }
-
-    #[test]
-    fn workspace_root_paths_match() {
-        for p in ["", ".", "./", ".\\", "  .  ", "/", "\\"] {
-            assert!(is_workspace_root_path(p), "expected root-ish: {:?}", p);
-        }
-    }
-
-    #[test]
-    fn named_subpaths_are_not_root() {
-        for p in ["src", "./src", "package.json", "a/b", ".git", ".."] {
-            assert!(!is_workspace_root_path(p), "expected NOT root-ish: {:?}", p);
-        }
     }
 
     // ── #62: relative paths must honor the folder workspace ──────────
@@ -2126,9 +2112,8 @@ mod write_needs_a_target_tests {
         d
     }
 
-    /// Every spelling that RESOLVES to the workspace root. The first three are
-    /// the ones the string predicate `is_workspace_root_path` knows; the last
-    /// three it does not — they only collapse once `..` is applied.
+    /// Every spelling that RESOLVES to the workspace root, including the ones
+    /// that only collapse once `.` and `..` are applied.
     const ROOT_SPELLINGS: [&str; 6] = ["", ".", "./", "./.", "unterordner/..", "a/b/../.."];
 
     /// The sharp form: the caller picks BOTH the place and the content.
@@ -2291,10 +2276,10 @@ mod write_needs_a_target_tests {
     fn listing_a_root_that_does_not_exist_creates_nothing() {
         let parent = picked("list");
 
-        for spelling in ["", ".", "./"] {
+        for (n, spelling) in ROOT_SPELLINGS.iter().copied().enumerate() {
             // A fresh root per spelling: the first call must not be able to
             // create the directory the second one is asked about.
-            let root = parent.join(format!("ws-{}", spelling.len()));
+            let root = parent.join(format!("ws-{n}"));
             let root_arg = root.to_string_lossy().to_string();
             assert!(!root.exists(), "the fixture must not exist yet");
 
@@ -2302,9 +2287,13 @@ mod write_needs_a_target_tests {
                 .unwrap_or_else(|e| panic!("fs_list({spelling:?}) was refused: {e}"));
             assert_eq!(v["count"], 0);
             assert_eq!(v["entries"], serde_json::json!([]));
+            // A search of a workspace without files finds nothing, it is not an error.
+            let v = fs_search(spelling.into(), "x".into(), None, None, Some(root_arg.clone()))
+                .unwrap_or_else(|e| panic!("fs_search({spelling:?}) was refused: {e}"));
+            assert_eq!(v["count"], 0);
             assert!(
                 !root.exists(),
-                "fs_list({spelling:?}) created {} — a listing must not write",
+                "fs_list/fs_search({spelling:?}) created {} — a listing must not write",
                 root.display(),
             );
 
@@ -2391,47 +2380,20 @@ mod write_needs_a_target_tests {
         );
     }
 
-    // ── Why the guard measures the RESOLVED path and not the string ─────────
-
-    /// The string predicate is wrong in BOTH directions, which is why the guard
-    /// does not use it.
-    ///
-    /// * `"unterordner/.."` resolves to the root and the predicate says no.
-    /// * `"  "` and `".\\"` resolve to ordinary FILES inside the root (on Unix a
-    ///   backslash is an ordinary character) and the predicate says yes — a
-    ///   guard built on it would refuse two legitimate writes.
-    ///
-    /// `is_workspace_root_path` keeps its one caller, `fs_list`, where it only
-    /// decides whether to auto-create a directory and a wrong answer costs
-    /// nothing.
+    /// Names that only LOOK like the root are ordinary files and still write.
+    /// On Unix a space and a backslash are ordinary characters in a file name.
+    #[cfg(not(windows))]
     #[test]
-    fn the_string_predicate_disagrees_with_the_resolved_path() {
-        assert!(is_workspace_root_path(""));
-        assert!(is_workspace_root_path("."));
-        assert!(is_workspace_root_path("./"));
-        // Misses a root: `..` is never applied.
-        assert!(!is_workspace_root_path("unterordner/.."));
-        assert!(!is_workspace_root_path("a/b/../.."));
-
+    fn names_that_only_look_like_the_root_still_write() {
         let root = picked("predicate");
         let root_arg = root.to_string_lossy().to_string();
         let resolve = |p: &str| resolve_path(p, None, Some(&root_arg)).expect("resolve");
-        assert_eq!(resolve("unterordner/.."), lexical_normalize(&root));
-        assert_eq!(resolve("a/b/../.."), lexical_normalize(&root));
-
-        // Claims a root where the resolved path is a named child.
-        #[cfg(not(windows))]
-        {
-            assert!(is_workspace_root_path("  "));
-            assert!(is_workspace_root_path(".\\"));
-            assert_ne!(resolve("  "), lexical_normalize(&root));
-            assert_ne!(resolve(".\\"), lexical_normalize(&root));
-            // …and those writes still go through.
-            fs_write("  ".into(), "leerzeichen".into(), None, Some(root_arg.clone()))
-                .expect("a file named with a space was refused");
-            fs_write(".\\".into(), "backslash".into(), None, Some(root_arg))
-                .expect("a file named with a backslash was refused");
-        }
+        assert_ne!(resolve("  "), lexical_normalize(&root));
+        assert_ne!(resolve(".\\"), lexical_normalize(&root));
+        fs_write("  ".into(), "leerzeichen".into(), None, Some(root_arg.clone()))
+            .expect("a file named with a space was refused");
+        fs_write(".\\".into(), "backslash".into(), None, Some(root_arg))
+            .expect("a file named with a backslash was refused");
     }
 
     /// A COMPLETELY MISSING `path` — the dev-server's `{}` body — cannot reach
