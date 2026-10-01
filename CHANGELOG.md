@@ -23,6 +23,13 @@ cloud catalogue. It also fixes the bugs reported on GitHub and Discord since
   and renders picture and sound together, from a prompt or from a first frame.
   The Model Manager offers it as one download with its text encoder and both
   decoders.
+- **A download speed limit.** Settings, Model Storage takes a limit in MB/s
+  for the model files LU downloads itself, shared by all downloads at once.
+  0 means no limit. Ollama pulls and installs are not limited.
+- **The Local API shows what went through it.** While it runs, Settings,
+  Local API shows the requests and failures, the requests running now,
+  tokens in and out as the model server reports them, and the last model,
+  counted since the API started and kept in memory only.
 
 ### Fixed
 
@@ -44,6 +51,10 @@ cloud catalogue. It also fixes the bugs reported on GitHub and Discord since
 - **The window no longer disappears on Linux.** On Bazzite and other Linux
   systems with an AMD card the main window could vanish, under Wayland and
   X11. The window is no longer transparent on Linux (issue 145).
+- **A chat model from LM Studio says where it is deleted.** Its row has no
+  bin, because LM Studio offers no way to delete a model from outside, and
+  Details showed nothing. Details now says to delete it in LM Studio under
+  My Models, and does the same for other local servers.
 - **Installing the MLX engine in a browser dev build says what is wrong.** It
   said "Unknown backend command". It now says that the engine install needs the
   desktop app (issue 135).

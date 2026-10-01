@@ -147,8 +147,12 @@ export const RELEASE_NOTES: ReleaseNote[] = [
         detail: 'A MiniMax H3 file showed up as an image model. It now sits in the video list, also under a CivitAI name, and renders picture and sound together, from a prompt or from a first frame. The Model Manager offers it as one download.',
       },
       {
+        title: 'A download speed limit, and usage numbers for the Local API.',
+        detail: 'Settings, Model Storage takes a limit in MB/s for the model files LU downloads, shared by all downloads at once. While the Local API runs, its panel shows requests, failures, tokens in and out as the model server reports them, and the last model.',
+      },
+      {
         title: 'Fixes from GitHub and Discord.',
-        detail: 'A group chat answers with every LU Engine model in it, also when the models sit in your Model Storage folder. Ollama models download without one already installed. A GGUF from the CivitAI search lands where ComfyUI reads it. A fresh ComfyUI install on Windows gets its own Python environment, which fixes "hipdnn_backend.dll Bad Image" on AMD cards. The window no longer disappears on Linux. A character trained on your own machine takes up to 100 photos.',
+        detail: 'A group chat answers with every LU Engine model in it, also when the models sit in your Model Storage folder. Ollama models download without one already installed. A GGUF from the CivitAI search lands where ComfyUI reads it. A fresh ComfyUI install on Windows gets its own Python environment, which fixes "hipdnn_backend.dll Bad Image" on AMD cards. The window no longer disappears on Linux. A character trained on your own machine takes up to 100 photos, and Details on an LM Studio model says where to delete it.',
       },
       {
         title: 'Writing a long file no longer ends the run.',
