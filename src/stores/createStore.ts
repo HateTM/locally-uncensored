@@ -174,6 +174,27 @@ export const MODEL_TYPE_DEFAULTS: Record<ModelType, {
  *  entirely, which is never what Edit means (Discord 2026-09-25). */
 export const EDIT_MAX_DENOISE = 0.95
 
+/**
+ * The video settings a model starts with: its family's defaults, with the
+ * sampling of a distilled or fixed-schedule model on top (Lightning / Rapid
+ * AIO merges, CFG-distilled HunyuanVideo 1.5, LTX-2, Wan 2.2 A14B;
+ * comfyui.ts videoSamplingOverride). setVideoModel applied the override, but
+ * switching to the Video, Animate or Extend tab reset to the bare family
+ * numbers, so a Lightning merge went back to 30 steps / cfg 5 there.
+ */
+export function videoDefaultsFor(model: string) {
+  const d = MODEL_TYPE_DEFAULTS[classifyModel(model)] || MODEL_TYPE_DEFAULTS.unknown
+  const fast = model ? videoSamplingOverride(model) : null
+  return {
+    steps: fast ? fast.steps : d.steps,
+    cfgScale: fast ? fast.cfg : d.cfgScale,
+    sampler: d.sampler, scheduler: d.scheduler,
+    width: d.width, height: d.height,
+    ...(d.frames ? { frames: d.frames } : {}),
+    ...(d.fps ? { fps: d.fps } : {}),
+  }
+}
+
 /** HiDream I1 ships as fast, dev and full, three different samplers
  *  (hidream_i1_fast / _dev / _full templates). Fast is the type default. */
 export function hidreamDefaults(model: string): (typeof MODEL_TYPE_DEFAULTS)['hidream'] {
@@ -656,16 +677,7 @@ export const useCreateStore = create<CreateState>()(
         // Reset parameters to the correct defaults when switching modes
         // This prevents image resolution (1024x1024) leaking into video mode (causes HTTP 500)
         if (mode === 'video' && state.videoModel) {
-          const type = classifyModel(state.videoModel)
-          const defaults = MODEL_TYPE_DEFAULTS[type] || MODEL_TYPE_DEFAULTS.unknown
-          return {
-            mode,
-            steps: defaults.steps, cfgScale: defaults.cfgScale,
-            sampler: defaults.sampler, scheduler: defaults.scheduler,
-            width: defaults.width, height: defaults.height,
-            ...(defaults.frames ? { frames: defaults.frames } : {}),
-            ...(defaults.fps ? { fps: defaults.fps } : {}),
-          }
+          return { mode, ...videoDefaultsFor(state.videoModel) }
         }
         if (mode === 'image' && state.imageModel) {
           const defaults = MODEL_TYPE_DEFAULTS[state.imageModelType] || MODEL_TYPE_DEFAULTS.unknown
@@ -691,22 +703,11 @@ export const useCreateStore = create<CreateState>()(
         })
       },
       setVideoModel: (model) => {
-        const type = classifyModel(model)
-        const defaults = MODEL_TYPE_DEFAULTS[type] || MODEL_TYPE_DEFAULTS.unknown
         // Lightning/rapid merges are distilled to few steps at cfg 1 — the
         // architecture defaults (30 steps, cfg 5+) render them to mush. The
         // catalogue's HunyuanVideo 1.5 is CFG-distilled, LTX-2 runs a fixed
         // 8-sigma schedule, Wan 2.2 A14B its template's 20 steps / cfg 3.5.
-        const fast = videoSamplingOverride(model)
-        set({
-          videoModel: model,
-          steps: fast ? fast.steps : defaults.steps,
-          cfgScale: fast ? fast.cfg : defaults.cfgScale,
-          sampler: defaults.sampler, scheduler: defaults.scheduler,
-          width: defaults.width, height: defaults.height,
-          ...(defaults.frames ? { frames: defaults.frames } : {}),
-          ...(defaults.fps ? { fps: defaults.fps } : {}),
-        })
+        set({ videoModel: model, ...videoDefaultsFor(model) })
       },
       setSampler: (sampler) => set({ sampler }),
       setScheduler: (scheduler) => set({ scheduler }),
@@ -779,10 +780,8 @@ export const useCreateStore = create<CreateState>()(
           case 'extend': {
             // The local lane continues from the picked clip's last frame —
             // regular I2V models, regular video defaults.
-            const d = MODEL_TYPE_DEFAULTS[classifyModel(s.videoModel)] || MODEL_TYPE_DEFAULTS.unknown
             return { ...base, cloudOp: 'extend' as const, mode: 'video' as const, videoSubMode: 't2v' as const, ...dropAll,
-              steps: d.steps, cfgScale: d.cfgScale, sampler: d.sampler, scheduler: d.scheduler,
-              width: d.width, height: d.height, ...(d.frames ? { frames: d.frames } : {}), ...(d.fps ? { fps: d.fps } : {}) }
+              ...videoDefaultsFor(s.videoModel) }
           }
           case 'motion': {
             // Keeps the source slot (the character image the video drives).
@@ -799,16 +798,12 @@ export const useCreateStore = create<CreateState>()(
           case 'upscale':  return { ...base, utilityOp: 'upscale' as const, mode: 'image' as const, imageSubMode: 'img2img' as const, mask: null }
           case 'eraser':   return { ...base, utilityOp: 'eraser' as const, mode: 'image' as const, imageSubMode: 'img2img' as const }
           case 'video': {
-            const d = MODEL_TYPE_DEFAULTS[classifyModel(s.videoModel)] || MODEL_TYPE_DEFAULTS.unknown
             return { ...base, mode: 'video' as const, videoSubMode: 't2v' as const, ...dropAll,
-              steps: d.steps, cfgScale: d.cfgScale, sampler: d.sampler, scheduler: d.scheduler,
-              width: d.width, height: d.height, ...(d.frames ? { frames: d.frames } : {}), ...(d.fps ? { fps: d.fps } : {}) }
+              ...videoDefaultsFor(s.videoModel) }
           }
           case 'animate': {
-            const d = MODEL_TYPE_DEFAULTS[classifyModel(s.videoModel)] || MODEL_TYPE_DEFAULTS.unknown
             return { ...base, mode: 'video' as const, videoSubMode: 'i2v' as const, mask: null,
-              steps: d.steps, cfgScale: d.cfgScale, sampler: d.sampler, scheduler: d.scheduler,
-              width: d.width, height: d.height, ...(d.frames ? { frames: d.frames } : {}), ...(d.fps ? { fps: d.fps } : {}) }
+              ...videoDefaultsFor(s.videoModel) }
           }
         }
       }),
@@ -934,9 +929,13 @@ export const useCreateStore = create<CreateState>()(
       setCaps: (caps) => set({ caps }),
       resetParamsToModelDefaults: () => {
         const s = get()
+        // Video: the same starting point as picking the model (distilled
+        // merges keep their few steps). HiDream dev/full have their own.
         const d = s.mode === 'video'
-          ? (MODEL_TYPE_DEFAULTS[classifyModel(s.videoModel)] || MODEL_TYPE_DEFAULTS.unknown)
-          : MODEL_TYPE_DEFAULTS[s.imageModelType]
+          ? videoDefaultsFor(s.videoModel)
+          : s.imageModelType === 'hidream'
+            ? hidreamDefaults(s.imageModel)
+            : MODEL_TYPE_DEFAULTS[s.imageModelType]
         set({
           sampler: d.sampler,
           scheduler: d.scheduler,

@@ -153,7 +153,10 @@ async fn finish_test_task(id: &str) {
     // Eine Abbruchanforderung ist noch kein ausgefuehrter Abbruch.
     // Endet die Testlaufzeit vorher, verwirft Tokio den Empfaenger und wartet
     // unter Windows auf dessen blockierende Pipe-Leser bis zum Prozessende.
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    // 20 s, not 5: on a loaded Windows CI runner a PowerShell start alone has
+    // run past 5 s (list_returns_active_tasks_newest_first, 2026-10-02), for
+    // a task that only echoes. A task that really hangs still fails here.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
     loop {
         let status = shell_task_status_impl(&json!({ "id": id })).await.unwrap();
         if status["running"] == false { return; }
@@ -828,13 +831,20 @@ mod cancel_tests {
         }
 
         shell_task_kill_impl(&json!({ "id": id })).await.expect("kill");
-        tokio::time::sleep(std::time::Duration::from_millis(700)).await;
-
+        // Cancel only signals the task; its loop then runs kill_tree, which
+        // may take up to shell::TREE_KILL_SETTLE (1.5 s) on Windows by its own
+        // doc. A fixed 700 ms wait was shorter than that worst case and failed
+        // on a loaded runner (2026-10-02). Wait for the condition instead, with
+        // a deadline well above it: a grandchild that survives still fails.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
         for pid in &grandchildren {
-            assert!(
-                !alive(*pid),
-                "cancel killed the shell but left the grandchild ({pid}) running",
-            );
+            while alive(*pid) {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "cancel killed the shell but left the grandchild ({pid}) running",
+                );
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
         }
     }
 }
