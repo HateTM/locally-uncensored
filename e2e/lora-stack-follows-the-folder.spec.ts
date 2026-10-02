@@ -15,7 +15,7 @@ const STYLE = 'film_grain_xl.safetensors'
 const CHAR = 'char_mira_zimage.safetensors'
 
 async function bootWithFakeComfy(page: Page, loras: string[], imageModel: string) {
-  await page.addInitScript(tauriMockInit, { assistantReply: DEFAULT_ASSISTANT_REPLY, modelName: DEFAULT_MODEL_NAME, platform: 'windows' })
+  await page.addInitScript(tauriMockInit, { assistantReply: DEFAULT_ASSISTANT_REPLY, modelName: DEFAULT_MODEL_NAME, platform: 'windows' as const })
   await seedOnboardingDone(page)
   await page.addInitScript(([list, model, stale]) => {
     const w = window as unknown as { __LORAS__: string[]; __TAURI_INTERNALS__: { invoke: (c: string, a: { url?: string }) => Promise<unknown> } }

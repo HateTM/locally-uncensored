@@ -520,6 +520,10 @@ export async function backendCall<T = unknown>(
     // gives. See dev-server/mlx-media-stubs.ts for the shared stub handler
     // and its reasoning; the systematic check behind this list is
     // dev-server/__tests__/mlx-media-endpoint-coverage.test.ts.
+    // Desktop only, answered by a 501 stub in dev-server/remote-stubs.ts:
+    // the Local API usage counter and the download speed limit live in Rust.
+    local_api_usage: { path: "/local-api/local-api-usage" },
+    set_download_limit: { path: "/local-api/set-download-limit", method: "POST" },
     mlx_status: { path: "/local-api/mlx-status" },
     mlx_start: { path: "/local-api/mlx-start", method: "POST" },
     mlx_unload: { path: "/local-api/mlx-unload", method: "POST" },

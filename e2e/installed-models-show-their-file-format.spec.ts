@@ -9,7 +9,7 @@ import { seedOnboardingDone } from './support/cloud-mock'
  * .safetensors, and the cards must name each file's own format.
  */
 test('an installed .ckpt is labelled ckpt, a .safetensors safetensors', async ({ page }) => {
-  await page.addInitScript(tauriMockInit, { assistantReply: DEFAULT_ASSISTANT_REPLY, modelName: DEFAULT_MODEL_NAME, platform: 'windows' })
+  await page.addInitScript(tauriMockInit, { assistantReply: DEFAULT_ASSISTANT_REPLY, modelName: DEFAULT_MODEL_NAME, platform: 'windows' as const })
   await seedOnboardingDone(page)
   await page.addInitScript(() => {
     const bridge = (window as unknown as { __TAURI_INTERNALS__: { invoke: (c: string, a: { url?: string }) => Promise<unknown> } }).__TAURI_INTERNALS__

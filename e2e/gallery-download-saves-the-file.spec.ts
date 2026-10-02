@@ -12,7 +12,7 @@ import { seedOnboardingDone } from './support/cloud-mock'
 const FILE = 'red_apple_on_a_plate_k3f9q2_00001_.png'
 
 test('Download in the gallery strip opens the native Save dialog with the render', async ({ page }) => {
-  await page.addInitScript(tauriMockInit, { assistantReply: DEFAULT_ASSISTANT_REPLY, modelName: DEFAULT_MODEL_NAME, platform: 'windows' })
+  await page.addInitScript(tauriMockInit, { assistantReply: DEFAULT_ASSISTANT_REPLY, modelName: DEFAULT_MODEL_NAME, platform: 'windows' as const })
   await seedOnboardingDone(page)
   await page.addInitScript(([file]) => {
     localStorage.setItem('create-store', JSON.stringify({
