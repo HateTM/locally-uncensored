@@ -133,7 +133,7 @@ export const RELEASE_NOTES: ReleaseNote[] = [
   // 3.0.4, vorbereitet 30.09.2026 auf fix/agent-credit-burn: der Kundenfall
   // swift_maple90 (Code-Agent auf LU Cloud). package.json, Cargo.toml/.lock und
   // tauri.conf.json stehen im selben Zug auf 3.0.4. 3.0.3 darunter bleibt
-  // unveraendert. Veroeffentlicht wird erst auf Davids Go.
+  // unveraendert. Released 02.10.2026.
   {
     version: '3.0.4',
     headline: 'A fix for the Code agent on LU Cloud: long file writes no longer end the run, "continue" picks up where the run stopped, and the agent no longer spends requests on steps you did not ask for. Plus the bugs reported on GitHub and Discord since 3.0.3.',

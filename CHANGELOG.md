@@ -2,7 +2,7 @@
 
 All notable changes to Locally Uncensored are documented here.
 
-## [3.0.4] - unreleased
+## [3.0.4] - 2026-10-02
 
 A fix for the Code agent and the agent in chat on LU Cloud. Long file writes
 no longer end the run, "continue" picks up where a run stopped, and the agent
