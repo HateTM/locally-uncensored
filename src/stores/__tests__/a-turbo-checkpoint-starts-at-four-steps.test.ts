@@ -26,4 +26,30 @@ describe('distilled image checkpoints', () => {
     useCreateStore.getState().setImageModel('juggernautXL_v9.safetensors', 'sdxl')
     expect(useCreateStore.getState()).toMatchObject({ steps: MODEL_TYPE_DEFAULTS.sdxl.steps, cfgScale: MODEL_TYPE_DEFAULTS.sdxl.cfgScale })
   })
+
+  it('back from a MiniMax H3 video, Image gives sd_turbo its own values again (Gegenprobe 9)', () => {
+    const st = useCreateStore.getState()
+    st.setImageModel('sd_turbo.safetensors', 'sd15')
+    useCreateStore.setState({ videoModel: 'MiniMax-H3-test.safetensors' })
+    st.setIntent('video')
+    expect(useCreateStore.getState()).toMatchObject({ mode: 'video', sampler: 'res_multistep', width: 1344, height: 768 })
+    for (const intent of ['image', 'edit', 'removebg', 'upscale', 'eraser', 'character'] as const) {
+      useCreateStore.getState().setIntent('video')
+      useCreateStore.getState().setIntent(intent)
+      expect(useCreateStore.getState(), intent).toMatchObject({
+        mode: 'image', steps: 4, cfgScale: 1,
+        sampler: MODEL_TYPE_DEFAULTS.sd15.sampler, scheduler: MODEL_TYPE_DEFAULTS.sd15.scheduler,
+        width: 512, height: 512,
+      })
+    }
+  })
+
+  it('inside the image lane a switch keeps what the user tuned', () => {
+    const st = useCreateStore.getState()
+    st.setIntent('image')
+    st.setImageModel('sd_turbo.safetensors', 'sd15')
+    useCreateStore.setState({ steps: 9, width: 640 })
+    st.setIntent('edit')
+    expect(useCreateStore.getState()).toMatchObject({ steps: 9, width: 640 })
+  })
 })

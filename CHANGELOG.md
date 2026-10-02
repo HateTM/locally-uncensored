@@ -76,6 +76,10 @@ cloud catalogue. It also fixes the bugs reported on GitHub and Discord since
   "Generation failed".
 - **One message while ComfyUI starts.** The red "ComfyUI is not running" no
   longer stands next to "ComfyUI is starting up."
+- **Back from Video, the image model gets its own settings.** Image, Edit
+  and the other image modes only switched the mode, so an image model could
+  render with the video model's steps, sampler and size (sd_turbo after
+  MiniMax H3: 20 steps at 1344x768, several plates instead of one).
 - **New Chat in Code works like New.** The sidebar button added an empty
   "Coding Agent" on every click and reset Bypass to Ask; it now reuses an
   untouched session and keeps your mode.

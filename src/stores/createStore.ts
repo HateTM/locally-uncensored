@@ -579,6 +579,20 @@ export function distilledImageCheckpoint(model: string, type: ModelType): boolea
   return /(^|[^a-z])(turbo|lightning|hyper|lcm)([^a-z]|$)/i.test(model.replace(/^.*[\\/]/, ''))
 }
 
+/** The image model's own sampling values. Leaving the video lane has to put
+ *  them back: Image, Edit and the other image intents only flipped the mode,
+ *  so sd_turbo rendered with MiniMax H3's 20 steps, res_multistep and
+ *  1344x768 (3.0.4 Gegenprobe 9). */
+function imageModelParams(state: { imageModel: string; imageModelType: ModelType }) {
+  const defaults = MODEL_TYPE_DEFAULTS[state.imageModelType] || MODEL_TYPE_DEFAULTS.unknown
+  const distilled = distilledImageCheckpoint(state.imageModel, state.imageModelType)
+  return {
+    steps: distilled ? 4 : defaults.steps, cfgScale: distilled ? 1.0 : defaults.cfgScale,
+    sampler: defaults.sampler, scheduler: defaults.scheduler,
+    width: defaults.width, height: defaults.height,
+  }
+}
+
 export const useCreateStore = create<CreateState>()(
   persist(
     // Explicit param/return types: LU compiles with `strict: true` (the web
@@ -696,16 +710,7 @@ export const useCreateStore = create<CreateState>()(
             ...(defaults.fps ? { fps: defaults.fps } : {}),
           }
         }
-        if (mode === 'image' && state.imageModel) {
-          const defaults = MODEL_TYPE_DEFAULTS[state.imageModelType] || MODEL_TYPE_DEFAULTS.unknown
-          const distilled = distilledImageCheckpoint(state.imageModel, state.imageModelType)
-          return {
-            mode,
-            steps: distilled ? 4 : defaults.steps, cfgScale: distilled ? 1.0 : defaults.cfgScale,
-            sampler: defaults.sampler, scheduler: defaults.scheduler,
-            width: defaults.width, height: defaults.height,
-          }
-        }
+        if (mode === 'image' && state.imageModel) return { mode, ...imageModelParams(state) }
         return { mode }
       }),
       setImageSubMode: (subMode) => set({ imageSubMode: subMode }),
@@ -781,7 +786,10 @@ export const useCreateStore = create<CreateState>()(
         // mirror setMode's reset so image resolution never leaks into video.
         // A stale error from the previous intent never carries over.
         const dropAll = { source: null, mask: null, sourceSetAt: 0, references: [] }
-        const base = { removebg: false, utilityOp: null, cloudOp: null, error: null }
+        // Back from video, the image model gets its own values again; inside
+        // the image lane a switch keeps what the user tuned.
+        const back = s.mode === 'video' && s.imageModel ? imageModelParams(s) : {}
+        const base = { removebg: false, utilityOp: null, cloudOp: null, error: null, ...back }
         switch (intent) {
           // ── 2.5.8 cloud categories. Inputs specific to each (train set,
           // audio, driving video, extend pick) live in their own slots and are
