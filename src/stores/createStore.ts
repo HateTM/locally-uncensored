@@ -26,8 +26,11 @@ const RUNTIME_ONLY_KEYS: readonly string[] = [
   // own fields since this bugfix. Session-scratch like source/mask, not a
   // preference worth remembering across restarts.
   'cloudFrames', 'cloudFps',
+  // A scene from yesterday must not ride along into today's run.
+  'videoShots',
 ]
 import type { ModelType, ClassifiedModel } from '../api/comfyui'
+import { MAX_SHOTS, MAX_SHOT_CHARS } from '../lib/ltx-multishot'
 import { classifyModel, hidreamSampling } from '../api/comfyui'
 import type { HiresUpscaleMethod } from '../api/hires-fix'
 import { releaseVideoBlobUrl } from '../api/mlx-video'
@@ -381,6 +384,12 @@ interface CreateState {
   cloudStudioCredits: number | null
   /** Runtime-only: images per cloud run, 1 to 4 (Image and Edit). */
   cloudImageCount: number
+  /** LTX 2.5 multishot (lib/ltx-multishot.ts): the shots AFTER the prompt, which
+   *  is shot 1. Empty means a single shot. Runtime-only like the prompt itself:
+   *  a scene from yesterday must not ride along into today's run. */
+  videoShots: string[]
+  setVideoShotCount: (count: number) => void
+  setVideoShot: (index: number, text: string) => void
   /** Local Qwen-Image 2.1 only: write the picture with a transparent background
    *  (lib/transparent-image.ts). A preference like the HiRes switch, so it is
    *  remembered. */
@@ -706,6 +715,7 @@ export const useCreateStore = create<CreateState>()(
       cloudImageCount: 1,
       improvePrompt: false,
       transparentBackground: false,
+      videoShots: [],
       localOpModel: '',
       charactersVersion: 0,
       caps: { rmbg: false, 'inpaint-nodes': false, dwpose: false } as Record<'rmbg' | 'inpaint-nodes' | 'dwpose', boolean>,
@@ -958,6 +968,16 @@ export const useCreateStore = create<CreateState>()(
       setCloudStudioCredits: (cloudStudioCredits) => set({ cloudStudioCredits }),
       setCloudImageCount: (count) => set({ cloudImageCount: clampImageCount(count) }),
       setImprovePrompt: (on) => set({ improvePrompt: on === true }),
+      setVideoShotCount: (count) => set((st) => {
+        const further = Math.max(1, Math.min(MAX_SHOTS, Math.floor(count) || 1)) - 1
+        return { videoShots: Array.from({ length: further }, (_, i) => st.videoShots[i] ?? '') }
+      }),
+      setVideoShot: (index, text) => set((st) => {
+        if (index < 0 || index >= st.videoShots.length) return {}
+        const next = [...st.videoShots]
+        next[index] = text.slice(0, MAX_SHOT_CHARS)
+        return { videoShots: next }
+      }),
       setTransparentBackground: (on) => set({ transparentBackground: on === true }),
       // Picking a lane model adopts its architecture defaults (like
       // setVideoModel does) — an inherited 1024×1024 from the Image tab would

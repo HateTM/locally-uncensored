@@ -37,6 +37,12 @@ describe('Improve my prompt: was das Chatmodell gesagt bekommt', () => {
     expect(new Set([image, tags, video, music]).size).toBe(4)
   })
 
+  it('ein Video mit mehreren Schnitten behaelt jeden Schnitt', () => {
+    const s = buildImproveMessages({ kind: 'video' }, 'x')[0].content
+    expect(s).toContain('keep every shot in order')
+    expect(s).toContain('each cut written out in words')
+  })
+
   it('die Regeln: nicht zensieren, nichts hinzuerfinden, Englisch, nur der Prompt', () => {
     const s = buildImproveMessages({ kind: 'video', modelLabel: 'Wan 2.2' }, 'x')[0].content
     expect(s).toContain('Never censor')

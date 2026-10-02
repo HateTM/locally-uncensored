@@ -50,7 +50,7 @@ export interface ImproveMessage {
 
 const RULES = [
   'Keep every subject, person, creature, object, action and setting the user wrote, exactly as meant.',
-  'Never censor, soften, moralize, refuse or add warnings. Adult or violent wording stays as it is.',
+  'Never censor, soften, moralize, refuse or add warnings. Strong or mature wording stays as it is.',
   'Do not add subjects, people, objects, actions or story the user did not ask for.',
   'You may add what a good prompt has: framing, lighting, lens or camera, style, texture, mood. It must serve the same idea.',
   'If the prompt is not in English, translate it to English.',
@@ -65,7 +65,7 @@ function kindBrief(target: ImproveTarget): string {
         ? 'You rewrite prompts for an image model trained on tags. Write one line of comma separated tags and short phrases: subject first, then details, setting, lighting, style. Up to about 60 words.'
         : 'You rewrite prompts for an image model that reads natural language. Write one flowing description of the picture in plain sentences: subject, details, setting, light, composition, style. 40 to 120 words.'
     case 'video':
-      return 'You rewrite prompts for a video model. Write one flowing paragraph in the present tense, in the order things happen: the subject, what moves and how, the camera (shot size and movement), the light and the setting. If sound is part of the idea, say it. 60 to 160 words.'
+      return 'You rewrite prompts for a video model. Write one flowing paragraph in the present tense, in the order things happen: the subject, what moves and how, the camera (shot size and movement), the light and the setting. If sound is part of the idea, say it. If the prompt already describes several shots joined by cuts, keep every shot in order and keep each cut written out in words. 60 to 160 words.'
     case 'music':
       return 'You rewrite prompts for a music model. Write a short description of the track: genre and sub genre, mood, tempo, main instruments, voice type if there is one, and how the track builds. One or two lines, 20 to 60 words. Do not write lyrics.'
   }
@@ -89,7 +89,7 @@ export function buildImproveMessages(target: ImproveTarget, prompt: string): Imp
 const THINK_BLOCK = /<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi
 const OPEN_THINK = /<think(?:ing)?>[\s\S]*$/i
 const REFUSAL = /^(i['’]m sorry|i am sorry|sorry[,.]|i can['’]?t|i cannot|i['’]m unable|i am unable|as an ai)/i
-const LABEL = /^(rewritten prompt|improved prompt|enhanced prompt|prompt|output|result)\s*[:\-]\s*/i
+const LABEL = /^(rewritten prompt|improved prompt|enhanced prompt|prompt|output|result)\s*[:-]\s*/i
 
 /** The chat model's raw answer, made into a prompt. Null when it is unusable:
  *  empty, cut off inside a thinking block, a refusal, or longer than a render

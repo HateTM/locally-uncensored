@@ -19,6 +19,7 @@ import { cn } from '../ui/cn'
 import { HINWEIS_TEXT } from '../../../lib/hinweis'
 import { lorasForRun, loraFitsModel } from '../../../lib/lora-stack'
 import { supportsTransparent } from '../../../lib/transparent-image'
+import { MAX_SHOTS, MAX_SHOT_CHARS, supportsMultishot } from '../../../lib/ltx-multishot'
 
 // Video families whose dynamic-workflow strategy actually wires a LoRA node:
 // the generic UNET path (wan/hunyuan/ltx/mochi/cosmos) plus Wan 2.2's dedicated
@@ -90,6 +91,10 @@ export function ParamGroups() {
   // Transparent background: local Qwen-Image 2.1 text-to-image only, the one
   // model family whose VAE writes an alpha channel (lib/transparent-image.ts).
   const showTransparent = !isCloud && !isVideo && meta.id === 'image' && !isMlxLocal && supportsTransparent(laneType)
+
+  // Shots: LTX 2.5 can cut between several shots in one run, with the same
+  // figure (lib/ltx-multishot.ts). Local text-to-video on that model only.
+  const showShots = !isCloud && meta.id === 'video' && !isMlxLocal && supportsMultishot(laneType)
 
   const samplers = samplerList.length ? samplerList : SAMPLERS_FALLBACK
   const schedulers = schedulerList.length ? schedulerList : SCHEDULERS_FALLBACK
@@ -222,7 +227,7 @@ export function ParamGroups() {
           >
             <span>
               <span className="block t-control text-gray-300">Transparent background</span>
-              <span className="block text-[11px] leading-4 text-gray-600">Saves a PNG with a see-through background</span>
+              <span className="block t-micro text-gray-600">Saves a PNG with a see-through background</span>
             </span>
             <span className={cn('t-mono text-xs', s.transparentBackground ? 'text-emerald-400' : 'text-gray-600')}>
               {s.transparentBackground ? 'on' : 'off'}
@@ -230,6 +235,29 @@ export function ParamGroups() {
           </button>
         )}
         {!isVideo && !isCloud && <Slider label="Batch size" min={1} max={8} step={1} value={s.batchSize} onChange={s.setBatchSize} />}
+        {showShots && (
+          <div className="space-y-2">
+            <Slider label="Shots" min={1} max={MAX_SHOTS} step={1} value={1 + s.videoShots.length} onChange={s.setVideoShotCount} />
+            {s.videoShots.map((text, i) => (
+              <label key={i} className="block space-y-1">
+                <span className="t-control text-gray-400">Shot {i + 2}</span>
+                <textarea
+                  rows={2}
+                  maxLength={MAX_SHOT_CHARS}
+                  value={text}
+                  onChange={(e) => s.setVideoShot(i, e.target.value)}
+                  placeholder="Describe the next shot…"
+                  className="w-full resize-none rounded-[var(--radius-control)] border border-white/[0.08] bg-white/[0.04] px-2.5 py-1.5 t-control text-gray-200 outline-none transition-colors placeholder:text-gray-600 focus:border-white/25"
+                />
+              </label>
+            ))}
+            <p className="t-micro text-gray-600">
+              {s.videoShots.length === 0
+                ? 'One shot. Add more to cut between shots in one clip.'
+                : 'Shot 1 is your prompt. Describe the same person the same way in every shot. More shots need a longer clip.'}
+            </p>
+          </div>
+        )}
         {isVideo && (
           <div className="grid grid-cols-2 gap-2">
             <Slider label="Frames" min={1} max={120} step={1} value={s.frames} onChange={s.setFrames} />

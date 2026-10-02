@@ -61,6 +61,7 @@ import { useDownloadStore } from '../stores/downloadStore'
 import { useComfyInstallStore } from '../stores/comfyInstallStore'
 import { checkPromptSafety, SAFETY_BLOCK_MESSAGE } from '../lib/render/safety'
 import { wantsTransparent } from '../lib/transparent-image'
+import { scenePromptFor } from '../lib/ltx-multishot'
 import { improveKindForIntent } from '../lib/render/improve-prompt'
 import { improvePrompt } from '../lib/render/improve-prompt-run'
 import { resolveRunSeed } from '../lib/run-seed'
@@ -572,7 +573,7 @@ export function useCreate() {
     // 2026-08-14).
     {
       const verdict = checkPromptSafety(
-        `${state.prompt} ${state.negativePrompt} ${state.musicLyrics} ${state.triggerWord}`,
+        `${state.prompt} ${state.negativePrompt} ${state.musicLyrics} ${state.triggerWord} ${state.videoShots.join(' ')}`,
       )
       if (verdict.blocked) {
         state.setError(SAFETY_BLOCK_MESSAGE)
@@ -639,23 +640,34 @@ export function useCreate() {
         ? imageModel
         : (state.imageModelList[0]?.name ?? imageModel)
 
+    // LTX 2.5 multishot: the prompt field is shot 1, the shots from the advanced
+    // settings follow, each cut written out in plain words (lib/ltx-multishot).
+    // The rewrite below sees the whole scene, so it keeps the cuts.
+    // The model the run really uses: the picker shows the first capable one when
+    // the stored pick cannot run the intent, and so does the submit below.
+    const capableVideo = !localOp && mode === 'video' && state.videoModelList.length > 0 ? videoLaneModels(state.videoModelList, intent) : []
+    const effVideoModel = capableVideo.length > 0 && !capableVideo.some((m) => m.name === videoModel) ? capableVideo[0].name : videoModel
+    const scenePrompt = scenePromptFor({
+      prompt: typedPrompt, shots: state.videoShots, mode, intent, onMlxHost: isMlxImageHost(),
+      modelType: state.videoModelList.find((m) => m.name === effVideoModel)?.type ?? classifyModel(effVideoModel),
+    })
     // "Improve my prompt": the chat model the user picked rewrites the prompt
     // for this model before the run. Local chat models run on this machine,
     // LU Cloud ones are billed like chat. The field itself is never touched:
     // the run uses `prompt`, the gallery keeps both. A rewrite that fails never
     // stops the run, it goes on with the user's own prompt.
-    let prompt = typedPrompt
+    let prompt = scenePrompt
     let improveFields: { promptOriginal?: string; improveFailed?: true } = {}
     const improveKind = state.improvePrompt ? improveKindForIntent(intent) : null
-    if (improveKind && typedPrompt.trim()) {
+    if (improveKind && scenePrompt.trim()) {
       const own = new AbortController()
       abortRef.current = own
       setIsGenerating(true)
       setProgress(3, 'Improving your prompt…')
-      const runModel = improveKind === 'music' ? state.localOpModel : improveKind === 'video' ? videoModel : effImageModel
+      const runModel = improveKind === 'music' ? state.localOpModel : improveKind === 'video' ? effVideoModel : effImageModel
       let out: Awaited<ReturnType<typeof improvePrompt>> = { status: 'failed' }
       try {
-        out = await improvePrompt(typedPrompt, {
+        out = await improvePrompt(scenePrompt, {
           kind: improveKind,
           modelLabel: runModel || undefined,
           tags: improveKind === 'image' && ['sd15', 'sdxl'].includes(state.imageModelList.find((m) => m.name === runModel)?.type ?? classifyModel(runModel)),
@@ -671,7 +683,7 @@ export function useCreate() {
       // prompt, the model must not turn it into a refusal.
       if (out.status === 'improved' && !checkPromptSafety(out.prompt).blocked) {
         prompt = out.prompt
-        improveFields = { promptOriginal: typedPrompt }
+        improveFields = { promptOriginal: scenePrompt }
       } else if (out.status !== 'unchanged') {
         improveFields = { improveFailed: true }
       }
