@@ -95,6 +95,9 @@ test('a Z-Image character on an SDXL checkpoint says so and is not counted', asy
   await bootWithFakeComfy(page, [STYLE, CHAR], 'juggernautXL.safetensors')
   await openStack(page)
   await page.getByRole('button', { name: /char_mira_zimage/ }).click()
-  await expect(page.getByRole('button', { name: /char_mira_zimage/ })).toContainText('Z-Image only')
+  const row = page.getByRole('button', { name: /char_mira_zimage/ })
+  await expect(row).toContainText('Z-Image only')
   await expect(page.getByText(/active/)).toHaveCount(0)
+  // Gegenprobe 02.10.: the row showed a strength slider as if it applied.
+  await expect(row.locator('xpath=..').getByRole('slider')).toHaveCount(0)
 })

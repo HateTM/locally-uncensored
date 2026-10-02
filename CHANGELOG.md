@@ -56,6 +56,9 @@ cloud catalogue. It also fixes the bugs reported on GitHub and Discord since
   bin, because LM Studio offers no way to delete a model from outside, and
   Details showed nothing. Details now says to delete it in LM Studio under
   My Models, and does the same for other local servers.
+- **No download offer while ComfyUI is starting.** Right after launch the
+  Create stage could offer the 6.5 GB starter download while ComfyUI was still
+  coming up and the models were already on disk. It now waits.
 - **A downloaded render is the render you picked.** After a gallery delete,
   ComfyUI could give the next render with the same prompt the freed file name,
   and downloading the older entry then saved the newer picture. Every run now

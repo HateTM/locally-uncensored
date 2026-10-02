@@ -37,9 +37,11 @@ interface Props {
    *  as onEditResult above. */
   onAnimateResult?: (item: GalleryItem) => void
   onFullscreen: (item: GalleryItem) => void
+  /** ComfyUI is coming up: no setup card in that window (./stageGate). */
+  comfyStarting?: boolean
 }
 
-export function Stage({ displayed, onOpenMaskEditor, onEditResult, onAnimateResult, onFullscreen }: Props) {
+export function Stage({ displayed, onOpenMaskEditor, onEditResult, onAnimateResult, onFullscreen, comfyStarting }: Props) {
   const intent = useCreateStore((s) => s.intent())
   const meta = INTENT_MAP[intent]
   const isGenerating = useCreateStore((s) => s.isGenerating)
@@ -78,6 +80,7 @@ export function Stage({ displayed, onOpenMaskEditor, onEditResult, onAnimateResu
     requiresModels: meta.requiresModels,
     mlxMissing,
     connected,
+    comfyStarting,
     modelsLoaded,
     laneModelCount: laneModelCount(intent, meta.requiresModels, {
       image: imageModelList, video: videoModelList, audio: audioModelList,

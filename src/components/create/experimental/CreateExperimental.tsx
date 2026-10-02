@@ -5,7 +5,7 @@ import { useCreateStore, type GalleryItem } from '../../../stores/createStore'
 import { useCloudNoticeStore, CLOUD_RETENTION_DAYS, shouldShowRetentionNotice } from '../../../stores/cloudNoticeStore'
 import { useComfyNoticeStore } from '../../../stores/comfyNoticeStore'
 import { loadComfyCorsSignature, shouldShowCorsNotice } from '../../../lib/comfy-cors-notice'
-import { comfyIdleNotice, shouldWatchComfyIdle, IDLE_WATCH_INTERVAL_MS } from '../../../lib/comfy-idle-watch'
+import { comfyIdleNotice, shouldWatchComfyIdle, IDLE_WATCH_INTERVAL_MS, IDLE_STARTING } from '../../../lib/comfy-idle-watch'
 import type { ComfyGuardStatus } from '../../../lib/comfy-restart-guard'
 import { useWorkflowStore } from '../../../stores/workflowStore'
 import { CreateExpProvider, useCreateExp } from './CreateContext'
@@ -221,11 +221,13 @@ function CreateExperimentalInner() {
   // `error` ist davon ausgenommen: das sind Laufzeitfehler eines konkreten
   // Laufs, die die Karte nicht erklaert — und nur sie tragen das
   // Schliesskreuz.
+  const comfyStarting = idleNotice === IDLE_STARTING
   const setupCardOwnsStage = stageShowsSetupCard({
     backend,
     requiresModels: INTENT_MAP[intent].requiresModels,
     mlxMissing,
     connected,
+    comfyStarting,
     modelsLoaded,
     laneModelCount: laneModelCount(intent, INTENT_MAP[intent].requiresModels, {
       image: imageModelList, video: videoModelList, audio: audioModelList,
@@ -424,6 +426,7 @@ function CreateExperimentalInner() {
           onEditResult={editAvailable ? (it) => { void editResultWithMask(it) } : undefined}
           onAnimateResult={animateAvailable ? (it) => { void animateResult(it) } : undefined}
           onFullscreen={(it) => setLightbox(it)}
+          comfyStarting={comfyStarting}
         />
         <CreatePanel open={panelOpen} onOpenChange={setPanelOpen} activeId={shownId} onSelect={openGalleryItem} />
         <PresetShelf

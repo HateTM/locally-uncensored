@@ -123,6 +123,9 @@ describe('D-S31: die Regel selbst', () => {
 
   it('meldet ein nicht erreichbares ComfyUI', () => {
     expect(stageShowsSetupCard({ ...basis, connected: false })).toBe(true)
+    // Gegenprobe 02.10.2026: while ComfyUI is starting, the probe says false
+    // and the models are already on disk. No 6.5 GB offer in that window.
+    expect(stageShowsSetupCard({ ...basis, connected: false, comfyStarting: true })).toBe(false)
   })
 
   it('meldet eine leere Spur', () => {

@@ -267,7 +267,7 @@ export function ParamGroups() {
                       <span className="truncate">{name.replace(/\.safetensors$/, '')}</span>
                       <span className={cn('t-mono', active && fits ? 'text-emerald-400' : 'text-gray-600')}>{active ? (fits ? 'on' : 'Z-Image only') : 'off'}</span>
                     </button>
-                    {active && (
+                    {active && fits && (
                       <div className="px-2.5 pb-2">
                         <Slider min={0} max={2} step={0.05} value={active.strength} onChange={(v) => s.setLoraStrengthFor(name, v)} format={(v) => v.toFixed(2)} />
                       </div>
