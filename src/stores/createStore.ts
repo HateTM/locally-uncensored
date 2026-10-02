@@ -236,6 +236,12 @@ export interface GalleryItem {
   /** Kurze Ueberschrift, wenn der Prompt nicht sagt, was dabei herauskam: der
    *  Titel des Presets, die Beschreibung des Schrittes. Siehe gallery-label.ts. */
   label?: string
+  /** "Improve my prompt": what the user typed, when the run was sent with a
+   *  rewritten prompt. `prompt` then holds the rewrite, the text that ran. */
+  promptOriginal?: string
+  /** "Improve my prompt" was on but the rewrite failed, the run used the
+   *  user's own prompt. Said in the details, nowhere else. */
+  improveFailed?: boolean
   /** MLX video (Mac, Apple Silicon): absolute filesystem path of the finished
    *  mp4, as returned by `video_generate`'s `output` field. Playback/download
    *  go through `dataUrl` (a blob: URL, see above) instead — this is kept
@@ -372,6 +378,9 @@ interface CreateState {
   cloudStudioCredits: number | null
   /** Runtime-only: images per cloud run, 1 to 4 (Image and Edit). */
   cloudImageCount: number
+  /** Advanced settings switch: a chat model rewrites the prompt before a run. Off by default, remembered. */
+  improvePrompt: boolean
+  setImprovePrompt: (on: boolean) => void
   /** Runtime-only: the LOCAL model picked inside a specialized lane (ACE
    *  checkpoint / S2V UNet / Animate-VACE UNet). One slot for all lanes —
    *  resolveLocalOpPick coerces a stale cross-lane pick onto the lane's list
@@ -687,6 +696,7 @@ export const useCreateStore = create<CreateState>()(
       cloudStudioOptions: {} as Record<string, unknown>,
       cloudStudioCredits: null as number | null,
       cloudImageCount: 1,
+      improvePrompt: false,
       localOpModel: '',
       charactersVersion: 0,
       caps: { rmbg: false, 'inpaint-nodes': false, dwpose: false } as Record<'rmbg' | 'inpaint-nodes' | 'dwpose', boolean>,
@@ -938,6 +948,7 @@ export const useCreateStore = create<CreateState>()(
       setCloudStudioOptions: (cloudStudioOptions) => set({ cloudStudioOptions }),
       setCloudStudioCredits: (cloudStudioCredits) => set({ cloudStudioCredits }),
       setCloudImageCount: (count) => set({ cloudImageCount: clampImageCount(count) }),
+      setImprovePrompt: (on) => set({ improvePrompt: on === true }),
       // Picking a lane model adopts its architecture defaults (like
       // setVideoModel does) — an inherited 1024×1024 from the Image tab would
       // OOM a 14B S2V run on consumer VRAM.
@@ -1189,6 +1200,7 @@ export const useCreateStore = create<CreateState>()(
         // staged media (blobs / object URLs) and cloudOp are runtime-only.
         musicDuration: state.musicDuration,
         musicHowtoSeen: state.musicHowtoSeen,
+        improvePrompt: state.improvePrompt,
         triggerWord: state.triggerWord,
         trainSteps: state.trainSteps,
         // Studio: the picked step's option values are a preference like the

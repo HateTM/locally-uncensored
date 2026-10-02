@@ -5,6 +5,7 @@ import { coldLoadHint } from '../../../lib/cold-load-notice'
 import { useCreateStore, type GalleryItem, type ProgressPhase } from '../../../stores/createStore'
 import { isMlxImageHost } from '../../../api/mlx-image'
 import { ICON_LG, ICON_STROKE_MARK } from '../../ui/icon-size'
+import { PromptDetails } from './PromptDetails'
 import { markGalleryItemAvailable } from './galleryUrl'
 import { downloadGalleryItem } from './galleryDownload'
 import { galleryLabel } from '../../../lib/render/gallery-label'
@@ -221,6 +222,7 @@ export function ResultView({ item, onFullscreen, onSendToEditor, onAnimate }: Re
       {item.runNote && (
         <div className="mt-1 t-mono text-gray-500" data-testid="run-note">{item.runNote}</div>
       )}
+      <PromptDetails item={item} className="mt-2" />
      </div>
     </div>
   )

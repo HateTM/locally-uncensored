@@ -42,6 +42,8 @@ import { STANDARD_UPSCALE, intentRoles, intentRequiredInputs, isStudioModel, res
 import { bumpSeed, runImageCount } from '../lib/render/image-count'
 import { STUDIO_MODELS, studioFields } from '../lib/render/studio-contract'
 import { modelLabel } from '../lib/render/preset-models'
+import { improveKindForIntent } from '../lib/render/improve-prompt'
+import { improvePrompt } from '../lib/render/improve-prompt-run'
 import { bookedVideoSeconds } from '../lib/render/video-duration'
 import { studioQuote, StudioQuoteChangedError } from '../api/cloud/studio'
 import { MIN_TRAIN_IMAGES, maxTrainImages } from '../lib/train-image-cap'
@@ -553,6 +555,27 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
         }
       }
 
+      // "Improve my prompt": the chat model the user picked rewrites the prompt
+      // for this model before the run. On LU Cloud that is a small chat call,
+      // billed like chat. The run sends the rewrite and the gallery keeps both.
+      // A rewrite that fails never stops the run.
+      let runPrompt = s.prompt
+      let promptOriginal: string | undefined
+      let improveFailed = false
+      const improveKind = s.improvePrompt && !characterUse ? improveKindForIntent(intent) : null
+      if (improveKind && s.prompt.trim() && !ac.signal.aborted) {
+        s.setProgress(8, 'Improving your prompt…')
+        const out = await improvePrompt(s.prompt, { kind: improveKind, modelLabel: modelLabel(model) }, ac.signal)
+        // The safety check covers the rewrite too: the user wrote an allowed
+        // prompt, the model must not turn it into a refusal.
+        if (out.status === 'improved' && !clientSafety(out.prompt).blocked) {
+          runPrompt = out.prompt
+          promptOriginal = s.prompt
+        } else if (out.status !== 'unchanged' && !ac.signal.aborted) {
+          improveFailed = true
+        }
+      }
+
       // Bail before the (credit-claiming) submit if the user cancelled while
       // we were uploading inputs.
       if (ac.signal.aborted) return
@@ -587,7 +610,7 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
         for (const k of ['source_path', 'image_paths', 'mask_path', 'audio_path', 'audio2_path', 'video_path', 'last_image_path', 'shot_type'] as const) {
           if (params[k] !== undefined) quoteFields[k] = params[k]
         }
-        const quote = await studioQuote(studioModel, s.prompt, {
+        const quote = await studioQuote(studioModel, runPrompt, {
           op: 'studio',
           studio_options: studioOptionsFiltered ?? {},
           ...quoteFields,
@@ -637,7 +660,7 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
       s.setProgress(10, 'Submitting to the render queue…')
       // Mehrere Bilder: der Server bucht jedes als eigenen Auftrag und nennt alle.
       if (count > 1) params.count = count
-      const submitted = await submitCloudJob({ kind, model, prompt: s.prompt, params })
+      const submitted = await submitCloudJob({ kind, model, prompt: runPrompt, params })
       const id = submitted.id
       // Ein Server, der die Anzahl nicht kennt, bucht genau einen Auftrag und
       // nennt keine Liste: dann laeuft ein Bild, und der Kunde erfaehrt es.
@@ -665,7 +688,9 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
       const addResult = (job: CloudJob, index = 0) => useCreateStore.getState().addToGallery({
         ...galleryItemFromJob(job),
         model: galleryModel,
-        prompt: OP_GALLERY_LABEL[op] ?? s.prompt,
+        prompt: OP_GALLERY_LABEL[op] ?? runPrompt,
+        promptOriginal,
+        improveFailed: improveFailed || undefined,
         label,
         negativePrompt: s.negativePrompt,
         // Jeder Auftrag eines Laufs rechnet mit Keim + Index (der Server bumpt

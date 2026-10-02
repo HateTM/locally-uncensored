@@ -60,6 +60,8 @@ import { buildWithFixups, wasDeclined, type FixupDeps } from '../lib/render-fixu
 import { useDownloadStore } from '../stores/downloadStore'
 import { useComfyInstallStore } from '../stores/comfyInstallStore'
 import { checkPromptSafety, SAFETY_BLOCK_MESSAGE } from '../lib/render/safety'
+import { improveKindForIntent } from '../lib/render/improve-prompt'
+import { improvePrompt } from '../lib/render/improve-prompt-run'
 import { resolveRunSeed } from '../lib/run-seed'
 import {
   clearTrainingSet, stageTrainingImage, startCharacterTraining,
@@ -584,7 +586,7 @@ export function useCreate() {
       return
     }
     const {
-      mode, prompt, negativePrompt, imageModel, videoModel,
+      mode, prompt: typedPrompt, negativePrompt, imageModel, videoModel,
       sampler, scheduler, steps, cfgScale, width, height, seed, batchSize, frames, fps, denoise,
       hiresFixEnabled, hiresScale, hiresDenoise, hiresSteps, hiresUpscaleMethod, i2iImage, i2vImage,
       source, references, mask, growMaskBy, removebg, selectedLoras, selectedVae, clipSkip,
@@ -636,6 +638,44 @@ export function useCreate() {
         ? imageModel
         : (state.imageModelList[0]?.name ?? imageModel)
 
+    // "Improve my prompt": the chat model the user picked rewrites the prompt
+    // for this model before the run. Local chat models run on this machine,
+    // LU Cloud ones are billed like chat. The field itself is never touched:
+    // the run uses `prompt`, the gallery keeps both. A rewrite that fails never
+    // stops the run, it goes on with the user's own prompt.
+    let prompt = typedPrompt
+    let improveFields: { promptOriginal?: string; improveFailed?: true } = {}
+    const improveKind = state.improvePrompt ? improveKindForIntent(intent) : null
+    if (improveKind && typedPrompt.trim()) {
+      const own = new AbortController()
+      abortRef.current = own
+      setIsGenerating(true)
+      setProgress(3, 'Improving your prompt…')
+      const runModel = improveKind === 'music' ? state.localOpModel : improveKind === 'video' ? videoModel : effImageModel
+      let out: Awaited<ReturnType<typeof improvePrompt>> = { status: 'failed' }
+      try {
+        out = await improvePrompt(typedPrompt, {
+          kind: improveKind,
+          modelLabel: runModel || undefined,
+          tags: improveKind === 'image' && ['sd15', 'sdxl'].includes(state.imageModelList.find((m) => m.name === runModel)?.type ?? classifyModel(runModel)),
+        }, own.signal)
+      } finally {
+        if (abortRef.current === own) abortRef.current = null
+        setIsGenerating(false)
+        setProgress(0)
+      }
+      // Cancel pressed while the chat model was writing: the run does not start.
+      if (own.signal.aborted) return
+      // The safety check covers the rewrite too: the user wrote an allowed
+      // prompt, the model must not turn it into a refusal.
+      if (out.status === 'improved' && !checkPromptSafety(out.prompt).blocked) {
+        prompt = out.prompt
+        improveFields = { promptOriginal: typedPrompt }
+      } else if (out.status !== 'unchanged') {
+        improveFields = { improveFailed: true }
+      }
+    }
+
     // ── MLX image pipeline (Apple Silicon) — hard rule: Mac local image is the
     // in-process MLX path, never ComfyUI. Gated on the derived `image` intent
     // (which already means: no cloudOp, no utilityOp, no removebg, text2img)
@@ -649,7 +689,7 @@ export function useCreate() {
       setIsGenerating(true)
       state.setProgressPhase('loading-model')
       setProgress(10, 'Starting MLX image generation...')
-      addToPromptHistory(prompt)
+      addToPromptHistory(typedPrompt)
       const startTime = Date.now()
       try {
         state.setProgressPhase('sampling')
@@ -667,7 +707,7 @@ export function useCreate() {
           id: uuid(), type: 'image', filename: `mlx-${Date.now()}.png`, subfolder: '',
           // localPath is what survives the restart: partialize strips dataUrl,
           // and there is no ComfyUI /view to fall back to on a Mac.
-          dataUrl, localPath, prompt, negativePrompt, model: imageModel, modelType: 'unknown',
+          dataUrl, localPath, prompt, ...improveFields, negativePrompt, model: imageModel, modelType: 'unknown',
           seed: runSeed, steps, cfgScale, sampler, scheduler,
           width: outW || width, height: outH || height, batchSize: 1,
           createdAt: Date.now(), builderUsed: 'dynamic', intent,
@@ -710,7 +750,7 @@ export function useCreate() {
       setIsGenerating(true)
       state.setProgressPhase('loading-model')
       setProgress(0, 'Starting MLX video generation...')
-      addToPromptHistory(prompt)
+      addToPromptHistory(typedPrompt)
       const startTime = Date.now()
       abortRef.current = new AbortController()
       let result: Awaited<ReturnType<typeof generateVideo>>
@@ -773,7 +813,7 @@ export function useCreate() {
                   // Keep the real on-disk path too, for a future
                   // download-to-disk path that wants to reference it directly.
                   localPath: result.output,
-                  prompt, negativePrompt, model: videoModel, modelType: 'wan',
+                  prompt, ...improveFields, negativePrompt, model: videoModel, modelType: 'wan',
                   seed: runSeed, steps, cfgScale, sampler, scheduler,
                   width, height, batchSize: 1,
                   createdAt: Date.now(), builderUsed: 'dynamic', intent,
@@ -1247,7 +1287,7 @@ export function useCreate() {
         return
       }
       setCurrentPromptId(promptId)
-      addToPromptHistory(prompt)
+      addToPromptHistory(typedPrompt)
 
       // Build node ID → class_type map from workflow for phase detection
       const nodeClassMap = new Map<string, string>()
@@ -1351,7 +1391,7 @@ export function useCreate() {
                     addToGallery({
                       id: uuid(), type: galleryTypeForFile(file.filename, mode),
                       filename: file.filename, subfolder: file.subfolder ?? '', comfyType: file.type ?? 'output',
-                      prompt, negativePrompt, model: activeModel,
+                      prompt, ...improveFields, negativePrompt, model: activeModel,
                       modelType: mode === 'image' ? imageModelType : (videoModelsList.find(m => m.name === activeModel)?.type ?? 'wan'),
                       seed: runSeed,
                       steps, cfgScale, sampler, scheduler, width: outputWidth, height: outputHeight, batchSize,
@@ -1442,7 +1482,7 @@ export function useCreate() {
                       addToGallery({
                         id: uuid(), type: galleryTypeForFile(file.filename, mode),
                         filename: file.filename, subfolder: file.subfolder ?? '', comfyType: file.type ?? 'output',
-                        prompt, negativePrompt, model: activeModel,
+                        prompt, ...improveFields, negativePrompt, model: activeModel,
                         modelType: mode === 'image' ? imageModelType : (videoModelsList.find(m => m.name === activeModel)?.type ?? 'wan'),
                         seed: runSeed,
                         steps, cfgScale, sampler, scheduler, width: outputWidth, height: outputHeight, batchSize,
@@ -1549,7 +1589,7 @@ export function useCreate() {
                     addToGallery({
                       id: uuid(), type: galleryTypeForFile(file.filename, mode),
                       filename: file.filename, subfolder: file.subfolder ?? '', comfyType: file.type ?? 'output',
-                      prompt, negativePrompt, model: activeModel,
+                      prompt, ...improveFields, negativePrompt, model: activeModel,
                       modelType: mode === 'image' ? imageModelType : (videoModelsList.find(m => m.name === activeModel)?.type ?? 'wan'),
                       seed: runSeed,
                       steps, cfgScale, sampler, scheduler, width: outputWidth, height: outputHeight, batchSize,

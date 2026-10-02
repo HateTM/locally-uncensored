@@ -5,6 +5,7 @@ import { useCreateStore, type GalleryItem } from '../../../stores/createStore'
 import { runCredits } from '../../../stores/cloudCatalogStore'
 import { useCreateExp } from './CreateContext'
 import { useComfyMedia } from './useComfyMedia'
+import { PromptDetails } from './PromptDetails'
 import { cn } from '../ui/cn'
 
 export function Lightbox({ item, onClose }: { item: GalleryItem | null; onClose: () => void }) {
@@ -104,6 +105,7 @@ export function Lightbox({ item, onClose }: { item: GalleryItem | null; onClose:
               className={cn('max-w-full max-h-full object-contain rounded-lg', item.intent === 'removebg' && 'lu-checker')}
             />
           )}
+          <PromptDetails item={item} className="absolute bottom-4 left-1/2 max-h-[40vh] -translate-x-1/2 overflow-y-auto bg-black/70" />
         </motion.div>
       )}
     </AnimatePresence>
