@@ -38,6 +38,7 @@ import {
 } from '../api/engine'
 import type { BundledModel } from '../api/engine'
 import type { PullProgress, AIModel, ModelCategory, ImageModel, VideoModel, CloudModel, ComfyModelSource } from '../types/models'
+import { fileFormat } from '../lib/model-file-format'
 
 
 // Boot-resume for the managed built-in engine (2.5.7): the llama-server
@@ -484,8 +485,9 @@ export function useModels() {
         // our catalogue) from every surface in the app while its three folder
         // neighbours showed up (R5 re-measure, 2026-08-30). A catalogue size
         // is a claim about the file we ship, not about the file the user has.
-        const format = (name: string) =>
-          name.toLowerCase().endsWith('.gguf') ? 'gguf' : 'safetensors'
+        // The file's own ending. Everything that was not .gguf used to be
+        // called safetensors, a .ckpt motion module too (3.0.4 Gegenprobe 8).
+        const format = (name: string) => fileFormat({ name })
         // What each file weighs, asked once for both lanes. Every ComfyUI
         // entry used to carry size 0, and the card hides a zero size, so the
         // Installed list answered "what is this costing me" with silence.

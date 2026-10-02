@@ -16,6 +16,12 @@ describe('the model card names the real file format', () => {
     expect(fileFormat({ name: 'some-model' })).toBe('')
   })
 
+  it('the installed list reads the ending instead of calling every file safetensors', () => {
+    const hook = readFileSync('src/hooks/useModels.ts', 'utf8')
+    expect(hook).not.toMatch(/'gguf'\s*:\s*'safetensors'/)
+    expect(hook).toContain('fileFormat({ name })')
+  })
+
   it('the card no longer falls back to the word safetensors', () => {
     const card = readFileSync('src/components/models/ModelCard.tsx', 'utf8')
     expect(card).not.toMatch(/\|\|\s*'safetensors'/)
