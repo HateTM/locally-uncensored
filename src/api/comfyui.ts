@@ -61,6 +61,9 @@ export interface GenerateParams {
   modelParts?: { textEncoder: boolean; vae: boolean }
   denoise?: number      // I2I denoise strength (0.0–1.0, default 1.0 = full txt2img)
   removebg?: boolean    // Background removal: LoadImage → RMBG → SaveImage cutout (no diffusion)
+  /** Qwen-Image 2.1 text-to-image only: ask for an RGBA picture with a
+   *  transparent background (lib/transparent-image.ts). Ignored elsewhere. */
+  transparent?: boolean
   // Local Edit (mask inpaint): ComfyUI /upload/image filename of the painted
   // mask (white = repaint). With inputImage set this selects the inpaint
   // pipeline (VAEEncodeForInpaint / InpaintModelConditioning) on the

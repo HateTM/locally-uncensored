@@ -18,6 +18,7 @@ import { Tooltip } from '../ui/Tooltip'
 import { cn } from '../ui/cn'
 import { HINWEIS_TEXT } from '../../../lib/hinweis'
 import { lorasForRun, loraFitsModel } from '../../../lib/lora-stack'
+import { supportsTransparent } from '../../../lib/transparent-image'
 
 // Video families whose dynamic-workflow strategy actually wires a LoRA node:
 // the generic UNET path (wan/hunyuan/ltx/mochi/cosmos) plus Wan 2.2's dedicated
@@ -85,6 +86,10 @@ export function ParamGroups() {
       hiresSizeError = error instanceof Error ? error.message : String(error)
     }
   }
+
+  // Transparent background: local Qwen-Image 2.1 text-to-image only, the one
+  // model family whose VAE writes an alpha channel (lib/transparent-image.ts).
+  const showTransparent = !isCloud && !isVideo && meta.id === 'image' && !isMlxLocal && supportsTransparent(laneType)
 
   const samplers = samplerList.length ? samplerList : SAMPLERS_FALLBACK
   const schedulers = schedulerList.length ? schedulerList : SCHEDULERS_FALLBACK
@@ -204,6 +209,26 @@ export function ParamGroups() {
         {/* Cloud: Bilder pro Lauf, jedes ein eigener Auftrag mit eigenem Preis.
             Lokal bleibt es die Batch size der ComfyUI-Warteschlange. */}
         {isCloud && imageCountApplies(meta.id) && <Slider label="Images" min={1} max={MAX_IMAGE_COUNT} step={1} value={s.cloudImageCount} onChange={s.setCloudImageCount} />}
+        {showTransparent && (
+          <button
+            type="button"
+            role="switch"
+            aria-checked={s.transparentBackground}
+            onClick={() => s.setTransparentBackground(!s.transparentBackground)}
+            className={cn(
+              'flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left transition-colors',
+              s.transparentBackground ? 'border-white/15 bg-white/[0.05]' : 'border-white/[0.07]',
+            )}
+          >
+            <span>
+              <span className="block t-control text-gray-300">Transparent background</span>
+              <span className="block text-[11px] leading-4 text-gray-600">Saves a PNG with a see-through background</span>
+            </span>
+            <span className={cn('t-mono text-xs', s.transparentBackground ? 'text-emerald-400' : 'text-gray-600')}>
+              {s.transparentBackground ? 'on' : 'off'}
+            </span>
+          </button>
+        )}
         {!isVideo && !isCloud && <Slider label="Batch size" min={1} max={8} step={1} value={s.batchSize} onChange={s.setBatchSize} />}
         {isVideo && (
           <div className="grid grid-cols-2 gap-2">

@@ -1,3 +1,4 @@
+import { itemHasAlpha } from '../../../lib/transparent-image'
 import { useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { X, Sparkles } from 'lucide-react'
@@ -102,7 +103,7 @@ export function Lightbox({ item, onClose }: { item: GalleryItem | null; onClose:
               alt={item.prompt}
               onError={onMediaError}
               onClick={(e) => e.stopPropagation()}
-              className={cn('max-w-full max-h-full object-contain rounded-lg', item.intent === 'removebg' && 'lu-checker')}
+              className={cn('max-w-full max-h-full object-contain rounded-lg', itemHasAlpha(item) && 'lu-checker')}
             />
           )}
           <PromptDetails item={item} className="absolute bottom-4 left-1/2 max-h-[40vh] -translate-x-1/2 overflow-y-auto bg-black/70" />

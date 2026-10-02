@@ -1,3 +1,4 @@
+import { itemHasAlpha } from '../../../lib/transparent-image'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Images, Play, PanelRightClose, Trash2, Download, MonitorOff, AudioLines } from 'lucide-react'
 import { useCreateStore, type GalleryItem } from '../../../stores/createStore'
@@ -115,7 +116,7 @@ export function CreatePanel({ open, onOpenChange, activeId, onSelect }: Props) {
                       className={cn(
                         'w-full aspect-square rounded-lg overflow-hidden border-2 transition-colors relative',
                         (activeId ?? gallery[0]?.id) === g.id ? 'border-white/60' : 'border-transparent hover:border-white/20',
-                        g.intent === 'removebg' && 'lu-checker',
+                        itemHasAlpha(g) && 'lu-checker',
                       )}
                     >
                       <GalleryThumb g={g} />

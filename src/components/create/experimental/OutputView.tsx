@@ -1,3 +1,4 @@
+import { itemHasAlpha } from '../../../lib/transparent-image'
 import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import { Cpu, Sparkles, ImageDown, Maximize2, Download, Wand2, MonitorOff, AudioLines, Film, Trash2 } from 'lucide-react'
@@ -170,7 +171,7 @@ export function ResultView({ item, onFullscreen, onSendToEditor, onAnimate }: Re
             alt={item.prompt}
             onError={onError}
             onLoad={(e) => { markGalleryItemAvailable(item); reconcileDims(item, e.currentTarget.naturalWidth, e.currentTarget.naturalHeight) }}
-            className={cn('max-w-full max-h-[62vh] object-contain rounded-[var(--radius-panel)] border border-white/[0.06]', item.intent === 'removebg' && 'lu-checker')}
+            className={cn('max-w-full max-h-[62vh] object-contain rounded-[var(--radius-panel)] border border-white/[0.06]', itemHasAlpha(item) && 'lu-checker')}
           />
         )}
         {item.unavailable && (

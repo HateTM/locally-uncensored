@@ -242,6 +242,9 @@ export interface GalleryItem {
   /** "Improve my prompt" was on but the rewrite failed, the run used the
    *  user's own prompt. Said in the details, nowhere else. */
   improveFailed?: boolean
+  /** Local Qwen-Image 2.1 with "Transparent background": the PNG carries an
+   *  alpha channel, so tiles and previews sit on a checkerboard. */
+  transparent?: boolean
   /** MLX video (Mac, Apple Silicon): absolute filesystem path of the finished
    *  mp4, as returned by `video_generate`'s `output` field. Playback/download
    *  go through `dataUrl` (a blob: URL, see above) instead — this is kept
@@ -378,6 +381,11 @@ interface CreateState {
   cloudStudioCredits: number | null
   /** Runtime-only: images per cloud run, 1 to 4 (Image and Edit). */
   cloudImageCount: number
+  /** Local Qwen-Image 2.1 only: write the picture with a transparent background
+   *  (lib/transparent-image.ts). A preference like the HiRes switch, so it is
+   *  remembered. */
+  transparentBackground: boolean
+  setTransparentBackground: (on: boolean) => void
   /** Advanced settings switch: a chat model rewrites the prompt before a run. Off by default, remembered. */
   improvePrompt: boolean
   setImprovePrompt: (on: boolean) => void
@@ -697,6 +705,7 @@ export const useCreateStore = create<CreateState>()(
       cloudStudioCredits: null as number | null,
       cloudImageCount: 1,
       improvePrompt: false,
+      transparentBackground: false,
       localOpModel: '',
       charactersVersion: 0,
       caps: { rmbg: false, 'inpaint-nodes': false, dwpose: false } as Record<'rmbg' | 'inpaint-nodes' | 'dwpose', boolean>,
@@ -949,6 +958,7 @@ export const useCreateStore = create<CreateState>()(
       setCloudStudioCredits: (cloudStudioCredits) => set({ cloudStudioCredits }),
       setCloudImageCount: (count) => set({ cloudImageCount: clampImageCount(count) }),
       setImprovePrompt: (on) => set({ improvePrompt: on === true }),
+      setTransparentBackground: (on) => set({ transparentBackground: on === true }),
       // Picking a lane model adopts its architecture defaults (like
       // setVideoModel does) — an inherited 1024×1024 from the Image tab would
       // OOM a 14B S2V run on consumer VRAM.
@@ -1201,6 +1211,7 @@ export const useCreateStore = create<CreateState>()(
         musicDuration: state.musicDuration,
         musicHowtoSeen: state.musicHowtoSeen,
         improvePrompt: state.improvePrompt,
+        transparentBackground: state.transparentBackground,
         triggerWord: state.triggerWord,
         trainSteps: state.trainSteps,
         // Studio: the picked step's option values are a preference like the

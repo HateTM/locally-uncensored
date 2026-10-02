@@ -1,3 +1,4 @@
+import { transparentPrompt } from '../lib/transparent-image'
 import {
   classifyModel, findMatchingVAE, findMatchingCLIP, findFluxCLIPPair, findMiniMaxAudioVAE, findLtx25AudioVAE, isFastH3,
   findMatchingAudioEncoder, findMatchingClipVision, findFramePackCLIPPair,
@@ -1097,7 +1098,11 @@ export async function buildDynamicWorkflow(
     // t2i template, which also carries the widget and never uses it.
     const qwenInputs: ComfyNodeInputs = {
       clip: [clipSourceId, clipOutputSlot],
-      prompt: params.prompt,
+      // Transparent background: the model writes an alpha channel when the
+      // prompt is wrapped the way the official template says, and SaveImage
+      // below keeps it (lib/transparent-image.ts). An edit takes its picture
+      // from the reference, so the wrapper stays out of it.
+      prompt: gp.transparent && !isQwenEdit ? transparentPrompt(params.prompt) : params.prompt,
       negative_prompt: params.negativePrompt || '',
       resolution: qwenEditResolution(params.width, params.height),
     }

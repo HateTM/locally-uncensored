@@ -60,6 +60,7 @@ import { buildWithFixups, wasDeclined, type FixupDeps } from '../lib/render-fixu
 import { useDownloadStore } from '../stores/downloadStore'
 import { useComfyInstallStore } from '../stores/comfyInstallStore'
 import { checkPromptSafety, SAFETY_BLOCK_MESSAGE } from '../lib/render/safety'
+import { wantsTransparent } from '../lib/transparent-image'
 import { improveKindForIntent } from '../lib/render/improve-prompt'
 import { improvePrompt } from '../lib/render/improve-prompt-run'
 import { resolveRunSeed } from '../lib/run-seed'
@@ -1014,8 +1015,17 @@ export function useCreate() {
       }
       let outputWidth = width
       let outputHeight = height
+      // Local Qwen-Image 2.1 text-to-image with "Transparent background": the
+      // builder wraps the prompt, SaveImage keeps the alpha channel. Only the
+      // dynamic builder knows the switch, so a custom workflow or a fallback
+      // graph runs as written and the entry is not marked transparent.
+      const transparentRequested = wantsTransparent({
+        enabled: state.transparentBackground, intent, isImageToImage: isI2I, isSpecializedLane: !!localOp, modelType: imageModelType,
+      })
+      const transparentFields = () => (transparentRequested && builderUsed === 'dynamic' ? { transparent: true as const } : {})
       const baseParams = {
-        prompt, negativePrompt, model: activeModel, sampler, scheduler, steps, cfgScale, width, height, seed: runSeed, batchSize,
+        prompt, negativePrompt,
+        ...(transparentRequested ? { transparent: true } : {}), model: activeModel, sampler, scheduler, steps, cfgScale, width, height, seed: runSeed, batchSize,
         ...(isRemoveBg && effInputImage ? { removebg: true, inputImage: effInputImage } : {}),
         // Discord 2026-09-25 (tbjdrw: "a house becomes a tennis court"): at
         // strength 1.00 the builder read denoise >= 1 as "no img2img" and
@@ -1391,7 +1401,7 @@ export function useCreate() {
                     addToGallery({
                       id: uuid(), type: galleryTypeForFile(file.filename, mode),
                       filename: file.filename, subfolder: file.subfolder ?? '', comfyType: file.type ?? 'output',
-                      prompt, ...improveFields, negativePrompt, model: activeModel,
+                      prompt, ...improveFields, ...transparentFields(), negativePrompt, model: activeModel,
                       modelType: mode === 'image' ? imageModelType : (videoModelsList.find(m => m.name === activeModel)?.type ?? 'wan'),
                       seed: runSeed,
                       steps, cfgScale, sampler, scheduler, width: outputWidth, height: outputHeight, batchSize,
@@ -1482,7 +1492,7 @@ export function useCreate() {
                       addToGallery({
                         id: uuid(), type: galleryTypeForFile(file.filename, mode),
                         filename: file.filename, subfolder: file.subfolder ?? '', comfyType: file.type ?? 'output',
-                        prompt, ...improveFields, negativePrompt, model: activeModel,
+                        prompt, ...improveFields, ...transparentFields(), negativePrompt, model: activeModel,
                         modelType: mode === 'image' ? imageModelType : (videoModelsList.find(m => m.name === activeModel)?.type ?? 'wan'),
                         seed: runSeed,
                         steps, cfgScale, sampler, scheduler, width: outputWidth, height: outputHeight, batchSize,
@@ -1589,7 +1599,7 @@ export function useCreate() {
                     addToGallery({
                       id: uuid(), type: galleryTypeForFile(file.filename, mode),
                       filename: file.filename, subfolder: file.subfolder ?? '', comfyType: file.type ?? 'output',
-                      prompt, ...improveFields, negativePrompt, model: activeModel,
+                      prompt, ...improveFields, ...transparentFields(), negativePrompt, model: activeModel,
                       modelType: mode === 'image' ? imageModelType : (videoModelsList.find(m => m.name === activeModel)?.type ?? 'wan'),
                       seed: runSeed,
                       steps, cfgScale, sampler, scheduler, width: outputWidth, height: outputHeight, batchSize,
