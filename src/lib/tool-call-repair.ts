@@ -402,7 +402,8 @@ export function extractToolCallsWithRanges(content: string): {
   // emitted by qwen2.5-coder). Replace with a locate-header-then-balance
   // scanner: find the `"arguments":` key, then walk the character stream
   // respecting string escapes to find the matching `}`.
-  const headerRe = /"(?:name|tool|function)"\s*:\s*"([^"]+)"\s*,\s*"(?:arguments|args|parameters|input)"\s*:\s*\{/gi
+  // "call" is the spelling of GH #147: !function_call:{"call": "file_read", "arguments": {...}}
+  const headerRe = /"(?:name|tool|function|call)"\s*:\s*"([^"]+)"\s*,\s*"(?:arguments|args|parameters|input)"\s*:\s*\{/gi
   let m: RegExpExecArray | null
   while ((m = headerRe.exec(content)) !== null) {
     const toolName = m[1]

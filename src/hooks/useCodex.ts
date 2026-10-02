@@ -69,11 +69,11 @@ import { openPlanGap, planReconcileSteer, PLAN_RECONCILE_BUDGET } from '../lib/p
 import { planResumeAnchor } from '../lib/plan-resume'
 import { useTodoStore } from '../stores/todoStore'
 import { httpStatusOf } from '../lib/http-status'
-import { asString, errorText, prop } from '../types/json-guards'
+import { asString, errorText, isRecord, prop } from '../types/json-guards'
 import type { ToolArgs } from '../api/mcp/types'
 import { CREDITS_EXHAUSTED_MESSAGE } from '../lib/credits-exhausted'
 import { streamOllamaChatWithTools } from '../lib/ollama-stream-tools'
-import { canonicalToolName } from '../lib/loose-tool-parse'
+import { repairToolCall } from '../lib/loose-tool-parse'
 import { selectRelevantTools, selectRelevantToolsAsync, SMALL_MODEL_MAX_TOOLS, gateCreateTools, wantsMediaTools, isGatedTool } from '../lib/tool-selection'
 import { generateEmbeddings } from '../api/rag'
 import { truncateToolResult } from '../lib/truncate-tool-result'
@@ -1602,6 +1602,23 @@ export function useCodex() {
             turnContent = turn.content || ''
             turnFinishReason = turn.finishReason
             reportTurnUsage(convId!, assistantMsg.id, turn)
+            // GH #147: a model on LU Cloud wrote its calls into the text
+            // (!function_call:{"call": "file_read", ...}). This path never
+            // looked, so the run stopped on prose. A call from the text counts
+            // only when every name in it is a tool this agent has, so example
+            // JSON in an explanation is never run.
+            {
+              const recovered = recoverToolCallsFromContent(toolCalls, turnContent)
+              const tools = toolRegistry.getAll()
+              const known = new Set(tools.map((t) => t.name))
+              const fromText = toolCalls.length === 0 && recovered.toolCalls.length > 0
+              const allKnown = recovered.toolCalls.every((tc) =>
+                known.has(repairToolCall(tc.function.name, isRecord(tc.function.arguments) ? tc.function.arguments : {}, tools).name))
+              if (!fromText || allKnown) {
+                toolCalls = recovered.toolCalls
+                turnContent = recovered.content
+              }
+            }
             if (keepThinking && turn.thinking) {
               thinkingContent += (thinkingContent ? '\n\n' : '') + turn.thinking
               useChatStore.getState().updateMessageThinking(convId!, assistantMsg.id, thinkingContent)
@@ -1865,11 +1882,12 @@ export function useCodex() {
         // turn passed it, and the repair then turned it into `file_write` on
         // the way to the executor. Repair first, then judge the real name.
         if (toolCalls.length > 0) {
-          const knownToolNames = toolRegistry.getAll().map((t) => t.name)
+          const tools = toolRegistry.getAll()
           toolCalls = toolCalls.map((tc) => {
             const raw = tc.function?.name ?? ''
-            const fixed = canonicalToolName(raw, knownToolNames)
-            return fixed === raw ? tc : { ...tc, function: { ...tc.function, name: fixed } }
+            const args = isRecord(tc.function?.arguments) ? tc.function.arguments : {}
+            const fixed = repairToolCall(raw, args, tools)
+            return fixed.name === raw ? tc : { ...tc, function: { ...tc.function, name: fixed.name, arguments: fixed.arguments } }
           })
         }
 

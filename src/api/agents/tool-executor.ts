@@ -23,6 +23,7 @@ import { deriveSideEffectKey } from './side-effect-key'
 import { validateToolArgs, formatValidationErrors, type JsonSchema } from './args-validator'
 import { stableArgsHash } from './block-helpers'
 import type { ToolArgs } from '../mcp/types'
+import { isGenericCallName } from '../../lib/loose-tool-parse'
 
 export interface ExecutorToolDef {
   name: string
@@ -276,7 +277,9 @@ async function runSingle(
       id: req.id,
       toolName: req.toolName,
       status: 'failed',
-      error: `Unknown tool: ${req.toolName}`,
+      error: isGenericCallName(req.toolName)
+        ? `Unknown tool: ${req.toolName}. "${req.toolName}" is not a tool name. Send the call again with the tool's own name, for example file_list or file_read, in the name field.`
+        : `Unknown tool: ${req.toolName}`,
       dispatchedArgs: req.args,
       argsHash,
       sideEffectKey,

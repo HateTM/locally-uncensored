@@ -55,6 +55,12 @@ cloud catalogue. It also fixes the bugs reported on GitHub and Discord since
   bin, because LM Studio offers no way to delete a model from outside, and
   Details showed nothing. Details now says to delete it in LM Studio under
   My Models, and does the same for other local servers.
+- **The Code agent runs calls a cloud model writes in unusual shapes.** A call
+  named "function" with a to-do list came back "Unknown tool: function", and
+  calls written into the answer as `!function_call:{"call": ...}` were never
+  picked up on LU Cloud, so the run stopped and the model kept retrying. Both
+  now reach their tool; a call that fits several tools is answered with what to
+  send instead (issue 147).
 - **A LoRA deleted from the loras folder leaves the stack.** Its pick stayed
   saved, the stack said "2 active" with nothing ticked, and every run sent it
   until ComfyUI refused with "Value not in list". Rescan and every connect now

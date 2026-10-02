@@ -42,7 +42,7 @@ import { stripVisionFeedbackMessages, reportMultimodalRefusal } from '../lib/vis
 import { log } from '../lib/logger'
 import { gatePlanTool, planToolAllowed } from '../lib/plan-gate'
 import { buildHermesToolPrompt, buildHermesToolResult, buildHermesToolCall, parseHermesToolCalls, stripToolCallTags, hasToolCallTags } from '../api/hermes-tool-calling'
-import { parseLooseToolCalls, stripMatchedCalls, stripToolCallText, canonicalToolName } from '../lib/loose-tool-parse'
+import { parseLooseToolCalls, stripMatchedCalls, stripToolCallText, repairToolCall } from '../lib/loose-tool-parse'
 import { mediaCallSucceeded } from '../lib/media-result'
 import { summarizeTurn } from '../lib/turn-summary'
 import { buildVisionFeedback } from '../api/vision-feedback'
@@ -114,7 +114,7 @@ import { capHiddenToolHistory } from './codex/hidden-history'
 // derselbe, und zwei Wortlaute fuer einen abgeschnittenen Zug waeren zwei
 // Stellen, von denen eine gepflegt wird.
 import { codexCutoffNote, dropCutOffCall } from './codex/turn-cutoff'
-import { asString, errorText, prop } from '../types/json-guards'
+import { asString, errorText, isRecord, prop } from '../types/json-guards'
 import type { ToolArgs } from '../api/mcp/types'
 import { CREDITS_EXHAUSTED_MESSAGE } from '../lib/credits-exhausted'
 import { buildChatSystemPrompt } from '../lib/system-prompt'
@@ -1938,10 +1938,11 @@ export function useAgentChat() {
         // NATIVE call to `video_generation` (not `video_generate`) → "Unknown
         // tool" → it gave up. Map such close misses to the registered name.
         if (toolCalls.length > 0) {
-          toolCalls = toolCalls.map((tc) => ({
-            ...tc,
-            function: { ...tc.function, name: canonicalToolName(tc.function.name, knownToolNames) },
-          }))
+          const tools = toolRegistry.getAll()
+          toolCalls = toolCalls.map((tc) => {
+            const fixed = repairToolCall(tc.function.name, isRecord(tc.function.arguments) ? tc.function.arguments : {}, tools)
+            return fixed.name === tc.function.name ? tc : { ...tc, function: { ...tc.function, name: fixed.name, arguments: fixed.arguments } }
+          })
         }
 
         // Loose tool-call fallback (David 2026-06-03): weak local models often
