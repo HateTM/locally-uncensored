@@ -61,7 +61,7 @@ describe('Multishot: der Prompt', () => {
   })
 
   it('kein Gedankenstrich im Text, der an das Modell geht', () => {
-    expect(composeShots('a', ['b'])).not.toMatch(/[—–]/)
+    expect(composeShots('a', ['b'])).not.toMatch(new RegExp('[\\u2014\\u2013]'))
   })
 
   it('zaehlt die Shots, die wirklich Text haben', () => {

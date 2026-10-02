@@ -14,7 +14,7 @@ describe('Transparent background: der Prompt', () => {
   })
 
   it('kein Gedankenstrich im Satz, der an das Modell geht', () => {
-    expect(transparentPrompt('x')).not.toMatch(/[—–]/)
+    expect(transparentPrompt('x')).not.toMatch(new RegExp('[\\u2014\\u2013]'))
   })
 })
 

@@ -54,7 +54,7 @@ describe('Improve my prompt: was das Chatmodell gesagt bekommt', () => {
 
   it('kein Gedankenstrich im Text, der an das Modell geht', () => {
     for (const kind of ['image', 'video', 'music'] as const) {
-      expect(buildImproveMessages({ kind, tags: true, modelLabel: 'M' }, 'x')[0].content).not.toMatch(/[—–]/)
+      expect(buildImproveMessages({ kind, tags: true, modelLabel: 'M' }, 'x')[0].content).not.toMatch(new RegExp('[\\u2014\\u2013]'))
     }
   })
 })
