@@ -41,6 +41,9 @@ vi.mock('../../api/comfyui', () => ({
     if (name.includes('sd15')) return 'sd15'
     return 'unknown'
   }),
+  // setMode/setIntent('video') ask for the distilled-model override
+  // (createStore videoDefaultsFor); none of the names here is one.
+  videoSamplingOverride: vi.fn(() => null),
 }))
 
 import { useCreateStore, MODEL_TYPE_DEFAULTS } from '../createStore'
