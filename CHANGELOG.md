@@ -55,6 +55,11 @@ cloud catalogue. It also fixes the bugs reported on GitHub and Discord since
   bin, because LM Studio offers no way to delete a model from outside, and
   Details showed nothing. Details now says to delete it in LM Studio under
   My Models, and does the same for other local servers.
+- **A downloaded render is the render you picked.** After a gallery delete,
+  ComfyUI could give the next render with the same prompt the freed file name,
+  and downloading the older entry then saved the newer picture. Every run now
+  writes its own file names. Download in the gallery strip also did nothing on
+  Windows; it now opens the same Save dialog as the result view.
 - **The Code agent runs calls a cloud model writes in unusual shapes.** A call
   named "function" with a to-do list came back "Unknown tool: function", and
   calls written into the answer as `!function_call:{"call": ...}` were never

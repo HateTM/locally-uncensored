@@ -8,7 +8,7 @@ import { resolveRunSeed } from '../lib/run-seed'
 // dynamischer Import, der nur den Zyklus comfyui ↔ dynamic-workflow
 // verdeckt hat. Beide sind reine Graph-Bausteine und wohnen jetzt in
 // comfyui-graph.ts, das nichts importiert.
-import { videoDecodeNode, promptFilenamePrefix } from './comfyui-graph'
+import { videoDecodeNode, promptFilenamePrefix, tagOutputPrefixes, newRunTag } from './comfyui-graph'
 import type { ComfyApiGraph, ComfyApiNode, ComfyHistoryEntry } from '../types/comfy-graph'
 import type { ComfyModelSource } from '../types/models'
 import { isRecord, asString, asRecordArray } from '../types/json-guards'
@@ -1925,7 +1925,8 @@ async function findAnimateDiffModel(): Promise<string> {
 // ─── Workflow Submission ───
 
 export async function submitWorkflow(workflow: ComfyApiGraph, clientId?: string): Promise<string> {
-  const payload: Record<string, unknown> = { prompt: workflow }
+  // Every run its own output names (comfyui-graph tagOutputPrefixes).
+  const payload: Record<string, unknown> = { prompt: tagOutputPrefixes(workflow, newRunTag()) }
   if (clientId) payload.client_id = clientId
   // Use localFetch (Rust proxy in Tauri, direct fetch in dev). The previous
   // direct-only fetch broke for any ComfyUI not started by LU itself —

@@ -1,9 +1,9 @@
 import { motion, AnimatePresence } from 'framer-motion'
 import { Images, Play, PanelRightClose, Trash2, Download, MonitorOff, AudioLines } from 'lucide-react'
-import { downloadMediaUrl } from '../../../lib/download-media'
 import { useCreateStore, type GalleryItem } from '../../../stores/createStore'
 import { galleryLabel } from '../../../lib/render/gallery-label'
-import { GALLERY_DRAG_TYPE, galleryItemUrl } from './galleryUrl'
+import { GALLERY_DRAG_TYPE } from './galleryUrl'
+import { downloadGalleryItem } from './galleryDownload'
 import { useComfyMedia } from './useComfyMedia'
 import { cn } from '../ui/cn'
 
@@ -136,7 +136,7 @@ export function CreatePanel({ open, onOpenChange, activeId, onSelect }: Props) {
                       <Trash2 size={12} />
                     </button>
                     <button
-                      onClick={() => { void downloadMediaUrl(galleryItemUrl(g), g.filename || undefined) }}
+                      onClick={() => { void downloadGalleryItem(g) }}
                       className="absolute bottom-1 right-1 w-6 h-6 rounded-md bg-black/55 hover:bg-black/70 text-gray-100 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center shadow-sm"
                       title="Download"
                     >
