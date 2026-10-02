@@ -462,12 +462,17 @@ export function CreateExpProvider({ children }: { children: ReactNode }) {
     const dl = useDownloadStore.getState()
     const files = bundle.files.filter((f) => f.downloadUrl && f.filename && f.subfolder)
     if (files.length > 1) dl.setBundleGroup(bundle.name, files.map((f) => f.filename!))
-    for (const f of files) dl.setMeta(f.filename!, f.downloadUrl!, f.subfolder!)
+    for (const f of files) {
+      dl.setMeta(f.filename!, f.downloadUrl!, f.subfolder!, undefined, {
+        expectedBytes: f.sizeGB ? Math.round(f.sizeGB * 1_073_741_824) : undefined,
+        sha256: f.sha256,
+      })
+    }
     dl.startPolling()
 
     await downloadBundleFiles(
       files.map((f) => ({
-        filename: f.filename!, subfolder: f.subfolder!, downloadUrl: f.downloadUrl!, sizeGB: f.sizeGB,
+        filename: f.filename!, subfolder: f.subfolder!, downloadUrl: f.downloadUrl!, sizeGB: f.sizeGB, sha256: f.sha256,
       })),
       {
         start: startModelDownload,

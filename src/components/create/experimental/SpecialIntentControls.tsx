@@ -18,7 +18,7 @@ import {
   characterTrainerStatus, installCharacterTrainer, parseLocalCharacterLora,
   TRAINER_BASE_FILES, baseDownloadRunning, baseDownloadPercent, type TrainerStatus,
 } from '../../../api/trainer'
-import { startModelDownload, getDownloadProgress } from '../../../api/discover'
+import { startModelDownload, getDownloadProgress, catalogDigestFor } from '../../../api/discover'
 import { useDownloadStore } from '../../../stores/downloadStore'
 import { getLoraModels } from '../../../api/comfyui'
 import { isWindows, isMacOS } from '../../../api/backend'
@@ -506,7 +506,7 @@ function LocalTrainControls() {
     if (missing.length > 1) dl.setBundleGroup('Character Studio base models', missing.map((f) => f.filename))
     for (const f of missing) {
       dl.setMeta(f.filename, f.url, f.subfolder)
-      try { await startModelDownload(f.url, f.subfolder, f.filename) } catch (e) {
+      try { const d = catalogDigestFor(f.filename, f.url); await startModelDownload(f.url, f.subfolder, f.filename, d.expectedBytes, d.sha256) } catch (e) {
         setNote(e instanceof Error ? e.message : `Could not start ${f.filename}.`)
       }
       dl.startPolling()

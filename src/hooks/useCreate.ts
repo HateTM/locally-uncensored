@@ -54,7 +54,7 @@ import { buildDynamicWorkflow, buildLocalOpWorkflow, checkVideoOutputCapability 
 import { getAllNodeInfo, clearNodeCache } from '../api/comfyui-nodes'
 import { apiNodes, type ComfyApiGraph, type ComfyExecutionMessage, type ComfyHistoryEntry } from '../types/comfy-graph'
 import { restartComfyForNewNodes } from '../api/comfy-restart'
-import { installCustomNodes, startModelDownload, getDownloadProgress, modelsNotVisibleInComfy, comfyModelTarget } from '../api/discover'
+import { installCustomNodes, startModelDownload, getDownloadProgress, modelsNotVisibleInComfy, comfyModelTarget, catalogDigestFor } from '../api/discover'
 import { downloadBundleFiles, waitForModelsVisible } from '../lib/bundle-install'
 import { buildWithFixups, wasDeclined, type FixupDeps } from '../lib/render-fixups'
 import { useDownloadStore } from '../stores/downloadStore'
@@ -113,7 +113,7 @@ function renderFixupDeps(onStatus: (line: string) => void, signal?: AbortSignal)
       for (const f of files) dl.setMeta(f.downloadFilename, f.downloadUrl, f.subfolder)
       dl.startPolling()
       await downloadBundleFiles(
-        files.map((f) => ({ filename: f.downloadFilename, subfolder: f.subfolder, downloadUrl: f.downloadUrl, sizeGB: f.sizeGB })),
+        files.map((f) => ({ filename: f.downloadFilename, subfolder: f.subfolder, downloadUrl: f.downloadUrl, sizeGB: f.sizeGB, sha256: catalogDigestFor(f.downloadFilename, f.downloadUrl).sha256 })),
         {
           start: startModelDownload,
           progress: getDownloadProgress,

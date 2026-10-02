@@ -296,7 +296,12 @@ export const useDownloadStore = create<DownloadStoreState>()(persist((set, get) 
 
   setMeta: (filename, url, subfolder, destDir?, extra?) => {
     set(s => {
-      const next = { ...s.downloadMeta, [filename]: { url, subfolder, destDir, ...extra } }
+      // Defence in depth: a caller that forgot the digest or the byte count gets
+      // the catalog's, when the catalog names the SAME address. Retry and resume
+      // read only this record, so a hole here is a download that installs a
+      // swapped file unchecked.
+      const filled = fillFromCatalog({ url, subfolder, destDir, ...extra }, filename)
+      const next = { ...s.downloadMeta, [filename]: filled }
       const keys = Object.keys(next)
       if (keys.length > META_LIMIT) {
         // Oldest first — insertion order is the only age we have, and the
@@ -522,11 +527,34 @@ export const useDownloadStore = create<DownloadStoreState>()(persist((set, get) 
   },
 }))
 
+/** Add the catalog's sha256 and byte count to a record that lacks them, but only
+ *  when the catalog entry is the same address: a Civitai file or a user's own
+ *  GGUF that happens to share a name must never inherit a foreign digest. */
+export function fillFromCatalog(meta: DownloadMeta, filename: string): DownloadMeta {
+  if (meta.sha256 && meta.expectedBytes) return meta
+  const cat = lookupFileMeta(filename)
+  if (!cat || cat.url !== meta.url) return meta
+  const sha256 = meta.sha256 ?? cat.sha256
+  const expectedBytes = meta.expectedBytes ?? cat.expectedBytes
+  if (sha256 === meta.sha256 && expectedBytes === meta.expectedBytes) return meta
+  return { ...meta, sha256, expectedBytes }
+}
+
 /** Meta for `id`, filling in from the catalog and remembering what it found.
  *  Retry and resume both need it and both used to lose the destDir. */
 function ensureMeta(get: () => DownloadStoreState, id: string): DownloadMeta | null {
   const known = get().downloadMeta[id]
-  if (known) return known
+  if (known) {
+    // A record written without the digest (older callers, a persisted one) is
+    // completed from the catalog before retry or resume reads it.
+    const filled = fillFromCatalog(known, id)
+    if (filled !== known) {
+      get().setMeta(id, filled.url, filled.subfolder, filled.destDir, {
+        expectedBytes: filled.expectedBytes, sha256: filled.sha256,
+      })
+    }
+    return filled
+  }
   const found = lookupFileMeta(id)
   if (!found) return null
   const meta: DownloadMeta = {

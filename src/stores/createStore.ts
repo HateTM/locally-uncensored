@@ -351,9 +351,14 @@ interface CreateState {
   cloudImageModel: string
   cloudVideoModel: string
   /** Runtime-only: the model picked inside a 2.5.8 specialized intent
-   *  (trainer/lipsync/music/extend/motion). One slot for all — modelForOp
+   *  (trainer/lipsync/music/extend/motion/enhance). Mirror of the current
+   *  sub-category's entry in cloudOpPicks; modelForOp
    *  coerces a stale cross-intent pick onto the op's own list. */
   cloudOpModel: string
+  /** The pick of EACH sub-category (see opSlot), runtime-only like cloudOpModel.
+   *  cloudOpModel mirrors the entry of the current sub-category, so choosing a
+   *  model in Enhance Image no longer wipes the music pick (02.10.2026). */
+  cloudOpPicks: Record<string, string>
   /** Studio: the schema-driven option values for the picked cloudOpModel step
    *  (studio-contract.ts). Belongs to the model, not the run: a model switch
    *  drops them, see setCloudOpModel. */
@@ -671,6 +676,7 @@ export const useCreateStore = create<CreateState>()(
       cloudImageModel: '',
       cloudVideoModel: '',
       cloudOpModel: '',
+      cloudOpPicks: {} as Record<string, string>,
       cloudStudioOptions: {} as Record<string, unknown>,
       cloudStudioCredits: null as number | null,
       localOpModel: '',
@@ -1237,3 +1243,27 @@ export const useCreateStore = create<CreateState>()(
     }
   )
 )
+
+/** Which pick slot the current sub-category owns. Character Studio USE picks a
+ *  generation endpoint, TRAIN a trainer, so they are two slots. */
+export function opSlot(s: Pick<CreateState, 'characterTab' | 'removebg' | 'utilityOp' | 'cloudOp' | 'mode' | 'imageSubMode' | 'videoSubMode'>): string {
+  const intent = deriveIntent(s)
+  return intent === 'character' && s.characterTab === 'use' ? 'character:use' : intent
+}
+
+// One shared cloudOpModel used to serve lip sync, music, extend, motion and
+// Enhance Image, so a pick in one sub-category replaced the pick of another
+// (Opus review 02.10.2026). The slot map keeps one pick each, and the single
+// field every reader uses stays, as the mirror of the current slot:
+//   - the slot changed: the field takes that slot's own pick ('' if none yet);
+//   - the field changed inside a slot: that is a pick for the slot, remember it.
+// Runtime-only, nothing is persisted, so there is no stored pick to migrate.
+useCreateStore.subscribe((s, prev) => {
+  const slot = opSlot(s)
+  if (slot !== opSlot(prev)) {
+    const want = s.cloudOpPicks[slot] ?? ''
+    if (s.cloudOpModel !== want) useCreateStore.setState({ cloudOpModel: want })
+  } else if (s.cloudOpModel !== prev.cloudOpModel && s.cloudOpPicks[slot] !== s.cloudOpModel) {
+    useCreateStore.setState({ cloudOpPicks: { ...s.cloudOpPicks, [slot]: s.cloudOpModel } })
+  }
+})

@@ -42,6 +42,7 @@ vi.mock('../../../api/backend', () => ({
   secretDelete: vi.fn(),
 }))
 vi.mock('../../../api/discover', () => ({
+  lookupFileMeta: () => null,
   detectProviderModelPath: vi.fn(async () => ''),
   startModelDownloadToPath: (url: string, dir: string, filename: string, bytes?: number, sha?: string) =>
     startModelDownloadToPath(url, dir, filename, bytes, sha),

@@ -1779,8 +1779,6 @@ export async function findFramePackCLIPPair(): Promise<{ clipL: string; llavaLla
   return { clipL, llavaLlama3 }
 }
 
-/** MiniMax H3's audio autoencoder. The model writes picture and sound into
- *  one latent and decodes the sound half with this file. */
 /** A file that says it is an LTX 2.5 one (ltx-2.5-..., gemma4-...-ltx-2.5-...). */
 export function isLtx25File(name: string): boolean {
   return /ltx[._\- ]?2[._\- ]?5/.test(name.toLowerCase())
@@ -1795,6 +1793,8 @@ export async function findLtx25AudioVAE(): Promise<string> {
   throw new Error(`No LTX 2.5 audio VAE found. Download "ltx-2.5-audio-vae-bf16.safetensors" from the Model Manager.`)
 }
 
+/** MiniMax H3's audio autoencoder. The model writes picture and sound into
+ *  one latent and decodes the sound half with this file. */
 export async function findMiniMaxAudioVAE(): Promise<string> {
   const vaes = await getVAEModels()
   const match = vaes.find(v => v.toLowerCase().includes('minimax_h3_audio_vae'))

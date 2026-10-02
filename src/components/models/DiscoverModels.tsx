@@ -468,7 +468,10 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
     const filenames: string[] = []
     for (const file of bundle.files) {
       if (file.downloadUrl && file.filename && file.subfolder) {
-        dlStore.getState().setMeta(file.filename, file.downloadUrl, file.subfolder)
+        dlStore.getState().setMeta(file.filename, file.downloadUrl, file.subfolder, undefined, {
+          expectedBytes: file.sizeGB ? Math.round(file.sizeGB * 1_073_741_824) : undefined,
+          sha256: file.sha256,
+        })
         filenames.push(file.filename)
       }
     }
@@ -527,8 +530,9 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
         dlStore.getState().retry(f.filename)
       } else if (!dl || (dl.status !== 'complete' && dl.status !== 'downloading' && dl.status !== 'connecting')) {
         // File has no active download — start fresh
-        dlStore.getState().setMeta(f.filename, f.downloadUrl, f.subfolder)
-        startModelDownload(f.downloadUrl, f.subfolder, f.filename, f.sizeGB ? Math.round(f.sizeGB * 1_073_741_824) : undefined)
+        const expectedBytes = f.sizeGB ? Math.round(f.sizeGB * 1_073_741_824) : undefined
+        dlStore.getState().setMeta(f.filename, f.downloadUrl, f.subfolder, undefined, { expectedBytes, sha256: f.sha256 })
+        startModelDownload(f.downloadUrl, f.subfolder, f.filename, expectedBytes, f.sha256)
         dlStore.getState().startPolling()
       }
     }

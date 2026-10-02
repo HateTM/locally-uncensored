@@ -34,6 +34,9 @@ export interface DiscoverModel {
   filename?: string
   subfolder?: string  // ComfyUI models subfolder: checkpoints, diffusion_models, vae, text_encoders
   sizeGB?: number
+  /** Exact byte count, when the catalog knows it to the byte. A file of the same name
+   *  and another size is NOT this file (a mirror's repack), so it never counts as installed. */
+  sizeBytes?: number
   // Vision projector that belongs to `downloadUrl`. A text GGUF carries no
   // image tower: llama.cpp keeps it in a separate mmproj file and only sees
   // images when the server is started with `--mmproj`. When this is set the
@@ -941,6 +944,7 @@ export function getVideoBundles(): ModelBundle[] {
           pulls: '', tags: ['Model', '21.5 GB'], updated: 'New',
           downloadUrl: 'https://huggingface.co/comfyicu/LTX-2.5/resolve/main/diffusion_models/ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors',
           filename: 'ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors', subfolder: 'diffusion_models', sizeGB: 20.03,
+          sizeBytes: 21504034224,
           sha256: 'c4279eeff115cbeaca494bd2183e7d768c38fe85a184dc6afbb7159157c44334',
         },
         {
@@ -949,6 +953,7 @@ export function getVideoBundles(): ModelBundle[] {
           pulls: '', tags: ['Text Encoder', '15.4 GB'], updated: 'New',
           downloadUrl: 'https://huggingface.co/deAPI-ai/ltx2-5-22b-dist-int8/resolve/main/text_encoders/gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors',
           filename: 'gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors', subfolder: 'text_encoders', sizeGB: 14.32,
+          sizeBytes: 15372969374,
           sha256: '6ce688a0aa98a5fa36a9f1e6c3f42152a498cc2b53ee8c15674c64244f91487f',
         },
         {
@@ -957,6 +962,7 @@ export function getVideoBundles(): ModelBundle[] {
           pulls: '', tags: ['VAE', '1.5 GB'], updated: 'New',
           downloadUrl: 'https://huggingface.co/comfyicu/LTX-2.5/resolve/main/vae/ltx-2.5-video-vae-bf16.safetensors',
           filename: 'ltx-2.5-video-vae-bf16.safetensors', subfolder: 'vae', sizeGB: 1.37,
+          sizeBytes: 1472223346,
           sha256: '847e14ca7f3355debca0cea4eaa24ac0fbcdf0061da054ac89ca638a869ddba3',
         },
         {
@@ -965,6 +971,7 @@ export function getVideoBundles(): ModelBundle[] {
           pulls: '', tags: ['VAE', '365 MB'], updated: 'New',
           downloadUrl: 'https://huggingface.co/comfyicu/LTX-2.5/resolve/main/vae/ltx-2.5-audio-vae-bf16.safetensors',
           filename: 'ltx-2.5-audio-vae-bf16.safetensors', subfolder: 'vae', sizeGB: 0.34,
+          sizeBytes: 364866540,
           sha256: 'c52733d37f6a7fb7949c3dc0fb468c6cb2169e4d836983a73babb9f0d54837a5',
         },
         {
@@ -973,6 +980,7 @@ export function getVideoBundles(): ModelBundle[] {
           pulls: '', tags: ['Upscaler', '996 MB'], updated: 'New',
           downloadUrl: 'https://huggingface.co/comfyicu/LTX-2.5/resolve/main/latent_upscale_models/ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors',
           filename: 'ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors', subfolder: 'latent_upscale_models', sizeGB: 0.93,
+          sizeBytes: 995778752,
           sha256: 'eb5a71fe4068ee87ccdb1c3aa635e547ca76bd2d30ae20ae889f2c325c0677e8',
         },
       ],
@@ -994,6 +1002,7 @@ export function getVideoBundles(): ModelBundle[] {
           pulls: '', tags: ['Model', '12.2 GB', 'GGUF'], updated: 'New',
           downloadUrl: 'https://huggingface.co/agosh/LTX-2.5-Comfy-GGUF/resolve/main/ltx-2.5-22b-distilled-transformer-bf16-Q4_K_M.gguf',
           filename: 'ltx-2.5-22b-distilled-transformer-bf16-Q4_K_M.gguf', subfolder: 'diffusion_models', sizeGB: 11.38,
+          sizeBytes: 12220864608,
           sha256: '0b1bca38240087117bb0d1379fdaf1bcdb53c40e63f5f9bcb1a7e793f9520cfb',
         },
         {
@@ -1002,6 +1011,7 @@ export function getVideoBundles(): ModelBundle[] {
           pulls: '', tags: ['Text Encoder', '15.4 GB'], updated: 'New',
           downloadUrl: 'https://huggingface.co/deAPI-ai/ltx2-5-22b-dist-int8/resolve/main/text_encoders/gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors',
           filename: 'gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors', subfolder: 'text_encoders', sizeGB: 14.32,
+          sizeBytes: 15372969374,
           sha256: '6ce688a0aa98a5fa36a9f1e6c3f42152a498cc2b53ee8c15674c64244f91487f',
         },
         {
@@ -1010,6 +1020,7 @@ export function getVideoBundles(): ModelBundle[] {
           pulls: '', tags: ['VAE', '1.5 GB'], updated: 'New',
           downloadUrl: 'https://huggingface.co/comfyicu/LTX-2.5/resolve/main/vae/ltx-2.5-video-vae-bf16.safetensors',
           filename: 'ltx-2.5-video-vae-bf16.safetensors', subfolder: 'vae', sizeGB: 1.37,
+          sizeBytes: 1472223346,
           sha256: '847e14ca7f3355debca0cea4eaa24ac0fbcdf0061da054ac89ca638a869ddba3',
         },
         {
@@ -1018,6 +1029,7 @@ export function getVideoBundles(): ModelBundle[] {
           pulls: '', tags: ['VAE', '365 MB'], updated: 'New',
           downloadUrl: 'https://huggingface.co/comfyicu/LTX-2.5/resolve/main/vae/ltx-2.5-audio-vae-bf16.safetensors',
           filename: 'ltx-2.5-audio-vae-bf16.safetensors', subfolder: 'vae', sizeGB: 0.34,
+          sizeBytes: 364866540,
           sha256: 'c52733d37f6a7fb7949c3dc0fb468c6cb2169e4d836983a73babb9f0d54837a5',
         },
         {
@@ -1026,6 +1038,7 @@ export function getVideoBundles(): ModelBundle[] {
           pulls: '', tags: ['Upscaler', '996 MB'], updated: 'New',
           downloadUrl: 'https://huggingface.co/comfyicu/LTX-2.5/resolve/main/latent_upscale_models/ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors',
           filename: 'ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors', subfolder: 'latent_upscale_models', sizeGB: 0.93,
+          sizeBytes: 995778752,
           sha256: 'eb5a71fe4068ee87ccdb1c3aa635e547ca76bd2d30ae20ae889f2c325c0677e8',
         },
       ],

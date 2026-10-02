@@ -44,6 +44,7 @@ vi.mock('../../../api/backend', () => ({
   isMacOS: () => false,
 }))
 vi.mock('../../../api/discover', () => ({
+  lookupFileMeta: () => null,
   searchCivitaiModels: (query: string, type: string, key?: string, host?: string) =>
     searchCivitaiModels(query, type, key, host),
   // The panel downloads through startCivitaiDownload; for a safetensors LoRA
