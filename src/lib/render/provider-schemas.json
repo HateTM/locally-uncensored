@@ -8633,6 +8633,7 @@
       "num_images": {
         "default": 1,
         "description": "The number of images to generate.",
+        "disabled": true,
         "maximum": 2,
         "minimum": 1,
         "type": "integer",

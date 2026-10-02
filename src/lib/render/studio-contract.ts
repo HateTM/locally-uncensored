@@ -134,7 +134,8 @@ export function studioCredits(id: string, options: Record<string,unknown>, measu
   if (!Number.isFinite(seconds) || seconds <= 0) throw new Error('Invalid duration')
   // Ein Endpunkt, der nach Bildpunkten abrechnet, bringt seinen eigenen Faktor
   // mit (Crystal: Preis je Megapixel je Sekunde).
-  const units = m.price.perUnitField ? Number(options[m.price.perUnitField]) : 1
+  // Ein abgeschaltetes Feld (num_images) fehlt in den Optionen: der Anbieter nimmt dann seinen Standard 1.
+  const units = m.price.perUnitField ? Number(options[m.price.perUnitField] ?? 1) : 1
   if (!Number.isFinite(units) || units <= 0) throw new Error('Invalid size')
   return Math.ceil((rate * seconds * units + (m.price.extraImage ?? 0) * Math.max(0,imageCount-1)) * 100000 - 1e-8)
 }
