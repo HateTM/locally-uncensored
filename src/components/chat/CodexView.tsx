@@ -31,6 +31,7 @@ import { useModelStore } from '../../stores/modelStore'
 import { useAnyAgentLoopActive } from '../../stores/agentLoopStore'
 import { useUIStore } from '../../stores/uiStore'
 import { RecentChats } from './RecentChats'
+import { openNewCodeSession } from '../../lib/code-session'
 import { useAgentModeStore } from '../../stores/agentModeStore'
 import {
   CODEX_WORKDIR_LOCK_TITLE,
@@ -139,7 +140,6 @@ export function CodexView() {
   const codexReviewMode = useSettingsStore((s) => s.settings.codexReviewMode)
   const userAvatarDataUrl = useSettingsStore((s) => s.settings.userAvatarDataUrl)
   const activeModel = useModelStore((s) => s.activeModel)
-  const createConversation = useChatStore((s) => s.createConversation)
   const codexWorkingDir = useCodexStore((s) => s.workingDirectory)
   const clearWorkingDirectory = useCodexStore((s) => s.clearWorkingDirectory)
   // A8 (2.6.8): the same Remove sits in the explorer column, but that column
@@ -200,15 +200,7 @@ export function CodexView() {
   const startNewSession = () => {
     stopCodex()
     if (!activeModel) return
-    // An untouched session IS a new session. Each click used to add another
-    // empty "Coding Agent" to the list (3.0.4 box run: two clicks, two rows).
-    const { conversations: convs, activeConversationId: current } = useChatStore.getState()
-    const open = convs.find((c) => c.id === current)
-    if (open?.mode === 'codex' && open.messages.length === 0
-      && !(useCodexStore.getState().threads[open.id]?.events.length)) return
-    const convId = createConversation(activeModel, '', 'codex')
-    // "New" keeps the Ask/Bypass the user last picked (Gegenprobe 01.10.2026).
-    useCodexStore.getState().startConversationMode(convId)
+    openNewCodeSession(activeModel)
   }
 
   return (

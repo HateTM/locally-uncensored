@@ -31,6 +31,8 @@ test('while ComfyUI is starting the stage offers no download', async ({ page }) 
   await expect(page.getByText('ComfyUI is starting up.')).toBeVisible({ timeout: 15_000 })
   await page.waitForTimeout(1500)
   await expect(page.getByText('Local image generation needs a one-time download')).toHaveCount(0)
+  // Gegenprobe 8: a red "is not running" stood next to "is starting up".
+  await expect(page.getByText(/ComfyUI is not running/)).toHaveCount(0)
 })
 
 // Negative control: nothing running and nothing starting, so the card is the

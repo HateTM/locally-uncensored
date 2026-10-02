@@ -9,6 +9,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { lorasForRun, loraFitsModel, skippedLorasLine } from '../lora-stack'
 import { useCreateStore } from '../../stores/createStore'
+import { readFileSync } from 'node:fs'
 
 const GONE = 'char_gracechar_e110.safetensors'
 const CHAR = 'char_gracechar_zimage.safetensors'
@@ -69,5 +70,16 @@ describe('the stack follows the folder', () => {
     useCreateStore.getState().clearLoras()
     expect(useCreateStore.getState().selectedLoras).toEqual([])
     expect(useCreateStore.getState().selectedCharacter).toBeNull()
+  })
+})
+
+describe('the result keeps the skip line (Gegenprobe 8, 02.10.)', () => {
+  it('every ComfyUI result written after the LoRA check carries the note', () => {
+    const src = readFileSync('src/hooks/useCreate.ts', 'utf8')
+    const after = src.slice(src.indexOf('let skippedNote'))
+    const adds = after.match(/addToGallery\(\{/g) ?? []
+    const notes = after.match(/\.\.\.\(skippedNote \? \{ runNote: skippedNote \} : \{\}\)/g) ?? []
+    expect(adds.length).toBeGreaterThan(0)
+    expect(notes.length).toBe(adds.length)
   })
 })

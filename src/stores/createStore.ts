@@ -204,6 +204,9 @@ export interface GalleryItem {
   batchSize: number
   createdAt: number
   builderUsed?: 'dynamic' | 'legacy' | 'custom'
+  /** What the run left out of the request, e.g. "Skipping LoRA no longer in
+   *  models/loras: style". Shown under the result. */
+  runNote?: string
   resolvedVAE?: string
   resolvedCLIP?: string
   /** Self-contained media URL for backends that don't serve files over

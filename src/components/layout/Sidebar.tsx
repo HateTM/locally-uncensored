@@ -13,6 +13,7 @@ import { workspaceRejectedMessage } from '../../lib/workspace-rejected'
 import { CHAT_BASE_SYSTEM_PROMPT } from '../../lib/system-prompt'
 import { backendCall, isTauri } from '../../api/backend'
 import { useDismissOnEscape } from '../../hooks/useDismissOnEscape'
+import { openNewCodeSession } from '../../lib/code-session'
 import {
   conversationMatches, sameSidebarRows, toSidebarRow, type SidebarRow,
 } from './sidebar-rows'
@@ -166,6 +167,11 @@ export function Sidebar() {
     // systemPrompt (so toggling personaEnabled later "just works"
     // without re-reading global state), but useChat / useAgentChat
     // only apply it when personaEnabled === true.
+    if (chatMode === 'codex') {
+      openNewCodeSession(activeModel)
+      setView('chat')
+      return
+    }
     const persona = personasEnabled ? getActivePersona() : null
     createConversation(activeModel, persona?.systemPrompt || '', chatMode)
     setView('chat')

@@ -133,3 +133,38 @@ test('New on an untouched Code session adds no second empty entry', async ({ pag
   await newButton.click()
   expect(await codeConvs()).toBe(before + 1)
 })
+
+test('New Chat in the sidebar follows the same rule as New in Code', async ({ page }) => {
+  // 3.0.4 Gegenprobe 8: the sidebar's New Chat added an empty "Coding Agent"
+  // row on every click and reset Bypass to Ask.
+  await bootCode(page)
+  const state = () => page.evaluate(async () => {
+    const chatPath = '/src/stores/chatStore.ts'
+    const codexPath = '/src/stores/codexStore.ts'
+    const chat = await import(/* @vite-ignore */ chatPath) as typeof import('../src/stores/chatStore')
+    const codex = await import(/* @vite-ignore */ codexPath) as typeof import('../src/stores/codexStore')
+    const { conversations, activeConversationId } = chat.useChatStore.getState()
+    return {
+      count: conversations.filter((c) => c.mode === 'codex').length,
+      mode: codex.useCodexStore.getState().modeByConversation[activeConversationId ?? ''] ?? null,
+    }
+  })
+  await page.evaluate(async () => {
+    const chatPath = '/src/stores/chatStore.ts'
+    const codexPath = '/src/stores/codexStore.ts'
+    const chat = await import(/* @vite-ignore */ chatPath) as typeof import('../src/stores/chatStore')
+    const codex = await import(/* @vite-ignore */ codexPath) as typeof import('../src/stores/codexStore')
+    codex.useCodexStore.getState().chooseCodexMode(chat.useChatStore.getState().activeConversationId!, 'bypass', false)
+  })
+  const sidebarNew = page.getByRole('button', { name: /New Chat/i })
+  const before = (await state()).count
+  await sidebarNew.click()
+  await sidebarNew.click()
+  expect((await state()).count).toBe(before)
+
+  // NEGATIVE CONTROL: with a message in it, New Chat starts a fresh session,
+  // and that one keeps Bypass.
+  await codeVerlauf(page)
+  await sidebarNew.click()
+  expect(await state()).toEqual({ count: before + 1, mode: 'bypass' })
+})

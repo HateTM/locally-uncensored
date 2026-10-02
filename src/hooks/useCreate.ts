@@ -56,7 +56,7 @@ import { apiNodes, type ComfyApiGraph, type ComfyExecutionMessage, type ComfyHis
 import { restartComfyForNewNodes } from '../api/comfy-restart'
 import { installCustomNodes, startModelDownload, getDownloadProgress, modelsNotVisibleInComfy, comfyModelTarget } from '../api/discover'
 import { downloadBundleFiles, waitForModelsVisible } from '../lib/bundle-install'
-import { buildWithFixups, type FixupDeps } from '../lib/render-fixups'
+import { buildWithFixups, wasDeclined, type FixupDeps } from '../lib/render-fixups'
 import { useDownloadStore } from '../stores/downloadStore'
 import { useComfyInstallStore } from '../stores/comfyInstallStore'
 import { checkPromptSafety, SAFETY_BLOCK_MESSAGE } from '../lib/render/safety'
@@ -960,12 +960,16 @@ export function useCreate() {
       // A deleted file or a Z-Image character on another model is left out
       // with a line, instead of ComfyUI refusing the whole graph.
       let runLoras = selectedLoras
+      // The progress line is gone a second later, so the result keeps it
+      // too (3.0.4 Gegenprobe 8: a deleted LoRA was left out "silently").
+      let skippedNote: string | undefined
       if (selectedLoras.length) {
         const listed = await listedLoras().catch(() => null)
         const pick = lorasForRun(selectedLoras, listed, imageModelType)
         if (listed && pick.missing.length) useCreateStore.getState().keepListedLoras(listed)
         const line = skippedLorasLine(pick.missing, pick.otherModel)
         if (line) setProgress(0, line)
+        skippedNote = line ?? undefined
         runLoras = pick.use
       }
       let outputWidth = width
@@ -1351,7 +1355,7 @@ export function useCreate() {
                       modelType: mode === 'image' ? imageModelType : (videoModelsList.find(m => m.name === activeModel)?.type ?? 'wan'),
                       seed: runSeed,
                       steps, cfgScale, sampler, scheduler, width: outputWidth, height: outputHeight, batchSize,
-                      createdAt: Date.now(), builderUsed, intent,
+                      createdAt: Date.now(), builderUsed, intent, ...(skippedNote ? { runNote: skippedNote } : {}),
                     })
                   }
                 }
@@ -1442,7 +1446,7 @@ export function useCreate() {
                         modelType: mode === 'image' ? imageModelType : (videoModelsList.find(m => m.name === activeModel)?.type ?? 'wan'),
                         seed: runSeed,
                         steps, cfgScale, sampler, scheduler, width: outputWidth, height: outputHeight, batchSize,
-                        createdAt: Date.now(), builderUsed,
+                        createdAt: Date.now(), builderUsed, ...(skippedNote ? { runNote: skippedNote } : {}),
                       })
                     }
                   }
@@ -1549,7 +1553,7 @@ export function useCreate() {
                       modelType: mode === 'image' ? imageModelType : (videoModelsList.find(m => m.name === activeModel)?.type ?? 'wan'),
                       seed: runSeed,
                       steps, cfgScale, sampler, scheduler, width: outputWidth, height: outputHeight, batchSize,
-                      createdAt: Date.now(), builderUsed, intent,
+                      createdAt: Date.now(), builderUsed, intent, ...(skippedNote ? { runNote: skippedNote } : {}),
                     })
                   }
                 }
@@ -1587,6 +1591,10 @@ export function useCreate() {
       }
       if (err instanceof Error && err.message === 'Cancelled') {
         // User cancelled, not an error
+      } else if (err instanceof Error && wasDeclined(err)) {
+        // A no to the download or update question: nothing failed, the run
+        // never started, and the reason says what it would have needed.
+        useCreateStore.getState().setError(`Not started. ${err.message}`)
       } else {
         const msg = err instanceof Error ? err.message : String(err)
         useCreateStore.getState().setError(`Generation failed: ${msg}`)

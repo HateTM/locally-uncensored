@@ -74,6 +74,9 @@ test('picks whose files are gone leave the stack, the count matches what is tick
   // Pick the one that exists, then delete its file and rescan.
   await page.getByRole('button', { name: /film_grain_xl/ }).click()
   await expect(page.getByText('· 1 active')).toBeVisible()
+  // Gegenprobe 8: the strength reads as a number.
+  await expect(page.getByText('Strength')).toBeVisible()
+  await expect(page.getByText('0.80', { exact: true })).toBeVisible()
   await page.evaluate(() => { (window as unknown as { __LORAS__: string[] }).__LORAS__ = [] })
   await page.getByRole('button', { name: /Rescan/ }).click()
   await expect(page.getByText(/active/)).toHaveCount(0)
@@ -94,10 +97,39 @@ test('Clear turns every LoRA off', async ({ page }) => {
 test('a Z-Image character on an SDXL checkpoint says so and is not counted', async ({ page }) => {
   await bootWithFakeComfy(page, [STYLE, CHAR], 'juggernautXL.safetensors')
   await openStack(page)
-  await page.getByRole('button', { name: /char_mira_zimage/ }).click()
   const row = page.getByRole('button', { name: /char_mira_zimage/ })
+  // Gegenprobe 8: the row says so before anyone ticks it.
+  await expect(row).toContainText('Z-Image only')
+  await row.click()
   await expect(row).toContainText('Z-Image only')
   await expect(page.getByText(/active/)).toHaveCount(0)
   // Gegenprobe 02.10.: the row showed a strength slider as if it applied.
   await expect(row.locator('xpath=..').getByRole('slider')).toHaveCount(0)
+})
+
+test('a render that left a LoRA out says so under the result', async ({ page }) => {
+  // Gegenprobe 8 (02.10.): the "Skipping LoRA" progress line was gone a
+  // second later, so the picture looked as if the style had been applied.
+  await page.addInitScript(() => {
+    localStorage.setItem('create-store', JSON.stringify({
+      state: {
+        backend: 'local',
+        gallery: [{
+          id: 'g1', type: 'image', filename: 'apple_k3f9q2_00001_.png', subfolder: '', prompt: 'a red apple', negativePrompt: '',
+          model: 'sd_turbo.safetensors', modelType: 'sd15', seed: 7, steps: 4, cfgScale: 1, sampler: 'euler',
+          scheduler: 'simple', width: 512, height: 512, batchSize: 1, createdAt: Date.now(),
+          runNote: 'Skipping LoRA no longer in models/loras: zz_gegenprobe_style',
+        }],
+      },
+      version: 2,
+    }))
+  })
+  await bootWithFakeComfy(page, [], 'sd_turbo.safetensors')
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64')
+  await page.route('**/view?**', (route) => route.fulfill({ status: 200, contentType: 'image/png', body: png }))
+  await page.goto('/')
+  await page.getByRole('button', { name: /^Create$/ }).click()
+  await page.getByRole('button', { name: 'Open the gallery' }).click()
+  await page.locator('aside').filter({ hasText: 'Gallery' }).locator('.group').first().locator('button').first().click()
+  await expect(page.getByTestId('run-note')).toHaveText('Skipping LoRA no longer in models/loras: zz_gegenprobe_style')
 })

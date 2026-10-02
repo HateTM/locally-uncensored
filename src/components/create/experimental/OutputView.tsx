@@ -218,6 +218,9 @@ export function ResultView({ item, onFullscreen, onSendToEditor, onAnimate }: Re
         )}
         <span className="truncate max-w-[280px]">{prettyModel(item.model)}</span>
       </div>
+      {item.runNote && (
+        <div className="mt-1 t-mono text-gray-500" data-testid="run-note">{item.runNote}</div>
+      )}
      </div>
     </div>
   )

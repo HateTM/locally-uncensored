@@ -62,11 +62,23 @@ cloud catalogue. It also fixes the bugs reported on GitHub and Discord since
 - **Turbo checkpoints start at a few steps.** SD-Turbo, SDXL-Turbo,
   Lightning, Hyper-SD and LCM checkpoints start at 4 steps and CFG 1 instead
   of the family's 25 steps.
-- **Installed models show their real file format.** A .ckpt such as the
-  AnimateDiff motion module was labelled "safetensors"; the card now reads the
-  file ending.
+- **Installed models show their real file format.** Every ComfyUI file that
+  was not a .gguf was labelled "safetensors", a .ckpt motion module too; the
+  list now reads the file ending.
 - **Local API counts say what they count.** "Requests" is now "Model
   requests", since listing the models is not counted.
+- **A render says when it left a LoRA out.** The "Skipping LoRA" line was
+  gone a second later; the result now keeps it under the picture. Character
+  Studio LoRAs say "Z-Image only" before you tick them, and the strength
+  slider shows its number.
+- **A no to a download is not a failure.** Cancel in the "One more file is
+  needed" question now reads "Not started." with the reason, instead of
+  "Generation failed".
+- **One message while ComfyUI starts.** The red "ComfyUI is not running" no
+  longer stands next to "ComfyUI is starting up."
+- **New Chat in Code works like New.** The sidebar button added an empty
+  "Coding Agent" on every click and reset Bypass to Ask; it now reuses an
+  untouched session and keeps your mode.
 - **No download offer while ComfyUI is starting.** Right after launch the
   Create stage could offer the 6.5 GB starter download while ComfyUI was still
   coming up and the models were already on disk. It now waits.

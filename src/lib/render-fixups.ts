@@ -91,6 +91,18 @@ export const UPDATE_PROMPT: FixupPrompt = {
   confirm: 'Update ComfyUI and render',
 }
 
+/** The original reason, marked as the user's own no, so Create can say
+ *  "Not started" instead of "Generation failed" (3.0.4 Gegenprobe 8: a
+ *  deliberate Cancel in the download question read as a failure). */
+function declined(err: unknown): unknown {
+  if (err instanceof Error) Object.assign(err, { declined: true })
+  return err
+}
+
+export function wasDeclined(err: unknown): boolean {
+  return err instanceof Error && (err as { declined?: boolean }).declined === true
+}
+
 /** A build that can be retried after its missing pieces are fixed. The same
  *  fix is never offered twice: a second identical failure is reported. */
 export async function buildWithFixups<T>(build: () => Promise<T>, deps: FixupDeps, maxRounds = 3): Promise<T> {
@@ -106,7 +118,7 @@ export async function buildWithFixups<T>(build: () => Promise<T>, deps: FixupDep
         if (remote) throw new Error(remoteUpdateMessage(remote))
         if (done.has('update')) throw err
         done.add('update')
-        if (!(await deps.ask(UPDATE_PROMPT))) throw err
+        if (!(await deps.ask(UPDATE_PROMPT))) throw declined(err)
         await deps.updateComfy()
       } else {
         const files = (e.missing ?? []).filter(
@@ -115,7 +127,7 @@ export async function buildWithFixups<T>(build: () => Promise<T>, deps: FixupDep
         const key = files.map((f) => f.downloadFilename).sort().join('|')
         if (done.has(key)) throw err
         done.add(key)
-        if (!(await deps.ask(remote ? remoteDownloadPrompt(files, remote) : downloadPrompt(files)))) throw err
+        if (!(await deps.ask(remote ? remoteDownloadPrompt(files, remote) : downloadPrompt(files)))) throw declined(err)
         await deps.download(files)
         // On another machine nothing can render with them until they are
         // copied over, so the run ends here and says what to copy where.

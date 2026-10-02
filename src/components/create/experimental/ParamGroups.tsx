@@ -258,6 +258,8 @@ export function ParamGroups() {
               <div className="t-control text-gray-600">No LoRAs found yet. Drop .safetensors files into ComfyUI&apos;s models/loras folder and hit Rescan. Characters trained in Character Studio land there automatically.</div>
             ) : (
             <div className="space-y-1 max-h-44 overflow-y-auto scrollbar-thin">
+              {/* Gegenprobe 8 (02.10.): "Z-Image only" showed only after a
+                  click, and the strength had no number next to it. */}
               {loraList.map((name) => {
                 const active = s.selectedLoras.find((l) => l.name === name)
                 const fits = loraFitsModel(name, laneType)
@@ -265,11 +267,11 @@ export function ParamGroups() {
                   <div key={name} className={cn('rounded-md border transition-colors', active ? 'border-white/15 bg-white/[0.06]' : 'border-white/[0.06]')}>
                     <button onClick={() => s.toggleLora(name)} className="w-full flex items-center justify-between px-2.5 py-1.5 t-control text-left text-gray-300">
                       <span className="truncate">{name.replace(/\.safetensors$/, '')}</span>
-                      <span className={cn('t-mono', active && fits ? 'text-emerald-400' : 'text-gray-600')}>{active ? (fits ? 'on' : 'Z-Image only') : 'off'}</span>
+                      <span className={cn('t-mono', active && fits ? 'text-emerald-400' : 'text-gray-600')}>{fits ? (active ? 'on' : 'off') : 'Z-Image only'}</span>
                     </button>
                     {active && fits && (
                       <div className="px-2.5 pb-2">
-                        <Slider min={0} max={2} step={0.05} value={active.strength} onChange={(v) => s.setLoraStrengthFor(name, v)} format={(v) => v.toFixed(2)} />
+                        <Slider label="Strength" min={0} max={2} step={0.05} value={active.strength} onChange={(v) => s.setLoraStrengthFor(name, v)} format={(v) => v.toFixed(2)} />
                       </div>
                     )}
                   </div>

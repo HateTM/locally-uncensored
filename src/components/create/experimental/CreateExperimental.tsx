@@ -234,7 +234,10 @@ function CreateExperimentalInner() {
       lipsync: lipsyncModelList, motion: motionModelList,
     }),
   })
-  const banner = error ?? (setupCardOwnsStage ? null : modelLoadError)
+  // While ComfyUI starts, "ComfyUI is starting up." is the one voice; the
+  // load error "is not running" said the opposite in red next to it
+  // (3.0.4 Gegenprobe 8).
+  const banner = error ?? (setupCardOwnsStage || comfyStarting ? null : modelLoadError)
 
   // "Edit with mask" on a finished image force-sets the 'edit' intent. On the
   // MLX Mac that lane does not exist (no ComfyUI inpaint nodes, and MLX

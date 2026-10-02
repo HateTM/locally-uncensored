@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
-import { buildWithFixups, downloadPrompt, remoteDownloadPrompt, UPDATE_PROMPT, type FixupDeps } from '../render-fixups'
+import { readFileSync } from 'node:fs'
+import { buildWithFixups, wasDeclined, downloadPrompt, remoteDownloadPrompt, UPDATE_PROMPT, type FixupDeps } from '../render-fixups'
 
 const unavailable = (extra: Record<string, unknown>) => Object.assign(new Error('needs files'), { name: 'WorkflowUnavailableError', ...extra })
 const T5 = { downloadFilename: 't5.safetensors', downloadUrl: 'https://huggingface.co/x/t5.safetensors', subfolder: 'text_encoders', sizeGB: 5.16, matchPatterns: [] }
@@ -31,6 +32,17 @@ describe('buildWithFixups', () => {
     const d = deps(false)
     await expect(buildWithFixups(vi.fn().mockRejectedValue(err), d)).rejects.toBe(err)
     expect(d.download).not.toHaveBeenCalled()
+    // Gegenprobe 8: Create says "Not started", not "Generation failed".
+    expect(wasDeclined(err)).toBe(true)
+  })
+
+  it('an error nobody was asked about is not a no', async () => {
+    const plain = new Error('boom')
+    await expect(buildWithFixups(vi.fn().mockRejectedValue(plain), deps())).rejects.toBe(plain)
+    expect(wasDeclined(plain)).toBe(false)
+    const update = unavailable({ needsComfyUpdate: true })
+    await expect(buildWithFixups(vi.fn().mockRejectedValue(update), deps(false))).rejects.toBe(update)
+    expect(wasDeclined(update)).toBe(true)
   })
 
   it('never offers the same fix twice, and never touches errors it cannot fix', async () => {
@@ -84,5 +96,14 @@ describe('buildWithFixups', () => {
       expect(d.ask).not.toHaveBeenCalled()
       expect(d.updateComfy).not.toHaveBeenCalled()
     })
+  })
+})
+
+describe('Create after a no (Gegenprobe 8, 02.10.)', () => {
+  it('says Not started with the reason, not Generation failed', () => {
+    const src = readFileSync('src/hooks/useCreate.ts', 'utf8')
+    const branch = src.slice(src.indexOf('} else if (err instanceof Error && wasDeclined(err)) {'))
+    expect(branch.slice(0, 400)).toContain('setError(`Not started. ${err.message}`)')
+    expect(branch.indexOf('Not started.')).toBeLessThan(branch.indexOf('Generation failed'))
   })
 })

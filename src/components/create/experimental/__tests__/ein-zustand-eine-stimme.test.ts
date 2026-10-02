@@ -86,7 +86,13 @@ describe('D-S31: die Regel gibt es genau einmal', () => {
   })
 
   it('der Balken haengt an ihr', () => {
-    expect(CREATE).toMatch(/setupCardOwnsStage \? null : modelLoadError/)
+    expect(CREATE).toMatch(/setupCardOwnsStage \|\| comfyStarting \? null : modelLoadError/)
+  })
+
+  it('schweigt, waehrend ComfyUI startet (Gegenprobe 8, 02.10.)', () => {
+    // "is not running" in Rot neben "is starting up" sagte zweimal Gegensaetzliches.
+    const b = CREATE.match(/const banner = ([^\n]+)/)
+    expect(b![1]).toContain('comfyStarting ? null')
   })
 
   it('echte Laufzeitfehler bleiben unberuehrt', () => {
