@@ -1,4 +1,4 @@
-import { useCallback, useState, useEffect, useRef } from 'react'
+import { Fragment, useCallback, useState, useEffect, useRef } from 'react'
 import { chatRecommendationGroups, isBelowChatMinimum, SMALL_CHAT_MODEL_WARNING } from '../../lib/chat-model-minimum'
 import { bundleIsComplete, bundleIsDownloading, bundleHasErrors } from '../../lib/bundle-state'
 import { motion } from 'framer-motion'
@@ -14,6 +14,7 @@ import {
   type DiscoverModel, type DownloadProgress, type ModelBundle, type HfGgufFile,
 } from '../../api/discover'
 import { getSystemVRAM } from '../../api/comfyui'
+import { sortByTier, tierGroup } from '../../lib/render/model-tier'
 import { getMaxVramGb, getTotalRamGb, bundleVramNeedGb } from '../../lib/hardware'
 import { openExternal } from '../../api/backend'
 import { useModels } from '../../hooks/useModels'
@@ -312,7 +313,9 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
   const parseVRAM = (b: ModelBundle): number => bundleVramNeedGb(b)
 
   // Sort bundles: verified first, then HOT, then fits VRAM, then by size
-  const sortedBundles = [...bundles].sort((a, b) => {
+  // Then the tier, stable: Best on top, Older gathered at the bottom under its
+  // own line, nothing hidden (David 2026-10-02, same rule as the cloud pickers).
+  const sortedBundles = sortByTier([...bundles].sort((a, b) => {
     // Verified models always first
     if (a.verified && !b.verified) return -1
     if (!a.verified && b.verified) return 1
@@ -326,7 +329,7 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
       if (!aFits && bFits) return 1
     }
     return parseVRAM(a) - parseVRAM(b)
-  })
+  }))
 
   const tabFilteredBundles = sortedBundles.filter(b => subTab === 'uncensored' ? b.uncensored : !b.uncensored)
 
@@ -955,7 +958,11 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
       {(isImage || isVideo) && filteredBundles.length > 0 && (
         <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-2.5">
           {filteredBundles.map((bundle, bi) => (
-            <motion.div key={bundle.name} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: Math.min(bi, 12) * 0.025 }}>
+            <Fragment key={bundle.name}>
+            {tierGroup(bundle) && tierGroup(bundle) !== tierGroup(filteredBundles[bi - 1] ?? {}) && (
+              <div className="col-span-full t-control pt-2 text-gray-500" data-tier-group={tierGroup(bundle)}>{tierGroup(bundle)}</div>
+            )}
+            <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: Math.min(bi, 12) * 0.025 }}>
               <BundleTile
                 bundle={bundle}
                 vramGb={systemVRAM}
@@ -968,6 +975,7 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
                 onOpenUrl={(u) => openExternal(u)}
               />
             </motion.div>
+            </Fragment>
           ))}
         </div>
       )}

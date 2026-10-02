@@ -43,6 +43,8 @@ export interface ComponentRequirements {
   clipSecondary?: ComponentSpec
   /** A separate sound autoencoder (MiniMax H3 decodes its audio with it). */
   audioVae?: ComponentSpec
+  /** A latent upscaler the graph runs between its two passes (LTX 2.5). */
+  upscaler?: ComponentSpec
   /** The CLIPLoader `type` widget value for this architecture, when the
    *  loader is CLIPLoader (single encoder). */
   clipType?: string
@@ -116,6 +118,18 @@ export const COMPONENT_REGISTRY: Record<string, ComponentRequirements> = {
     loader: 'UNETLoader', needsSeparateVAE: false, needsSeparateCLIP: true, clipType: 'ltxv',
     clip: { matchPatterns: ['gemma'], downloadFilename: 'gemma_3_12B_it_fp8_scaled.safetensors', downloadUrl: 'https://huggingface.co/Comfy-Org/ltx-2/resolve/main/split_files/text_encoders/gemma_3_12B_it_fp8_scaled.safetensors', subfolder: 'text_encoders' },
   },
+  // LTX 2.5 (Lightricks/LTX-2.5, GATED: a download needs a Hugging Face token,
+  // the downloader's 401 text names the Settings field). Needs ComfyUI 0.32.0.
+  // The 2.3 entry above keeps Gemma 3; these are the 2.5 files of the official
+  // template video_ltx2_5_t2v. The sizes are the byte counts of the Hugging Face
+  // tree API on 2026-10-02 in GiB, the unit sizeGB uses everywhere.
+  ltx25: {
+    loader: 'UNETLoader', needsSeparateVAE: true, needsSeparateCLIP: true, clipType: 'ltxv',
+    vae: { matchPatterns: ['ltx-2.5-video-vae'], downloadFilename: 'ltx-2.5-video-vae-bf16.safetensors', downloadUrl: 'https://huggingface.co/Lightricks/LTX-2.5/resolve/main/vae/ltx-2.5-video-vae-bf16.safetensors', subfolder: 'vae', sizeGB: 1.37 },
+    clip: { matchPatterns: ['gemma4', 'ltx-2.5'], downloadFilename: 'gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors', downloadUrl: 'https://huggingface.co/Lightricks/LTX-2.5/resolve/main/text_encoders/gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors', subfolder: 'text_encoders', sizeGB: 14.32 },
+    audioVae: { matchPatterns: ['ltx-2.5-audio-vae'], downloadFilename: 'ltx-2.5-audio-vae-bf16.safetensors', downloadUrl: 'https://huggingface.co/Lightricks/LTX-2.5/resolve/main/vae/ltx-2.5-audio-vae-bf16.safetensors', subfolder: 'vae', sizeGB: 0.34 },
+    upscaler: { matchPatterns: ['ltx-2.5-latent-spatial-upscaler'], downloadFilename: 'ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors', downloadUrl: 'https://huggingface.co/Lightricks/LTX-2.5/resolve/main/latent_upscale_models/ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors', subfolder: 'latent_upscale_models', sizeGB: 0.93 },
+  },
   // MiniMax H3 (Discord, throwaway 2026-09-26): one model for picture and sound. The
   // video VAE comes from here, the audio VAE is a second file the builder
   // finds through findMiniMaxAudioVAE.
@@ -125,6 +139,9 @@ export const COMPONENT_REGISTRY: Record<string, ComponentRequirements> = {
     clip: { matchPatterns: ['minimax_h3_nvfp4', 'minimax'], downloadFilename: 'qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors', downloadUrl: 'https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors', subfolder: 'text_encoders', sizeGB: 15.7 },
     audioVae: { matchPatterns: ['minimax_h3_audio_vae'], downloadFilename: 'minimax_h3_audio_vae_fp32.safetensors', downloadUrl: 'https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/vae/minimax_h3_audio_vae_fp32.safetensors', subfolder: 'vae', sizeGB: 0.6 },
   },
+  // YuE2 (Comfy-Org/YuE2, ComfyUI 0.36.0): model, text model and audio VAE in
+  // one checkpoint, like ACE Step, so there is nothing separate to fetch.
+  yue2: { loader: 'CheckpointLoaderSimple', needsSeparateVAE: false, needsSeparateCLIP: false },
   mochi: {
     loader: 'UNETLoader', needsSeparateVAE: true, needsSeparateCLIP: true, clipType: 'mochi',
     vae: { matchPatterns: ['mochi'], downloadFilename: 'mochi_vae.safetensors', downloadUrl: 'https://huggingface.co/Comfy-Org/mochi_preview_repackaged/resolve/main/split_files/vae/mochi_vae.safetensors', subfolder: 'vae' },

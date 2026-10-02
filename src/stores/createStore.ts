@@ -152,6 +152,7 @@ export const MODEL_TYPE_DEFAULTS: Record<ModelType, {
   wan22:       { steps: 30, cfgScale: 5.0, sampler: 'euler',           scheduler: 'simple', width: 1024, height: 576, frames: 49, fps: 24 },
   hunyuan:     { steps: 30, cfgScale: 6.0, sampler: 'euler',           scheduler: 'normal', width: 848,  height: 480, frames: 45, fps: 15 },
   ltx:         { steps: 20, cfgScale: 1.0, sampler: 'euler',           scheduler: 'simple', width: 768,  height: 512, frames: 97, fps: 24 },
+  ltx25:       { steps: 8,  cfgScale: 1.0, sampler: 'euler_ancestral', scheduler: 'simple', width: 1280, height: 704, frames: 121, fps: 24 },
   minimaxh3:   { steps: 20, cfgScale: 1.0, sampler: 'res_multistep',   scheduler: 'simple', width: 1344, height: 768, frames: 124, fps: 24 },
   mochi:       { steps: 40, cfgScale: 4.5, sampler: 'euler',           scheduler: 'normal', width: 848,  height: 480, frames: 49, fps: 24 },
   cosmos:      { steps: 30, cfgScale: 7.0, sampler: 'euler',           scheduler: 'normal', width: 1280, height: 704, frames: 57, fps: 24 },
@@ -163,6 +164,7 @@ export const MODEL_TYPE_DEFAULTS: Record<ModelType, {
   // 2.5.8 specialized local lanes (see comfyui.ts MODEL_TYPE_DEFAULTS for the
   // node-default provenance). ACE width/height are unused by the audio graph.
   ace:         { steps: 50, cfgScale: 5.0, sampler: 'euler',           scheduler: 'simple', width: 1024, height: 1024 },
+  yue2:        { steps: 32, cfgScale: 1.0, sampler: 'dpm_2',           scheduler: 'sgm_uniform', width: 1024, height: 1024 },
   wans2v:      { steps: 20, cfgScale: 6.0, sampler: 'euler',           scheduler: 'simple', width: 832,  height: 480, frames: 77, fps: 16 },
   wananimate:  { steps: 20, cfgScale: 5.0, sampler: 'euler',           scheduler: 'simple', width: 832,  height: 480, frames: 77, fps: 16 },
   wanvace:     { steps: 25, cfgScale: 5.0, sampler: 'euler',           scheduler: 'simple', width: 832,  height: 480, frames: 81, fps: 16 },

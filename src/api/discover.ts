@@ -1734,6 +1734,8 @@ export function catalogAddresses(): CatalogAddress[] {
     add(req.vae?.downloadUrl, `COMPONENT_REGISTRY.${type}.vae`)
     add(req.clip?.downloadUrl, `COMPONENT_REGISTRY.${type}.clip`)
     add(req.clipSecondary?.downloadUrl, `COMPONENT_REGISTRY.${type}.clipSecondary`)
+    add(req.audioVae?.downloadUrl, `COMPONENT_REGISTRY.${type}.audioVae`)
+    add(req.upscaler?.downloadUrl, `COMPONENT_REGISTRY.${type}.upscaler`)
   }
 
   return [...byUrl].map(([url, where]) => ({ url, where: [...where] }))

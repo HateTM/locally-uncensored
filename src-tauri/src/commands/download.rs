@@ -554,6 +554,8 @@ const MODEL_SUBDIRS: &[&str] = &[
     "checkpoints", "diffusion_models", "unet", "vae", "loras",
     "text_encoders", "clip", "clip_vision", "audio_encoders",
     "controlnet", "upscale_models", "embeddings", "style_models",
+    // LTX 2.5's x2 latent upscaler, written by the Get button since 2.x.
+    "latent_upscale_models",
 ];
 
 /// Why a file ComfyUI listed is not in the ComfyUI models tree.

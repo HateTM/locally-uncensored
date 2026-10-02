@@ -13,6 +13,7 @@ import type { LucideIcon } from 'lucide-react'
 import type { DiscoverModel, DownloadProgress, ModelBundle } from '../../api/discover'
 import { formatBytes, countLabel } from '../../lib/formatters'
 import { bundleVramNeedGb } from '../../lib/hardware'
+import { tierMarks } from '../../lib/render/model-tier'
 import { modelTileAction } from '../../lib/model-tile-action'
 import { ICON_SM } from '../ui/icon-size'
 
@@ -571,6 +572,9 @@ export function BundleTile({ bundle, vramGb, complete, downloading, hasErrors, o
           <div className="flex items-center gap-1.5 min-w-0">
             <h3 className="text-[0.78rem] font-semibold text-gray-900 dark:text-white truncate">{bundle.name}</h3>
             {bundle.hot && !complete && <HotMark />}
+            {tierMarks(bundle).map((t) => (
+              <span key={t.label} className={`shrink-0 rounded px-1.5 py-0.5 t-micro font-semibold ${t.color}`}>{t.label}</span>
+            ))}
           </div>
           {bundle.description && (
             <p className="t-micro text-gray-500 dark:text-gray-400 leading-snug mt-0.5 line-clamp-2">{bundle.description}</p>

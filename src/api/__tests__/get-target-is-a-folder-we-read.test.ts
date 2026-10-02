@@ -72,6 +72,7 @@ const SCANS: Record<string, string[]> = {
   loras: ['models/loras'],
   controlnet: ['models/controlnet'],
   upscale_models: ['models/upscale_models'],
+  latent_upscale_models: ['models/latent_upscale_models'],
   style_models: ['models/style_models'],
 }
 
@@ -117,6 +118,7 @@ function serve(root: string) {
     if (url.includes('AudioEncoderLoader')) return combo('AudioEncoderLoader', 'audio_encoder_name', listFor(root, 'audio_encoders', false))
     if (url.includes('LoraLoader')) return combo('LoraLoader', 'lora_name', listFor(root, 'loras', false))
     if (url.includes('ControlNetLoader')) return combo('ControlNetLoader', 'control_net_name', listFor(root, 'controlnet', false))
+    if (url.includes('LatentUpscaleModelLoader')) return combo('LatentUpscaleModelLoader', 'model_name', listFor(root, 'latent_upscale_models', false))
     if (url.includes('UpscaleModelLoader')) return combo('UpscaleModelLoader', 'model_name', listFor(root, 'upscale_models', false))
     if (url.includes('StyleModelLoader')) return combo('StyleModelLoader', 'style_model_name', listFor(root, 'style_models', false))
     if (url.includes('ADE_LoadAnimateDiffModel')) {

@@ -20,6 +20,7 @@
  */
 
 import type { ProviderId } from './providers/types'
+import type { ModelTier } from '../lib/render/model-tier'
 
 export interface DiscoverModel {
   name: string
@@ -93,6 +94,7 @@ export function getImageBundles(): ModelBundle[] {
       totalSizeGB: 6.5,
       vramRequired: '6-8 GB',
       workflow: 'sdxl',
+      tier: 'older',
       url: 'https://huggingface.co/RunDiffusion/Juggernaut-XL-v9',
       files: [
         {
@@ -113,6 +115,7 @@ export function getImageBundles(): ModelBundle[] {
       totalSizeGB: 6.5,
       vramRequired: '6-8 GB',
       workflow: 'sdxl',
+      tier: 'older',
       url: 'https://huggingface.co/SG161222/RealVisXL_V5.0',
       files: [
         {
@@ -132,6 +135,7 @@ export function getImageBundles(): ModelBundle[] {
       totalSizeGB: 21,
       vramRequired: '8-10 GB',
       workflow: 'flux',
+      tier: 'older',
       url: 'https://huggingface.co/Comfy-Org/flux1-schnell',
       files: [
         {
@@ -172,6 +176,7 @@ export function getImageBundles(): ModelBundle[] {
       totalSizeGB: 21,
       vramRequired: '8-10 GB',
       workflow: 'flux',
+      tier: 'older',
       url: 'https://huggingface.co/Comfy-Org/flux1-dev',
       files: [
         {
@@ -212,6 +217,7 @@ export function getImageBundles(): ModelBundle[] {
       totalSizeGB: 11.1,
       vramRequired: '8-10 GB',
       workflow: 'flux2',
+      tier: 'best',
       url: 'https://huggingface.co/Comfy-Org/vae-text-encorder-for-flux-klein-4b',
       files: [
         {
@@ -255,6 +261,7 @@ export function getImageBundles(): ModelBundle[] {
       totalSizeGB: 5.5,
       vramRequired: 'depends on the checkpoint',
       workflow: 'krea2',
+      tier: 'best',
       url: 'https://huggingface.co/Comfy-Org/Krea-2',
       files: [
         {
@@ -282,6 +289,7 @@ export function getImageBundles(): ModelBundle[] {
       totalSizeGB: 19.3,
       vramRequired: '10-16 GB',
       workflow: 'zimage',
+      tier: 'best',
       url: 'https://huggingface.co/Comfy-Org/z_image_turbo',
       files: [
         {
@@ -316,6 +324,7 @@ export function getImageBundles(): ModelBundle[] {
       totalSizeGB: 19.3,
       vramRequired: '10-16 GB',
       workflow: 'zimage',
+      tier: 'best',
       url: 'https://huggingface.co/Comfy-Org/z_image',
       files: [
         {
@@ -355,6 +364,7 @@ export function getImageBundles(): ModelBundle[] {
       totalSizeGB: 16.1,
       vramRequired: '16-24 GB',
       workflow: 'qwenimage',
+      tier: 'best',
       url: 'https://huggingface.co/Comfy-Org/Qwen-Image-2.1',
       files: [
         {
@@ -389,6 +399,7 @@ export function getImageBundles(): ModelBundle[] {
       totalSizeGB: 6.5,
       vramRequired: '6-8 GB',
       workflow: 'sdxl',
+      tier: 'older',
       url: 'https://huggingface.co/Lykon/dreamshaper-xl-v2-turbo',
       files: [
         {
@@ -409,6 +420,7 @@ export function getImageBundles(): ModelBundle[] {
       totalSizeGB: 28.9,
       vramRequired: '24 GB',
       workflow: 'ernie_image',
+      tier: 'best',
       url: 'https://huggingface.co/Comfy-Org/ERNIE-Image',
       files: [
         {
@@ -450,6 +462,7 @@ export function getImageBundles(): ModelBundle[] {
       totalSizeGB: 28.9,
       vramRequired: '24 GB',
       workflow: 'ernie_image',
+      tier: 'best',
       url: 'https://huggingface.co/Comfy-Org/ERNIE-Image',
       files: [
         {
@@ -490,6 +503,7 @@ export function getImageBundles(): ModelBundle[] {
       totalSizeGB: 0.33,
       vramRequired: 'any',
       workflow: 'sdxl',
+      tier: 'older',
       url: 'https://huggingface.co/madebyollin/sdxl-vae-fp16-fix',
       files: [
         {
@@ -509,6 +523,7 @@ export function getImageBundles(): ModelBundle[] {
       totalSizeGB: 0.17,
       vramRequired: 'any',
       workflow: 'sdxl',
+      tier: 'older',
       url: 'https://huggingface.co/nerijs/pixel-art-xl',
       files: [
         {
@@ -621,6 +636,14 @@ export interface ModelBundle {
   totalSizeGB: number
   vramRequired: string
   workflow: string
+  /**
+   * How the pickers order this bundle (Oct 2026, David). 'best' is today's open
+   * weight state of the art and stands on top with a small mark, 'older' is
+   * collected under "Older models", everything else keeps its usual place.
+   * Nothing is hidden by it. Every local model is an open weight, so there is
+   * no weights field here (the cloud catalog carries one).
+   */
+  tier: ModelTier
   files: DiscoverModel[]
   url?: string
   hot?: boolean
@@ -629,6 +652,33 @@ export interface ModelBundle {
   i2v?: boolean           // Image-to-Video model
   verified?: boolean      // E2E tested and confirmed working
 }
+
+// The three files MiniMax H3 and FastH3 share: the text encoder and both
+// autoencoders. One definition, so an install of either bundle satisfies the
+// other and the two can never drift apart.
+const H3_SHARED_FILES: DiscoverModel[] = [
+    {
+      name: 'Qwen3-VL 32B Text Encoder (NVFP4)',
+      description: 'Required text encoder for MiniMax H3. Runs on any NVIDIA card, not only Blackwell.',
+      pulls: '', tags: ['Text Encoder', '15.7 GB'], updated: 'New',
+      downloadUrl: 'https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors',
+      filename: 'qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors', subfolder: 'text_encoders', sizeGB: 15.7,
+    },
+    {
+      name: 'MiniMax H3 Video VAE',
+      description: 'Required, decodes the picture.',
+      pulls: '', tags: ['VAE', '2.8 GB'], updated: 'New',
+      downloadUrl: 'https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/vae/minimax_h3_video_vae_int8_convrot.safetensors',
+      filename: 'minimax_h3_video_vae_int8_convrot.safetensors', subfolder: 'vae', sizeGB: 2.8,
+    },
+    {
+      name: 'MiniMax H3 Audio VAE',
+      description: 'Required, decodes the sound.',
+      pulls: '', tags: ['VAE', '605 MB'], updated: 'New',
+      downloadUrl: 'https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/vae/minimax_h3_audio_vae_fp32.safetensors',
+      filename: 'minimax_h3_audio_vae_fp32.safetensors', subfolder: 'vae', sizeGB: 0.6,
+    },
+]
 
 export function getVideoBundles(): ModelBundle[] {
   return [
@@ -641,6 +691,7 @@ export function getVideoBundles(): ModelBundle[] {
       totalSizeGB: 9.2,
       vramRequired: '8-10 GB',
       workflow: 'wan',
+      tier: 'older',
       url: 'https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged',
       files: [
         {
@@ -675,6 +726,7 @@ export function getVideoBundles(): ModelBundle[] {
       totalSizeGB: 20.5,
       vramRequired: '12+ GB',
       workflow: 'wan',
+      tier: 'older',
       url: 'https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged',
       files: [
         {
@@ -711,6 +763,7 @@ export function getVideoBundles(): ModelBundle[] {
       totalSizeGB: 16.9,
       vramRequired: '12+ GB',
       workflow: 'wan22',
+      tier: 'standard',
       url: 'https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged',
       files: [
         {
@@ -745,6 +798,7 @@ export function getVideoBundles(): ModelBundle[] {
       totalSizeGB: 18.8,
       vramRequired: '12+ GB',
       workflow: 'hunyuan',
+      tier: 'older',
       url: 'https://huggingface.co/Comfy-Org/HunyuanVideo_1.5_repackaged',
       files: [
         {
@@ -778,13 +832,14 @@ export function getVideoBundles(): ModelBundle[] {
       ],
     },
     {
-      name: 'LTX Video 2.3 · 22B FP8 (Latest)',
+      name: 'LTX Video 2.3 · 22B FP8',
       description: 'Lightricks LTX Video 2.3 · fast inference, high quality. Uses Gemma 3 12B text encoder. Distilled for speed.',
       tags: ['LTX 2.3', '22B', 'Quality'],
       verified: true,
       totalSizeGB: 40,
       vramRequired: '16+ GB',
       workflow: 'ltx',
+      tier: 'older',
       url: 'https://huggingface.co/Lightricks/LTX-2.3-fp8',
       files: [
         {
@@ -815,6 +870,7 @@ export function getVideoBundles(): ModelBundle[] {
       totalSizeGB: 40.1,
       vramRequired: '24+ GB',
       workflow: 'minimaxh3',
+      tier: 'best',
       url: 'https://huggingface.co/Comfy-Org/MiniMax-H3',
       files: [
         {
@@ -824,26 +880,93 @@ export function getVideoBundles(): ModelBundle[] {
           downloadUrl: 'https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors',
           filename: 'minimax_h3_fl2va_pruned_int8_convrot.safetensors', subfolder: 'diffusion_models', sizeGB: 21.0,
         },
+        ...H3_SHARED_FILES,
+      ],
+    },
+    // FastH3 (FastVideo, 8 step distilled MiniMax H3). A full checkpoint of its
+    // own, not a LoRA: FastVideo/FastVideo-FastH3-Comfy ships the distilled
+    // weights as diffusion_models/fastvideo_fasth3_8step_v2_pruned_*.safetensors.
+    // The official Comfy-Org template (video_fastvideo_fasth3_t2v) loads it with
+    // the same Qwen3-VL encoder and the same two VAEs as MiniMax H3, so those
+    // three files are shared. Text to video only: the model card says the
+    // first/last frame and reference tasks were not distilled. Sizes and
+    // digests read from the Hugging Face tree API on 2026-10-02. Needs ComfyUI
+    // 0.35.0 or newer (BlockSparseAttention, comfy_extras/nodes_sparse_attention.py).
+    {
+      name: 'FastH3 · MiniMax H3 in 8 Steps',
+      description: 'The quick MiniMax H3: video with its own sound from a prompt in 8 steps. Text to video only. Shares its text encoder and VAEs with MiniMax H3.',
+      tags: ['FastH3', 'Audio', 'Fast'],
+      totalSizeGB: 39.7,
+      vramRequired: '24+ GB',
+      workflow: 'minimaxh3',
+      tier: 'best',
+      url: 'https://huggingface.co/FastVideo/FastVideo-FastH3-Comfy',
+      files: [
         {
-          name: 'Qwen3-VL 32B Text Encoder (NVFP4)',
-          description: 'Required text encoder for MiniMax H3. Runs on any NVIDIA card, not only Blackwell.',
-          pulls: '', tags: ['Text Encoder', '15.7 GB'], updated: 'New',
-          downloadUrl: 'https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors',
-          filename: 'qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors', subfolder: 'text_encoders', sizeGB: 15.7,
+          name: 'FastH3 8 Step V2 (int8)',
+          description: 'Main model, distilled to 8 steps. Text to video with sound.',
+          pulls: '', tags: ['Model', '20.6 GB'], updated: 'New',
+          downloadUrl: 'https://huggingface.co/FastVideo/FastVideo-FastH3-Comfy/resolve/main/diffusion_models/fastvideo_fasth3_8step_v2_pruned_int8_convrot.safetensors',
+          filename: 'fastvideo_fasth3_8step_v2_pruned_int8_convrot.safetensors', subfolder: 'diffusion_models', sizeGB: 20.61,
+          sha256: '0922785978dc9bfe1adf27d8b291b0ca763f9f165f882e6cb297c72fbb6deda8',
+        },
+        ...H3_SHARED_FILES,
+      ],
+    },
+    // LTX 2.5 (Lightricks, open weights since 11.08.2026). Every file below is
+    // the one the official Comfy-Org template video_ltx2_5_t2v/_i2v loads, from
+    // the official repo; sizes (GiB) from the Hugging Face tree API on
+    // 2026-10-02. The repo is GATED: Hugging Face asks for a one time licence
+    // accept and every download needs a token (Settings, AI Backends, Hugging
+    // Face token); the downloader answers an unauthorised request with a
+    // sentence that names that field. The model patch for 2.5 reached ComfyUI
+    // in 0.32.0 (PR 15499), and the graph needs LTXVDualCFGGuider, which
+    // arrived in the same release. There is no FP8 file in the repo: the small
+    // official variant is the distilled INT8 transformer.
+    {
+      name: 'LTX 2.5 · Video with Sound',
+      description: 'Video with its own sound from a prompt or a first frame, with cuts between connected shots. Fast distilled version. Needs a free Hugging Face token in Settings.',
+      tags: ['LTX 2.5', 'Audio', 'Multishot'],
+      totalSizeGB: 37.0,
+      vramRequired: '16+ GB',
+      workflow: 'ltx25',
+      tier: 'best',
+      url: 'https://huggingface.co/Lightricks/LTX-2.5',
+      files: [
+        {
+          name: 'LTX 2.5 22B Distilled (int8)',
+          description: 'Main video model, distilled for fast renders. Video and sound in one pass.',
+          pulls: '', tags: ['Model', '21.5 GB'], updated: 'New',
+          downloadUrl: 'https://huggingface.co/Lightricks/LTX-2.5/resolve/main/diffusion_models/ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors',
+          filename: 'ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors', subfolder: 'diffusion_models', sizeGB: 20.03,
         },
         {
-          name: 'MiniMax H3 Video VAE',
+          name: 'Gemma 4 12B Text Encoder (LTX 2.5, int8)',
+          description: 'Required text encoder for LTX 2.5.',
+          pulls: '', tags: ['Text Encoder', '15.4 GB'], updated: 'New',
+          downloadUrl: 'https://huggingface.co/Lightricks/LTX-2.5/resolve/main/text_encoders/gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors',
+          filename: 'gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors', subfolder: 'text_encoders', sizeGB: 14.32,
+        },
+        {
+          name: 'LTX 2.5 Video VAE',
           description: 'Required, decodes the picture.',
-          pulls: '', tags: ['VAE', '2.8 GB'], updated: 'New',
-          downloadUrl: 'https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/vae/minimax_h3_video_vae_int8_convrot.safetensors',
-          filename: 'minimax_h3_video_vae_int8_convrot.safetensors', subfolder: 'vae', sizeGB: 2.8,
+          pulls: '', tags: ['VAE', '1.5 GB'], updated: 'New',
+          downloadUrl: 'https://huggingface.co/Lightricks/LTX-2.5/resolve/main/vae/ltx-2.5-video-vae-bf16.safetensors',
+          filename: 'ltx-2.5-video-vae-bf16.safetensors', subfolder: 'vae', sizeGB: 1.37,
         },
         {
-          name: 'MiniMax H3 Audio VAE',
+          name: 'LTX 2.5 Audio VAE',
           description: 'Required, decodes the sound.',
-          pulls: '', tags: ['VAE', '605 MB'], updated: 'New',
-          downloadUrl: 'https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/vae/minimax_h3_audio_vae_fp32.safetensors',
-          filename: 'minimax_h3_audio_vae_fp32.safetensors', subfolder: 'vae', sizeGB: 0.6,
+          pulls: '', tags: ['VAE', '365 MB'], updated: 'New',
+          downloadUrl: 'https://huggingface.co/Lightricks/LTX-2.5/resolve/main/vae/ltx-2.5-audio-vae-bf16.safetensors',
+          filename: 'ltx-2.5-audio-vae-bf16.safetensors', subfolder: 'vae', sizeGB: 0.34,
+        },
+        {
+          name: 'LTX 2.5 Latent Upscaler x2',
+          description: 'Required, sharpens the picture in the second pass.',
+          pulls: '', tags: ['Upscaler', '996 MB'], updated: 'New',
+          downloadUrl: 'https://huggingface.co/Lightricks/LTX-2.5/resolve/main/latent_upscale_models/ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors',
+          filename: 'ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors', subfolder: 'latent_upscale_models', sizeGB: 0.93,
         },
       ],
     },
@@ -856,6 +979,7 @@ export function getVideoBundles(): ModelBundle[] {
       totalSizeGB: 2.8,
       vramRequired: '6-8 GB',
       workflow: 'animatediff',
+      tier: 'older',
       customNodes: ['animatediff-evolved'],
       url: 'https://huggingface.co/ByteDance/AnimateDiff-Lightning',
       files: [
@@ -882,6 +1006,7 @@ export function getVideoBundles(): ModelBundle[] {
       totalSizeGB: 3.6,
       vramRequired: '6-8 GB',
       workflow: 'animatediff',
+      tier: 'older',
       customNodes: ['animatediff-evolved'],
       url: 'https://huggingface.co/guoyww/animatediff',
       files: [
@@ -920,6 +1045,7 @@ export function getVideoBundles(): ModelBundle[] {
       totalSizeGB: 27.0,
       vramRequired: '6-8 GB',
       workflow: 'framepack',
+      tier: 'older',
       i2v: true,
       customNodes: ['framepack-wrapper'],
       url: 'https://huggingface.co/lllyasviel/FramePack_F1_I2V_HY_20250503',
@@ -969,6 +1095,7 @@ export function getVideoBundles(): ModelBundle[] {
       totalSizeGB: 4.8,
       vramRequired: '12+ GB',
       workflow: 'svd',
+      tier: 'older',
       i2v: true,
       url: 'https://huggingface.co/stabilityai/stable-video-diffusion-img2vid-xt-1-1',
       files: [
@@ -988,6 +1115,7 @@ export function getVideoBundles(): ModelBundle[] {
       totalSizeGB: 20.4,
       vramRequired: '16+ GB',
       workflow: 'mochi',
+      tier: 'older',
       url: 'https://huggingface.co/Comfy-Org/mochi_preview_repackaged',
       files: [
         {
@@ -1031,6 +1159,7 @@ export function getVideoBundles(): ModelBundle[] {
       totalSizeGB: 19.2,
       vramRequired: '24+ GB',
       workflow: 'cosmos',
+      tier: 'older',
       url: 'https://huggingface.co/mcmonkey/cosmos-1.0',
       files: [
         {
@@ -1064,6 +1193,7 @@ export function getVideoBundles(): ModelBundle[] {
       totalSizeGB: 15.5,
       vramRequired: '10-12 GB',
       workflow: 'wan',
+      tier: 'older',
       customNodes: ['gguf'],
       url: 'https://huggingface.co/NSFW-API/NSFW_Wan_14b',
       files: [
@@ -1099,6 +1229,7 @@ export function getVideoBundles(): ModelBundle[] {
       totalSizeGB: 16.6,
       vramRequired: '10-12 GB',
       workflow: 'wan',
+      tier: 'standard',
       customNodes: ['gguf'],
       url: 'https://huggingface.co/desirel/WAN2.2-14B-Rapid-AllInOne-GGUF-NSFW-v10',
       files: [
@@ -1145,6 +1276,7 @@ export function getAudioBundles(): ModelBundle[] {
       totalSizeGB: 9.4,
       vramRequired: '6-8 GB',
       workflow: 'ace',
+      tier: 'best',
       url: 'https://huggingface.co/Comfy-Org/ace_step_1.5_ComfyUI_files',
       files: [
         {
@@ -1156,6 +1288,32 @@ export function getAudioBundles(): ModelBundle[] {
         },
       ],
     },
+    // YuE2 (m-a-p, ComfyUI 0.36.0 and newer, PR 16250). Songs with vocals from a
+    // style and lyrics. The int8 checkpoint is the one the official template
+    // audio_yue2_text2music loads; it is an all in one file (model, text model
+    // and audio VAE), so it goes to checkpoints like ACE Step. Size and digest
+    // from the Hugging Face tree API on 2026-10-02. The model card says CC BY NC
+    // 4.0, so the card says non-commercial.
+    {
+      name: 'YuE2 (Songs from Style and Lyrics)',
+      description: 'Full songs with vocals from a style and your lyrics. Non-commercial use only (CC BY-NC 4.0).',
+      tags: ['Music', 'Vocals', 'Lyrics'],
+      totalSizeGB: 3.69,
+      vramRequired: '6-8 GB',
+      workflow: 'yue2',
+      tier: 'best',
+      url: 'https://huggingface.co/Comfy-Org/YuE2',
+      files: [
+        {
+          name: 'YuE2 3B (int8, all in one)',
+          description: 'Complete music model. Includes its text model and audio VAE.',
+          pulls: '', tags: ['Checkpoint', '4.0 GB'], updated: 'New',
+          downloadUrl: 'https://huggingface.co/Comfy-Org/YuE2/resolve/main/checkpoints/yue2_3b_int8_convrot.safetensors',
+          filename: 'yue2_3b_int8_convrot.safetensors', subfolder: 'checkpoints', sizeGB: 3.69,
+          sha256: '96fe199377309001ed8cd26a944baeee8cc31a20ba7c36d1d3c0a7e1f4149db6',
+        },
+      ],
+    },
     {
       name: 'ACE Step v1 3.5B (Music, lighter)',
       description: 'The proven full song generator. Smaller download, runs from 4 GB VRAM.',
@@ -1163,6 +1321,7 @@ export function getAudioBundles(): ModelBundle[] {
       totalSizeGB: 7.2,
       vramRequired: '4-6 GB',
       workflow: 'ace',
+      tier: 'standard',
       url: 'https://huggingface.co/Comfy-Org/ACE-Step_ComfyUI_repackaged',
       files: [
         {
@@ -1210,6 +1369,7 @@ export function getLipsyncBundles(): ModelBundle[] {
       totalSizeGB: 20.0,
       vramRequired: '10-12 GB',
       workflow: 'wans2v',
+      tier: 'standard',
       customNodes: ['gguf'],
       url: 'https://huggingface.co/QuantStack/Wan2.2-S2V-14B-GGUF',
       files: [
@@ -1230,6 +1390,7 @@ export function getLipsyncBundles(): ModelBundle[] {
       totalSizeGB: 22.4,
       vramRequired: '16 GB best, offloads on less',
       workflow: 'wans2v',
+      tier: 'standard',
       url: 'https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged',
       files: [
         {
@@ -1270,6 +1431,7 @@ export function getMotionBundles(): ModelBundle[] {
       totalSizeGB: 10.5,
       vramRequired: '8-10 GB',
       workflow: 'wanvace',
+      tier: 'older',
       customNodes: ['controlnet-aux'],
       url: 'https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged',
       files: [
@@ -1290,6 +1452,7 @@ export function getMotionBundles(): ModelBundle[] {
       totalSizeGB: 17.3,
       vramRequired: '10-12 GB',
       workflow: 'wananimate',
+      tier: 'standard',
       customNodes: ['gguf', 'controlnet-aux'],
       url: 'https://huggingface.co/QuantStack/Wan2.2-Animate-14B-GGUF',
       files: [

@@ -34,6 +34,7 @@ function bundle(files: Array<Partial<DiscoverModel>>, totalSizeGB = 0): ModelBun
     totalSizeGB,
     vramRequired: '8 GB',
     workflow: 'wan',
+    tier: 'standard',
     files: files.map(f => ({
       name: '', description: '', pulls: '', tags: [], updated: '',
       downloadUrl: 'https://huggingface.co/x/y/resolve/main/f.safetensors',

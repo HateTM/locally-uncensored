@@ -11,15 +11,15 @@ describe('Video Bundle Definitions', () => {
     bundles = getVideoBundles()
   })
 
-  it('has 13 video bundles', () => {
+  it('has 16 video bundles', () => {
     // 14 original - Allegro (diffusers only) + CogVideoX 2B replaced by 5B I2V,
     // + Wan 2.2 TI2V-5B (unified T2V/I2V, 2026-06-11); 2.5.8 adds the two
     // uncensored GGUF finetunes (NSFW Wan 14B t2v + Wan 2.2 Rapid AIO i2v).
     // 2026-07-24 removes three that could never run: both CogVideoX bundles
     // (21 GB each) and Pyramid Flow, whose builders emitted node class names no
     // wrapper registers. See wrapper-node-names.test.ts. 2026-10-01 adds
-    // MiniMax H3 (video with sound).
-    expect(bundles.length).toBe(14)
+    // MiniMax H3 (video with sound). 2026-10-02 adds LTX 2.5 and FastH3.
+    expect(bundles.length).toBe(16)
   })
 
   it('every bundle has required fields', () => {
@@ -54,7 +54,7 @@ describe('Video Bundle Definitions', () => {
 
   it('every file has valid subfolder', () => {
     const validSubfolders = ['diffusion_models', 'vae', 'text_encoders', 'checkpoints', 'clip_vision',
-      'custom_nodes/ComfyUI-AnimateDiff-Evolved/models']
+      'latent_upscale_models', 'custom_nodes/ComfyUI-AnimateDiff-Evolved/models']
     for (const b of bundles) {
       for (const f of b.files) {
         expect(validSubfolders).toContain(f.subfolder)
@@ -92,7 +92,7 @@ describe('Video Bundle Definitions', () => {
 
   it('every workflow type is a known strategy', () => {
     const knownWorkflows = ['wan', 'wan22', 'hunyuan', 'ltx', 'animatediff', 'cogvideo', 'framepack',
-      'svd', 'mochi', 'cosmos', 'pyramidflow', 'allegro', 'minimaxh3']
+      'svd', 'mochi', 'cosmos', 'pyramidflow', 'allegro', 'minimaxh3', 'ltx25']
     for (const b of bundles) {
       expect(knownWorkflows).toContain(b.workflow)
     }
@@ -161,7 +161,7 @@ describe('2.5.8 specialized lane bundles (music / lipsync / motion)', () => {
 
   it('every lane bundle is complete and https', () => {
     const all = laneBundles()
-    expect(all.length).toBe(6) // 2 music + 2 lipsync + 2 motion
+    expect(all.length).toBe(7) // 3 music + 2 lipsync + 2 motion
     for (const b of all) {
       expect(b.name).toBeTruthy()
       expect(b.totalSizeGB).toBeGreaterThan(0)
@@ -175,9 +175,9 @@ describe('2.5.8 specialized lane bundles (music / lipsync / motion)', () => {
     }
   })
 
-  it('music bundles are single-file ACE checkpoints', () => {
+  it('music bundles are single-file ACE or YuE2 checkpoints', () => {
     for (const b of getAudioBundles()) {
-      expect(b.workflow).toBe('ace')
+      expect(['ace', 'yue2']).toContain(b.workflow)
       expect(b.files.length).toBe(1)
       expect(b.files[0].subfolder).toBe('checkpoints')
     }

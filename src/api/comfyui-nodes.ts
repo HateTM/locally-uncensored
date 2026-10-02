@@ -126,6 +126,10 @@ export function categorizeNodes(allNodes: Record<string, NodeMetadata>): Categor
     KSampler: 'samplers',
     KSamplerAdvanced: 'samplers',
     SamplerCustom: 'samplers',
+    // LTX 2.5's guider for a joint picture-and-sound latent. New in ComfyUI
+    // 0.32.0, the same release as the LTX 2.5 model patch, so determineStrategy
+    // reads its presence as "this ComfyUI can run LTX 2.5".
+    LTXVDualCFGGuider: 'samplers',
     // Wrapper samplers (custom nodes)
     CogVideoXSampler: 'samplers',
     FramePackSampler: 'samplers',
@@ -357,6 +361,7 @@ export async function getModelCapabilities(model: string): Promise<ModelCapabili
     case 'wan':
     case 'hunyuan':
     case 'ltx':
+    case 'ltx25':
     case 'mochi':
     case 'cosmos': {
       // The latent node types `length` as a generic INT (max ~10000) — meaningless

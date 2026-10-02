@@ -10,7 +10,7 @@
 export type CreateBackendKind = 'local' | 'cloud'
 
 /**
- * Local music always runs an ACE-Step checkpoint through buildMusicWorkflow,
+ * Local music runs an ACE-Step or a YuE2 checkpoint through buildMusicWorkflow,
  * and that builder feeds `lyrics` into the encoder for every one of them, so
  * the box is always right locally. Cloud depends on the catalog flag, because
  * only ace-step-1.5 has a lyrics input on the wire.

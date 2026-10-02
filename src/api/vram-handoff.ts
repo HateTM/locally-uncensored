@@ -1365,8 +1365,9 @@ async function generateVideo(
     // matches isI2VModel(), but that branch's 25-frame / 8-fps tuning would butcher
     // it (wan22 is 24 fps, up to ~7 s). buildDynamicWorkflow routes to buildWan22.
     // MiniMax H3 takes the same road: its encode node has an optional first
-    // frame, so one graph serves both modes, at 24 fps and up to ~15 s.
-    if (type === 'wan22' || type === 'minimaxh3') {
+    // frame, so one graph serves both modes, at 24 fps and up to ~15 s. LTX 2.5
+    // does the same through a first frame pinned into its latent.
+    if (type === 'wan22' || type === 'minimaxh3' || type === 'ltx25') {
       const { buildDynamicWorkflow } = await import('./dynamic-workflow')
       const d = MODEL_TYPE_DEFAULTS[type]
       const av = args as Record<string, unknown>
@@ -1397,7 +1398,7 @@ async function generateVideo(
       if (frameRej) return frameRej
       // 24 fps native; Wan up to ~7 s (169 frames), MiniMax H3 up to ~15 s
       // (362, the top of its trained range). resolveClip honors `seconds`/`frames`.
-      const vMax = caps?.frameRange?.max ?? (type === 'minimaxh3' ? 362 : 169)
+      const vMax = caps?.frameRange?.max ?? (type === 'minimaxh3' ? 362 : type === 'ltx25' ? 242 : 169)
       const { frames, fps } = resolveClip(args, { defFps: d.fps, defFrames: d.frames, maxFrames: vMax })
       const tun = resolveTunables(args, caps, { steps: d.steps, cfg: d.cfg, sampler: d.sampler, scheduler: d.scheduler })
       if (tun.reject) return `Cannot generate: ${tun.reject}`
@@ -2043,12 +2044,21 @@ export function resolveI2VResolution(
   const landscapeDefault = { width: 1024, height: 576 }
   if (!srcW || !srcH || srcW <= 0 || srcH <= 0) {
     if (type === 'minimaxh3') return { width: 1344, height: 768 }
+    if (type === 'ltx25') return { width: 1280, height: 704 }
     return (type === 'svd' || type === 'wan22') ? landscapeDefault : { width: 768, height: 768 }
   }
   const aspect = srcW / srcH
   if (type === 'svd') {
     // Square is closer to landscape than portrait; center-crop handles the rest.
     return aspect >= 0.95 ? { width: 1024, height: 576 } : { width: 576, height: 1024 }
+  }
+  if (type === 'ltx25') {
+    // The official template's 1280x704 canvas on the 64 pixel grid its half
+    // size first pass needs. Keeps the source aspect.
+    const MAX_PX = 1280 * 704
+    const scale = Math.sqrt(MAX_PX / (srcW * srcH))
+    const snap = (v: number) => Math.max(256, Math.round(v / 64) * 64)
+    return { width: snap(srcW * scale), height: snap(srcH * scale) }
   }
   if (type === 'minimaxh3') {
     // The official templates' canvas: a 768 short edge, capped at 1344x768

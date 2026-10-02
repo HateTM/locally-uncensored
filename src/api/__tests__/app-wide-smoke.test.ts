@@ -41,7 +41,7 @@ function fullNodes(): CategorizedNodes {
       'PyramidFlowModelLoader', 'PyramidFlowVAELoader',
       'AllegroModelLoader',
     ],
-    samplers: ['KSampler', 'KSamplerAdvanced', 'CogVideoXSampler', 'FramePackSampler', 'PyramidFlowSampler', 'AllegroSampler'],
+    samplers: ['KSampler', 'KSamplerAdvanced', 'CogVideoXSampler', 'FramePackSampler', 'PyramidFlowSampler', 'AllegroSampler', 'LTXVDualCFGGuider'],
     latentInit: [
       'EmptyLatentImage', 'EmptySD3LatentImage', 'EmptyFlux2LatentImage',
       'EmptyHunyuanLatentVideo', 'EmptyLTXVLatentVideo',

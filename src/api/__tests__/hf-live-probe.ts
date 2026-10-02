@@ -77,6 +77,19 @@ export async function alleKlopfen(urls: Iterable<string>): Promise<Map<string, H
  * einen Eintrag hier ablegt, muss den Grund im Katalog selbst dokumentieren.
  */
 export const BEKANNT_TOT: Record<string, string> = {
+  // LTX 2.5: Lightricks/LTX-2.5 is a gated repo (HTTP 401 without a token and an
+  // accepted licence). A user with a Hugging Face token (Settings, AI Backends)
+  // downloads it; an anonymous HEAD cannot. Begruendung beim Bundle in model-bundles.ts.
+  ...Object.fromEntries([
+    'diffusion_models/ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors',
+    'text_encoders/gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors',
+    'vae/ltx-2.5-video-vae-bf16.safetensors',
+    'vae/ltx-2.5-audio-vae-bf16.safetensors',
+    'latent_upscale_models/ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors',
+  ].map((f) => [
+    `https://huggingface.co/Lightricks/LTX-2.5/resolve/main/${f}`,
+    'Gated repo (HTTP 401 ohne Token und akzeptierte Lizenz), mit Token ladbar · Begruendung bei den Eintraegen in model-bundles.ts',
+  ])),
   'https://huggingface.co/huihui-ai/Huihui-DeepSeek-V4-Flash-abliterated-GGUF/resolve/main/DeepSeek-V4-Flash-UD-IQ1_M.gguf':
     'Repo privat oder geloescht (HTTP 401), kein geprueftes Ersatz-Repo · Begruendung bei den Eintraegen in discover.ts',
   'https://huggingface.co/huihui-ai/Huihui-DeepSeek-V4-Flash-abliterated-GGUF/resolve/main/ggml-model-Q3_K_S.gguf':

@@ -5,6 +5,7 @@ import {
 } from '../../../stores/cloudCatalogStore'
 import { DEFAULT_MODEL_IDS } from '../../../lib/render/cloud-models'
 import { sortByTier, tierGroup, tierMarks } from '../../../lib/render/model-tier'
+import { localTier } from '../../../lib/render/local-model-tier'
 import { intentPickerModels, intentRoles, createStudioCost, isStudioModel } from '../../../lib/render/create-studio'
 import { resolveCharacterModel, characterGenerationModels } from '../../../hooks/useCloudCreate'
 import type { RenderOp } from '../../../lib/render/cloud-jobs'
@@ -235,10 +236,16 @@ function LocalModelChip() {
     ? resolveLocalOpPick(stored, list)
     : list.some((m) => m.name === stored) ? stored : (list[0]?.name ?? stored)
 
-  const options: SelectOption[] = list.map((m) => ({
+  // Beste oben mit der Marke "Best", Aeltere gesammelt unten unter "Older
+  // models", der Rest in gewohnter Reihenfolge. Wie im Cloud-Waehler; nichts
+  // verschwindet. `value` oben haelt sich an die ungeordnete Liste, denn die
+  // zeigt, welches Modell ein Lauf wirklich nimmt.
+  const options: SelectOption[] = sortByTier(list.map((m) => ({ m, tier: localTier(m) }))).map(({ m, tier }) => ({
     value: m.name,
     label: prettyName(m.name),
     badge: TYPE_BADGE[m.type],
+    group: tierGroup({ tier }),
+    tags: tierMarks({ tier }),
   }))
   // Discovery rows: a few hosted models of this kind at the list's tail.
   // Picking one opens the Cloud sheet; the local selection stays untouched.
