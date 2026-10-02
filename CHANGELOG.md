@@ -56,6 +56,9 @@ cloud catalogue. It also fixes the bugs reported on GitHub and Discord since
   bin, because LM Studio offers no way to delete a model from outside, and
   Details showed nothing. Details now says to delete it in LM Studio under
   My Models, and does the same for other local servers.
+- **Turbo checkpoints start at a few steps.** SD-Turbo, SDXL-Turbo,
+  Lightning, Hyper-SD and LCM checkpoints start at 4 steps and CFG 1 instead
+  of the family's 25 steps.
 - **No download offer while ComfyUI is starting.** Right after launch the
   Create stage could offer the 6.5 GB starter download while ComfyUI was still
   coming up and the models were already on disk. It now waits.

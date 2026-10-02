@@ -563,6 +563,19 @@ function releaseReplacedMediaRef(previous: MediaRef | null, next: MediaRef | nul
   releaseDroppedMediaRefs(previous ? [previous] : [], next ? [next] : [])
 }
 
+/**
+ * SD-Turbo, SDXL-Turbo, Lightning, Hyper-SD and LCM checkpoints are distilled
+ * to a few steps at CFG 1. The family defaults (25 steps, CFG 7) cost several
+ * times the time and overcook them. Seen in the 3.0.4 Gegenprobe on the
+ * Windows box (02.10.2026): sd_turbo started at 25 steps. Only the SD and SDXL
+ * checkpoint families; Z-Image Turbo and the other UNET families carry their
+ * own tuned defaults.
+ */
+export function distilledImageCheckpoint(model: string, type: ModelType): boolean {
+  if (type !== 'sd15' && type !== 'sdxl' && type !== 'unknown') return false
+  return /(^|[^a-z])(turbo|lightning|hyper|lcm)([^a-z]|$)/i.test(model.replace(/^.*[\\/]/, ''))
+}
+
 export const useCreateStore = create<CreateState>()(
   persist(
     // Explicit param/return types: LU compiles with `strict: true` (the web
@@ -682,9 +695,10 @@ export const useCreateStore = create<CreateState>()(
         }
         if (mode === 'image' && state.imageModel) {
           const defaults = MODEL_TYPE_DEFAULTS[state.imageModelType] || MODEL_TYPE_DEFAULTS.unknown
+          const distilled = distilledImageCheckpoint(state.imageModel, state.imageModelType)
           return {
             mode,
-            steps: defaults.steps, cfgScale: defaults.cfgScale,
+            steps: distilled ? 4 : defaults.steps, cfgScale: distilled ? 1.0 : defaults.cfgScale,
             sampler: defaults.sampler, scheduler: defaults.scheduler,
             width: defaults.width, height: defaults.height,
           }
@@ -696,9 +710,10 @@ export const useCreateStore = create<CreateState>()(
       setNegativePrompt: (negativePrompt) => set({ negativePrompt }),
       setImageModel: (model, type) => {
         const defaults = type === 'hidream' ? hidreamDefaults(model) : MODEL_TYPE_DEFAULTS[type]
+        const distilled = distilledImageCheckpoint(model, type)
         set({
           imageModel: model, imageModelType: type,
-          steps: defaults.steps, cfgScale: defaults.cfgScale,
+          steps: distilled ? 4 : defaults.steps, cfgScale: distilled ? 1.0 : defaults.cfgScale,
           sampler: defaults.sampler, scheduler: defaults.scheduler,
           width: defaults.width, height: defaults.height,
         })
