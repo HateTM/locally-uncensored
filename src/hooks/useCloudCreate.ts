@@ -25,7 +25,9 @@ import {
 } from '../api/cloud/jobs'
 import {
   defaultCloudModel,
+  editNeedsMask,
   modelForOp,
+  utilityOpModel,
   resolveOpPick,
   cloudModelById,
   cloudMediaLive,
@@ -35,7 +37,7 @@ import { checkPromptSafety, blockMessageFor, type SafetyVerdict } from '../lib/r
 import { contentPolicySnapshot, loadContentPolicy } from './useContentPolicy'
 import { signalCreditsExhausted } from '../lib/credits-exhausted'
 import { resolveRunSeed } from '../lib/run-seed'
-import { intentRoles, intentRequiredInputs, isStudioModel, resolveIntentPick } from '../lib/render/create-studio'
+import { STANDARD_UPSCALE, intentRoles, intentRequiredInputs, isStudioModel, resolveIntentPick } from '../lib/render/create-studio'
 import { STUDIO_MODELS, studioFields } from '../lib/render/studio-contract'
 import { modelLabel } from '../lib/render/preset-models'
 import { bookedVideoSeconds } from '../lib/render/video-duration'
@@ -243,15 +245,28 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
     } else {
       picked = (kind === 'video' ? s.cloudVideoModel : s.cloudImageModel) || defaultCloudModel(kind)?.id || ''
     }
-    // A Studio pick runs its own schema-driven endpoint (op: 'studio'), never
-    // through modelForOp's classic op coercion, STUDIO_MODELS is a disjoint
-    // registry the classic picker functions do not know about.
-    const studioModel = !characterUse && isStudioModel(picked) ? picked : undefined
-    if (studioModel) kind = STUDIO_MODELS[studioModel].kind
     // Coerce a leftover/incapable pick onto a model that can run this op
     // (edit→i2i, animate→i2v, video→t2v, specialized ops→their family) so the
-    // submit never 400s.
-    const model = studioModel ?? modelForOp(kind, op, picked)
+    // submit never 400s. Seit 02.10.2026 fuehren Image, Edit, Video und Animate
+    // auch Studio-Modelle (Web-Paritaet), also laeuft die Wahl IMMER durch
+    // modelForOp, und erst das Ergebnis sagt, ob der Lauf ein Studio-Lauf ist.
+    // Eine Rollen-Absicht behaelt ihre Wahl, "Standard" in Enhance Image ist
+    // kein Modell, sondern der feste Endpunkt von frueher: er laeuft wie vorher
+    // unter dem Bildmodell, das der Server ignoriert.
+    const model = roleIntent
+      ? (picked === STANDARD_UPSCALE ? (defaultCloudModel(kind)?.id ?? picked) : picked)
+      : modelForOp(kind, op, picked)
+    // A Studio pick runs its own schema-driven endpoint (op: 'studio'), never a
+    // classic op shape. The character use-surface stays on its fixed -lora family.
+    const studioModel = !characterUse && isStudioModel(model) ? model : undefined
+    if (studioModel) kind = STUDIO_MODELS[studioModel].kind
+    // The result carries the customer's own pick. A utility op that swapped a
+    // Studio pick out (utilityOpModel), and Enhance Image on "Standard", must
+    // not make addToGallery jump the picker to the default or overwrite a
+    // saved choice.
+    const galleryModel = roleIntent
+      ? (picked === STANDARD_UPSCALE ? (s.cloudImageModel || defaultCloudModel('image')?.id || model) : model)
+      : model !== picked && model === utilityOpModel(kind, op, picked) ? picked : model
 
     s.setError(null)
     if (!cloudMediaLive()) {
@@ -391,7 +406,10 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
               cfg: s.cfgScale,
               seed: runSeed,
             }
-      if (kind === 'video' && !bare) {
+      // Ein Studio-Modell traegt Laenge und Aufloesung in studio_options (sein
+      // Schema), nicht in frames/fps: bookedVideoSeconds kennt nur die klassischen
+      // Laengenlisten und wuerfe fuer ein Studio-Modell einen Fehler.
+      if (kind === 'video' && !bare && !studioModel) {
         // dd29f359 (Portplan Abschnitt 6), review A2 (Runde 2): book exactly
         // a length the model prices, read from the SAME catalog-first list
         // LaneControls shows (effectiveVideoDurations, in video-duration.ts),
@@ -417,7 +435,11 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
       if (characterUse && s.selectedCharacter) {
         params.loras = [{ id: s.selectedCharacter.id }]
       }
-      if (op === 'edit') {
+      // Instruction editors (maskless in the catalog, every studio editor) edit
+      // from the prompt alone: no mask demand, no inpaint knobs, and a leftover
+      // painted mask is not sent (the endpoint has no input for it).
+      const editIsMaskless = op === 'edit' && !editNeedsMask(model)
+      if (op === 'edit' && !studioModel) {
         params.denoise = s.denoise
         params.grow_mask_by = s.growMaskBy
         // The mask is exported at the SOURCE image's resolution, so the output
@@ -429,7 +451,8 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
           params.height = s.source.height
         }
       }
-      if (op === 'upscale') {
+      // Ein Studio-Upscaler traegt sein Ziel in studio_options.
+      if (op === 'upscale' && !studioModel) {
         params.target_resolution = s.targetResolution
       }
       // ImageRef.url is always a data URL preview; the cloud path re-uploads
@@ -439,8 +462,16 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
       // field instead of a fixed param.
       if (op !== 'generate' && s.source) {
         params.source_path = await uploadInput(dataUrlToBlob(s.source.url), 'source')
+        // Ein Studio-Modell, das eine Bilderliste liest (Edit mit mehreren
+        // Vorlagen, Referenz zu Video), bekommt das Standbild der Oberflaeche als
+        // einzigen Eintrag. Liest es kein source_path, geht das Bild nur dorthin.
+        if (studioModel) {
+          const reads = Object.values(STUDIO_MODELS[studioModel].inputs)
+          if (reads.includes('image_paths')) params.image_paths = [params.source_path]
+          if (!reads.includes('source_path')) delete params.source_path
+        }
       }
-      if (op === 'edit' || op === 'eraser') {
+      if ((op === 'edit' && !editIsMaskless) || op === 'eraser') {
         if (!s.mask) {
           s.setError(
             op === 'eraser'
@@ -534,7 +565,7 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
       if (studioModel) {
         s.setProgress(9, 'Confirming the price…')
         const quoteFields: Record<string, unknown> = {}
-        for (const k of ['source_path', 'mask_path', 'audio_path', 'audio2_path', 'video_path', 'last_image_path', 'shot_type'] as const) {
+        for (const k of ['source_path', 'image_paths', 'mask_path', 'audio_path', 'audio2_path', 'video_path', 'last_image_path', 'shot_type'] as const) {
           if (params[k] !== undefined) quoteFields[k] = params[k]
         }
         const quote = await studioQuote(studioModel, s.prompt, {
@@ -633,6 +664,7 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
         st.setProgress(100, 'Complete!')
         st.addToGallery({
           ...galleryItemFromJob(job),
+          model: galleryModel,
           prompt: OP_GALLERY_LABEL[op] ?? s.prompt,
           label,
           negativePrompt: s.negativePrompt,

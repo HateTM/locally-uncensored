@@ -13,7 +13,8 @@
 import type { CreateIntent } from '../../stores/createStore'
 import { STUDIO_MODELS, studioBaseCredits, studioPreviewCredits } from './studio-contract'
 import { presetModels, requiredRoleInputs, type PresetModel, type StepRole } from './preset-models'
-import { catalogHasStudio, opPickerModels } from '../../stores/cloudCatalogStore'
+import { defaultCloudModel, modelForOp, opPickerModels } from '../../stores/cloudCatalogStore'
+import { intentToJob } from './cloud-jobs'
 
 // Desktop port (P2, checked again in P9): the web's CreateIntent already
 // carries 'video_upscale' as a distinct intent from the plain 'upscale'
@@ -42,7 +43,14 @@ const INTENT_ROLE: Partial<Record<StudioIntent, StepRole[]>> = {
   extend: ['extend'],
   motion: ['motion'],
   video_upscale: ['upscale'],
+  // Enhance Image: der Standard-Upscaler plus SeedVR2. Siehe intentPickerModels.
+  upscale: ['imageup'],
 }
+
+/** Die Wahl "Standard" im Waehler von Enhance Image: der feste Endpunkt, auf dem
+ *  die Unterkategorie bis 02.10.2026 allein lief. Kein Studio-Modell, deshalb
+ *  schickt der Start dafuer weiter den Bild-Upscale-Op und kein Studio-Op. */
+export const STANDARD_UPSCALE = 'upscale-standard'
 
 export function intentRoles(intent: StudioIntent): StepRole[] {
   return INTENT_ROLE[intent] ?? []
@@ -59,20 +67,18 @@ export function intentRoleFor(intent: StudioIntent, model: string): StepRole | u
  *  kennt, und ein Wechsel der Liste darf seine bisherige Wahl nicht verschieben.
  *  `lipsync` fuehrt zusaetzlich die beiden Nachvertonungsmodelle, die einen
  *  fertigen Clip statt eines Fotos lesen. Die sind kein Rollenmitglied, gehoeren
- *  in der Oberflaeche aber seit jeher hierher.
+ *  in der Oberflaeche aber seit jeher hierher. `upscale` (Enhance Image) fuehrt
+ *  vorn den festen Standard-Endpunkt, der kein Modell ist (STANDARD_UPSCALE).
  *
- *  Review B1 (Runde 2, 20.09.2026): ein Studio-Mitglied (`m.op === 'studio'`)
- *  erscheint NUR, wenn der lebende Katalog `quote_required` fuehrt
- *  (catalogHasStudio(), cloudCatalogStore.ts). Ein aelterer Server (oder ein
- *  frischer Zustand vor der ersten Katalogabfrage) sagt damit selbst, dass er
- *  die Studio-Endpunkte nicht kennt, und diese EINE Stelle traegt die Regel
- *  fuer alle fuenf Aufrufer (Composer, CreditsMeter, CreateExperimental,
- *  ModelChip direkt, useCloudCreate ueber resolveIntentPick). Vorher wich
- *  jede Rolle auf ihr erstes STUDIO_MODELS-Mitglied aus, sobald der
- *  gespeicherte cloudOpModel nicht (mehr) in der Liste stand, und Extend/
- *  Motion liefen damit auf einem Server ohne Studio ins Leere
- *  (review-studio-B.md B1). Jede klassische Absicht (lipsync/music) faellt
- *  auf ihre klassischen Mitglieder zurueck, genau wie vor dem Port. */
+ *  Ein Studio-Mitglied erscheint NUR, wenn der lebende Katalog genau dieses
+ *  Modell fuehrt (preset-models.ts, studioKnown). Ein aelterer Server sagt damit
+ *  selbst, welche Studio-Endpunkte er nicht kennt, und diese EINE Stelle traegt
+ *  die Regel fuer alle Aufrufer (Composer, CreditsMeter, CreateExperimental,
+ *  ModelChip direkt, useCloudCreate ueber resolveIntentPick). Review B1
+ *  (Runde 2, 20.09.2026): vorher wich jede Rolle auf ihr erstes Studio-Mitglied
+ *  aus, und Extend/Motion liefen auf einem Server ohne Studio ins Leere. Jede
+ *  klassische Absicht (lipsync/music) faellt auf ihre klassischen Mitglieder
+ *  zurueck, genau wie vor dem Port. */
 export function intentPickerModels(intent: StudioIntent): PresetModel[] {
   const roles = intentRoles(intent)
   if (!roles.length) return []
@@ -80,13 +86,12 @@ export function intentPickerModels(intent: StudioIntent): PresetModel[] {
   const seen = new Set<string>()
   const add = (m: PresetModel) => { if (!seen.has(m.id)) { seen.add(m.id); out.push(m) } }
   if (intent === 'lipsync') for (const m of opPickerModels('lipsync')) {
-    add({ id: m.id, label: m.label, kind: m.kind, op: 'lipsync', adult: m.adult === true })
+    add({ id: m.id, label: m.label, kind: m.kind, op: 'lipsync', adult: m.adult === true, tier: m.tier, weights: m.weights })
   }
-  const studioLive = catalogHasStudio()
-  for (const role of roles) for (const m of presetModels(role)) {
-    if (m.op === 'studio' && !studioLive) continue
-    add(m)
+  if (intent === 'upscale') {
+    add({ id: STANDARD_UPSCALE, label: 'Standard', kind: 'image', op: 'upscale', adult: false, tier: 'standard', weights: 'closed' })
   }
+  for (const role of roles) for (const m of presetModels(role)) add(m)
   return out
 }
 
@@ -99,6 +104,29 @@ export function resolveIntentPick(intent: StudioIntent, picked: string): string 
   const list = intentPickerModels(intent)
   if (!list.length) return picked
   return list.some((m) => m.id === picked) ? picked : list[0].id
+}
+
+/** Das Studio-Modell, auf dem ein Cloud-Lauf dieser Unterkategorie wirklich
+ *  laeuft, oder `undefined`. Dieselbe Aufloesung wie Waehler, Zaehler und Start:
+ *  Rollen-Absichten lesen ihre Wahl aus der Rolle, alle anderen laufen durch
+ *  modelForOp. Der Character-Weg bleibt auf seiner festen -lora-Familie und
+ *  die spezialisierten Ops ohne Rolle (Training) fahren nie Studio. Die
+ *  Schublade mit den Einstellungen liest das, um ihr Schema zu zeigen. */
+export function studioPickFor(
+  intent: StudioIntent,
+  s: { cloudImageModel: string; cloudVideoModel: string; cloudOpModel: string },
+): string | undefined {
+  if (intent === 'character') return undefined
+  if (intentRoles(intent).length) {
+    const picked = resolveIntentPick(intent, s.cloudOpModel)
+    return isStudioModel(picked) ? picked : undefined
+  }
+  if (intent === 'video_upscale') return undefined
+  const { kind, op } = intentToJob(intent)
+  if (op === 'lora-train' || op === 'tts') return undefined
+  const picked = (kind === 'video' ? s.cloudVideoModel : s.cloudImageModel) || defaultCloudModel(kind)?.id || ''
+  const model = modelForOp(kind, op, picked)
+  return isStudioModel(model) ? model : undefined
 }
 
 export function isStudioModel(id: string): boolean {
@@ -122,8 +150,19 @@ export function createStudioCost(
   options: Record<string, unknown>,
   promptLength = 100,
   seconds?: number,
+  imageCount = 1,
 ): number {
-  return studioPreviewCredits(model, options, seconds, 1, promptLength) ?? studioBaseCredits(model)
+  return studioPreviewCredits(model, options, seconds, imageCount, promptLength) ?? studioBaseCredits(model)
+}
+
+/** Wie viele Bilder der Start eines Studio-Modells im Create-Tab schickt: das
+ *  eine Standbild der Oberflaeche, als Einzelbild oder als Liste mit einem
+ *  Eintrag (useCloudCreate). `undefined`, wo ein Modell mehr als Bilder liest
+ *  (Ton, Video) oder keines. Dann gibt es keinen Vorab-Preis ohne Datei. */
+export function startImageCount(model: string): number | undefined {
+  const reads = Object.values(STUDIO_MODELS[model]?.inputs ?? {})
+  if (!reads.length || reads.some((k) => k !== 'source_path' && k !== 'image_paths' && k !== 'last_image_path')) return undefined
+  return 1
 }
 
 /** Haengt der Preis dieses Modells an der Laenge einer hochgeladenen Datei?
@@ -132,5 +171,5 @@ export function createStudioCost(
  *  Anbieter sofort beziffern, weil nichts zu messen ist. */
 export function pricesByInput(model: string): boolean {
   const mode = STUDIO_MODELS[model]?.price.mode
-  return mode === 'input' || mode === 'both'
+  return mode === 'input' || mode === 'both' || mode === 'inout'
 }

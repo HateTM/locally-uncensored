@@ -17,10 +17,11 @@ import {
 } from '../create-studio'
 import { STUDIO_MODELS } from '../studio-contract'
 import { CLOUD_MODEL_SEED } from '../cloud-models'
+import { neuerServer } from './fixtures/test-catalogs'
 import { opPickerModels, useCloudCatalogStore } from '../../../stores/cloudCatalogStore'
 import type { CreateIntent } from '../../../stores/createStore'
 
-const MIT_ROLLE: StudioIntent[] = ['lipsync', 'music', 'extend', 'motion', 'video_upscale']
+const MIT_ROLLE: StudioIntent[] = ['lipsync', 'music', 'extend', 'motion', 'video_upscale', 'upscale']
 
 // Review B1 (Runde 2): die ganze Datei prueft den Fall "der lebende Katalog
 // kennt Studio" (`quote_required` auf mindestens einem Eintrag). Das ist
@@ -29,7 +30,7 @@ const MIT_ROLLE: StudioIntent[] = ['lipsync', 'music', 'extend', 'motion', 'vide
 // Verhalten) hat einen eigenen Fall unten ("faellt ohne quote_required im
 // Katalog auf die klassischen Mitglieder zurueck").
 beforeEach(() => {
-  useCloudCatalogStore.setState({ models: [...CLOUD_MODEL_SEED, { id: 'test-studio-marker', label: 'x', kind: 'image', quote_required: true }] })
+  useCloudCatalogStore.setState({ models: neuerServer() })
 })
 
 describe('die Unterkategorien von Create fahren dieselben Modelle wie die Presets', () => {
@@ -106,7 +107,7 @@ describe('die Unterkategorien von Create fahren dieselben Modelle wie die Preset
   })
 
   it('gibt keiner Absicht ohne Rolle eine Auswahl', () => {
-    for (const intent of ['image', 'video', 'animate', 'edit', 'character', 'upscale'] as CreateIntent[]) {
+    for (const intent of ['image', 'video', 'animate', 'edit', 'character'] as CreateIntent[]) {
       expect(intentRoles(intent), intent).toEqual([])
       expect(intentPickerModels(intent), intent).toEqual([])
     }

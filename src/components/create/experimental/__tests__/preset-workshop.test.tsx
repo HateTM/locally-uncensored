@@ -12,6 +12,8 @@ import { promptIdeas } from '../../../../lib/render/prompt-ideas'
 import { useCreateStore } from '../../../../stores/createStore'
 import { useCloudCatalogStore } from '../../../../stores/cloudCatalogStore'
 import { CLOUD_MODEL_SEED, type CloudModel } from '../../../../lib/render/cloud-models'
+import { neuerServer } from '../../../../lib/render/__tests__/fixtures/test-catalogs'
+import { sortByTier } from '../../../../lib/render/model-tier'
 import { CloudJobError } from '../../../../api/cloud/client'
 import { QuoteChangedError } from '../../../../api/cloud/jobs'
 import { StudioQuoteChangedError } from '../../../../api/cloud/studio'
@@ -60,17 +62,10 @@ function WerkstattFenster({ preset, onClosed }: { preset: CreatePreset; onClosed
 // Feld. Im echten Betrieb heilt das die erste Katalogaktualisierung, hier
 // braucht es einen Preis, damit die klassischen Faelle unten (Modellwechsel,
 // Frames/Fps) ueberhaupt einen bestaetigbaren Preis sehen.
-const QUOTE_REQUIRED_CATALOG: CloudModel[] = [
-  ...CLOUD_MODEL_SEED.map((m) =>
-    m.id === 'flux-schnell' ? { ...m, credits: { base: 300 } }
-      : m.id === 'wan-2.2-720p' ? { ...m, credits: { base: 5000, long: 8000 } }
-        : m),
-  // Sentinel: der Katalog eines Servers, der Studio kennt, traegt dieses
-  // Feld auf mindestens einem Eintrag. Der genaue Modellname ist beliebig;
-  // jeder Fall unten, der presetModels()/roleForModel() live neu berechnet,
-  // bleibt in sich konsistent, ob dieser Testeintrag mitzaehlt oder nicht.
-  { id: 'quote-required-test-marker', label: 'Test Studio Marker', kind: 'image', quote_required: true },
-]
+const QUOTE_REQUIRED_CATALOG: CloudModel[] = neuerServer().map((m) =>
+  m.id === 'flux-schnell' ? { ...m, credits: { base: 300 } }
+    : m.id === 'wan-2.2-720p' ? { ...m, credits: { base: 5000, long: 8000 } }
+      : m)
 
 const mocks = vi.hoisted(() => ({
   submit: vi.fn(), poll: vi.fn(), refresh: vi.fn(), upload: vi.fn(), getJob: vi.fn(), cancel: vi.fn(),
@@ -275,15 +270,17 @@ const eigenes = (role: 'image' | 'animate', model: string, kind: 'image' | 'vide
 // `role="option"` (Web: nur ein `<button>` ohne Rollen-Override), also wird
 // nach `option` statt nach `button` gefragt.
 const aufklappen = (name: string) => { const k = screen.getByLabelText(name); fireEvent.click(k); return k }
-const eintraege = (name: string) => { aufklappen(name); const liste = screen.getAllByRole('option').filter((b) => b.closest('.lu-elevated')); const namen = liste.map((b) => b.textContent ?? ''); fireEvent.click(screen.getByLabelText(name)); return namen }
-const waehlen = (name: string, text: string) => { aufklappen(name); const treffer = screen.getAllByRole('option').find((b) => b.closest('.lu-elevated') && (b.textContent ?? '').trim() === text); if (!treffer) throw new Error(`Eintrag nicht gefunden: ${text}`); fireEvent.click(treffer) }
+// Nur der Name zaehlt: Marken (Best, Open weights) und Preis stehen daneben.
+const nameVon = (b: HTMLElement) => (b.querySelector('.truncate')?.textContent ?? b.textContent ?? '').trim()
+const eintraege = (name: string) => { aufklappen(name); const liste = screen.getAllByRole('option').filter((b) => b.closest('.lu-elevated')); const namen = liste.map((b) => nameVon(b)); fireEvent.click(screen.getByLabelText(name)); return namen }
+const waehlen = (name: string, text: string) => { aufklappen(name); const treffer = screen.getAllByRole('option').find((b) => b.closest('.lu-elevated') && nameVon(b) === text); if (!treffer) throw new Error(`Eintrag nicht gefunden: ${text}`); fireEvent.click(treffer) }
 
 it('ein Preset mit Freigabe bietet nur die offenen Modelle an', async () => {
   // Ein gefilterter Endpunkt verweigert einen Horror- oder Spicy-Lauf und
   // kostet die Credits trotzdem. Er steht dort also gar nicht erst.
   render(<PresetWorkshop preset={CREATE_PRESETS[0]} onClose={() => {}} onGenerate={() => {}} />)
   const namen = eintraege('Model')
-  expect(namen).toEqual(presetModels('image', true).map((m) => m.label))
+  expect(namen).toEqual(sortByTier(presetModels('image', true)).map((m) => m.label))
   expect(namen).toContain('Chroma Spicy')
   expect(namen).not.toContain('Flux Schnell (fast)')
 })

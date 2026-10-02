@@ -37,8 +37,8 @@ const PresetWorkshop = lazy(() =>
   import('./PresetWorkshop').then((m) => ({ default: m.PresetWorkshop })),
 )
 import { INTENT_MAP, isIntentAvailable } from './intents'
-import { intentRoles, isStudioModel, resolveIntentPick } from '../../../lib/render/create-studio'
-import { modelForOp } from '../../../stores/cloudCatalogStore'
+import { studioPickFor } from '../../../lib/render/create-studio'
+import { modelForOp, useCloudCatalogStore } from '../../../stores/cloudCatalogStore'
 import { stageShowsSetupCard, laneModelCount } from './stageGate'
 import { isMlxImageHost } from '../../../api/mlx-image'
 import { fetchGalleryItemBlob } from './galleryUrl'
@@ -84,16 +84,18 @@ function CreateExperimentalInner() {
   // Composer.tsx, kept in sync by hand (both read the same store getters and
   // pure functions, no new state).
   const intent = useCreateStore((s) => s.intent())
-  const characterTab = useCreateStore((s) => s.characterTab)
   const cloudOpModel = useCreateStore((s) => s.cloudOpModel)
-  // characterUse never resolves to a Studio pick (Composer.tsx: roleIntent
-  // excludes it outright, character-use stays on its fixed -lora family via
-  // resolveCharacterModel), so this derivation does not need
-  // selectedCharacter at all.
-  const characterUse = intent === 'character' && characterTab === 'use'
-  const roleIntent = backend === 'cloud' && !characterUse && intentRoles(intent).length > 0
-  const rolePick = roleIntent ? resolveIntentPick(intent, cloudOpModel) : undefined
-  const studioPick = rolePick && isStudioModel(rolePick) ? rolePick : undefined
+  const cloudImageModel = useCreateStore((s) => s.cloudImageModel)
+  const cloudVideoModel = useCreateStore((s) => s.cloudVideoModel)
+  // Der Katalog kommt vom Server; die Studio-Wahl liest ihn, also zeichnet sich
+  // diese Flaeche neu, sobald er eintrifft.
+  useCloudCatalogStore((s) => s.models)
+  // Seit 02.10.2026 faehrt nicht nur eine Rollen-Absicht ein Studio-Modell,
+  // sondern auch Image, Edit, Video und Animate (Web-Paritaet). Eine Funktion
+  // traegt die Regel fuer Composer, Zaehler, Start und diese Schublade; der
+  // Character-Weg bleibt davon ausgenommen. Auf der lokalen Spur gibt es nie
+  // eine Studio-Wahl.
+  const studioPick = backend === 'cloud' ? studioPickFor(intent, { cloudImageModel, cloudVideoModel, cloudOpModel }) : undefined
 
   const [shownId, setShownId] = useState<string | null>(null)
   const [advancedOpen, setAdvancedOpen] = useState(false)

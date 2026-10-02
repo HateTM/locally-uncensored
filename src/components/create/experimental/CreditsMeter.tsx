@@ -1,8 +1,8 @@
 import { useCreateStore } from '../../../stores/createStore'
 import { useCreateExp } from './CreateContext'
 import { intentToJob } from '../../../lib/render/cloud-jobs'
-import { defaultCloudModel, resolveOpPick, runCredits } from '../../../stores/cloudCatalogStore'
-import { createStudioCost, intentRoles, isStudioModel, resolveIntentPick } from '../../../lib/render/create-studio'
+import { defaultCloudModel, modelForOp, resolveOpPick, runCredits } from '../../../stores/cloudCatalogStore'
+import { createStudioCost, intentRoles, isStudioModel, resolveIntentPick, startImageCount } from '../../../lib/render/create-studio'
 import { STUDIO_MODELS } from '../../../lib/render/studio-contract'
 import { resolveCharacterModel } from '../../../hooks/useCloudCreate'
 import { meterState } from '../../../lib/render/credits-meter'
@@ -63,7 +63,6 @@ export function CreditsMeter() {
     op === 'music' || op === 'tts' || op === 'lora-train'
   const roleIntent = !characterUse && intentRoles(intent).length > 0
   const rolePick = roleIntent ? resolveIntentPick(intent, cloudOpModel) : undefined
-  const studioPick = rolePick && isStudioModel(rolePick) ? rolePick : undefined
   const picked = characterUse
     ? (resolveCharacterModel(selectedCharacter?.family ?? '', cloudOpModel) ?? '')
     : roleIntent
@@ -71,6 +70,13 @@ export function CreditsMeter() {
       : special
         ? resolveOpPick(op, cloudOpModel)
         : (kind === 'video' ? cloudVideoModel : cloudImageModel) || defaultCloudModel(kind)?.id || ''
+  // Dieselbe Aufloesung wie Composer und Start (modelForOp): eine Wahl, die die
+  // Unterkategorie nicht fahren kann, rechnet hier als das Modell, das wirklich
+  // laeuft. Rollen-Absichten und der Character-Weg behalten ihre Wahl.
+  const model = roleIntent || characterUse ? picked : modelForOp(kind, op, picked)
+  // Ein Studio-Modell rechnet nach seinem eigenen Schema, auch aus Image, Edit,
+  // Video und Animate (seit 02.10.2026).
+  const studioPick = !characterUse && isStudioModel(model) ? model : undefined
   if (studioPick) kind = STUDIO_MODELS[studioPick].kind
   const seconds =
     op === 'music'
@@ -84,7 +90,7 @@ export function CreditsMeter() {
   // (useStudioPrice) and leaves it here; this chip never asks twice for the
   // same figure.
   const cost = studioPick
-    ? cloudStudioCredits ?? createStudioCost(studioPick, cloudStudioOptions, Array.from(prompt).length)
+    ? cloudStudioCredits ?? createStudioCost(studioPick, cloudStudioOptions, Array.from(prompt).length, undefined, startImageCount(studioPick) ?? 1)
     : runCredits(kind, op, picked, seconds, quota.costs[kind === 'audio' ? 'image' : kind], targetResolution)
   const remaining = quota.remaining.credits
   const limit = quota.limits.credits

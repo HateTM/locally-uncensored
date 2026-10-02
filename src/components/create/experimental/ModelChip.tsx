@@ -1,7 +1,10 @@
 import { useCreateStore } from '../../../stores/createStore'
 import {
-  useCloudCatalogStore, cloudModelById, defaultCloudModel, opPickerModels, modelCostHint, isEditModel, shortCount,
+  useCloudCatalogStore, cloudModelById, defaultCloudModel, opPickerModels, modelCostHint, shortCount,
+  editCapableModels, animatePickerModels, videoPickerModels, studioOnlyImageModels,
 } from '../../../stores/cloudCatalogStore'
+import { DEFAULT_MODEL_IDS } from '../../../lib/render/cloud-models'
+import { sortByTier, tierGroup, tierMarks } from '../../../lib/render/model-tier'
 import { intentPickerModels, intentRoles, createStudioCost, isStudioModel } from '../../../lib/render/create-studio'
 import { resolveCharacterModel, characterGenerationModels } from '../../../hooks/useCloudCreate'
 import type { RenderOp } from '../../../lib/render/cloud-jobs'
@@ -20,16 +23,15 @@ import { resolveLocalOpPick, videoLaneModels } from '../../../api/comfyui'
 // this only prices each row, since a PresetModel carries no `credits` field.
 function pickerCostHint(m: PresetModel, musicDuration: number): string | undefined {
   const classic = cloudModelById(m.id)
-  if (classic) return modelCostHint(classic, m.op as RenderOp, m.op === 'music' ? musicDuration : undefined)
-  if (isStudioModel(m.id)) {
-    // No options chosen yet (this is the picker row, not the run), so use the
-    // model's own baseline preview, same figure studio-contract.ts's
-    // studioBaseCredits() would compute, just inlined to avoid a second
-    // import for one call site.
-    const cr = createStudioCost(m.id, {}, 100)
-    return `${shortCount(cr)} cr`
-  }
-  return undefined
+  if (classic && !isStudioModel(m.id)) return modelCostHint(classic, m.op as RenderOp, m.op === 'music' ? musicDuration : undefined)
+  return studioCostHint(m.id)
+}
+
+/** A Studio row prices from its own schema: no options chosen yet (this is the
+ *  picker row, not the run), so the model's own baseline preview, the same
+ *  figure studio-contract.ts's studioBaseCredits() would compute. */
+function studioCostHint(id: string): string | undefined {
+  return isStudioModel(id) ? `${shortCount(createStudioCost(id, {}, 100))} cr` : undefined
 }
 
 const CLOUD_BADGE = { label: 'Cloud', color: 'bg-violet-500/15 text-violet-500 dark:text-violet-200' }
@@ -99,14 +101,18 @@ function CloudModelChip() {
   // user's choice was a lie. Edit needs masked-img2img (flux-dev); Animate needs
   // i2v; Video needs t2v (absent flag = capable, so today's dual-capable fleet
   // lists in full, and a future t2v-only model that sets i2v:false is excluded).
+  //
+  // 02.10.2026 (Web-Paritaet): Edit, Video und Animate fuehren hinter den
+  // klassischen Modellen die Studio-Modelle, die der Server kennt (siehe
+  // cloudCatalogStore.studioEntries); Image fuehrt die Studio-Bildmodelle, die
+  // in keinem klassischen Eintrag stehen. R5-58: Edit sieht auch die op-
+  // spezialisierten Endpunkte (qwen-image-edit hat `ops: ['edit']`).
   const list =
-    // R5-58: `m.edit` alone missed the 2.5.8 op-specialized edit endpoints
-    // (qwen-image-edit carries `ops: ['edit']`, not `edit: true`), so the
-    // picker never offered a model the catalog genuinely served.
-    intent === 'edit' ? models.filter((m) => m.kind === 'image' && isEditModel(m))
-    : intent === 'animate' ? models.filter((m) => m.kind === 'video' && m.i2v !== false)
-    : intent === 'video' ? models.filter((m) => m.kind === 'video' && m.t2v !== false)
+    intent === 'edit' ? editCapableModels()
+    : intent === 'animate' ? animatePickerModels()
+    : intent === 'video' ? videoPickerModels()
     : intent === 'character' && !characterUse ? opPickerModels('lora-train')
+    : kind === 'image' ? [...models.filter((m) => m.kind === 'image' && !m.ops), ...studioOnlyImageModels()]
     : models.filter((m) => m.kind === kind && !m.ops)
   const current = characterUse
     ? (resolveCharacterModel(selectedCharacter?.family ?? '', cloudOpModel) ?? '')
@@ -116,9 +122,12 @@ function CloudModelChip() {
   // Reflect the model the run will really use, so a leftover pick the current op
   // can't perform doesn't show as "selected".
   const roleOrCharacterIds = roleIntent ? roleModels : characterModels
+  // Faellt die Wahl heraus, gilt das Standardmodell dieser Unterkategorie (wie in
+  // modelForOp), und erst dahinter der erste Eintrag.
+  const standard = intent === 'edit' ? DEFAULT_MODEL_IDS.edit : intent === 'animate' ? DEFAULT_MODEL_IDS.animate : (defaultCloudModel(kind)?.id ?? '')
   const value = roleIntent || characterUse
     ? (roleOrCharacterIds.some((m) => m.id === current) ? current : (roleOrCharacterIds[0]?.id ?? current))
-    : list.some((m) => m.id === current) ? current : (list[0]?.id ?? current)
+    : list.some((m) => m.id === current) ? current : list.some((m) => m.id === standard) ? standard : (list[0]?.id ?? current)
 
   // The op this picker's models will run as, so the sublabel prices correctly
   // (a trainer bills a training run, not an image).
@@ -129,31 +138,40 @@ function CloudModelChip() {
     : intent === 'music' ? 'music'
     : intent === 'extend' ? 'extend'
     : intent === 'motion' ? 'motion'
+    : intent === 'upscale' ? 'upscale'
     : intent === 'edit' ? 'edit'
     : intent === 'animate' ? 'animate'
     : 'generate'
   const options: SelectOption[] = roleIntent
-    ? roleModels.map((m) => ({
+    ? sortByTier(roleModels).map((m) => ({
         value: m.id,
         label: m.label,
         sublabel: pickerCostHint(m, musicDuration),
+        group: tierGroup(m),
+        tags: tierMarks(m),
         badge: m.adult
           ? { label: 'No refusals', color: contentPolicy === 'off' ? NO_REFUSALS_COLOR.open : NO_REFUSALS_COLOR.filtering }
           : CLOUD_BADGE,
       }))
     : characterUse
-      ? characterModels.map((m) => ({
+      ? sortByTier(characterModels).map((m) => ({
           value: m.id,
           label: m.label,
           sublabel: modelCostHint(m, 'generate', undefined),
+          group: tierGroup(m),
+          tags: tierMarks(m),
           badge: m.adult
             ? { label: 'No refusals', color: contentPolicy === 'off' ? NO_REFUSALS_COLOR.open : NO_REFUSALS_COLOR.filtering }
             : CLOUD_BADGE,
         }))
-      : list.map((m) => ({
+      : sortByTier(list).map((m) => ({
           value: m.id,
           label: m.label,
-          sublabel: modelCostHint(m, op, op === 'music' ? musicDuration : undefined),
+          sublabel: isStudioModel(m.id) ? studioCostHint(m.id) : modelCostHint(m, op, op === 'music' ? musicDuration : undefined),
+          // Beste oben, Aeltere gesammelt unten unter einer Zwischenzeile, nichts
+          // verschwindet. Die Marken stehen nur in der aufgeklappten Liste.
+          group: tierGroup(m),
+          tags: tierMarks(m),
           // adult models keep the standard Cloud badge everywhere EXCEPT the row
           // itself, where "No refusals" is strictly more informative, matching web.
           badge: m.adult

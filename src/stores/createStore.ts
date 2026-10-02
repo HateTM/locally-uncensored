@@ -780,7 +780,13 @@ export const useCreateStore = create<CreateState>()(
 
       // ── redesign additions ──
       intent: () => deriveIntent(get()),
-      setIntent: (intent) => set((s) => {
+      // Eine andere Unterkategorie wirft die Studio-Optionen weg (wie ein
+      // Modellwechsel): Image, Edit, Video und Animate fuehren seit 02.10.2026
+      // Studio-Modelle, und ein Feld wie `resolution` hat je Endpunkt eine andere
+      // Auswahl. Ein uebriggebliebener Wert wuerde das Absenden abweisen.
+      setIntent: (intent) => {
+        const changed = get().intent() !== intent
+        set((s) => {
         // Clear intent-incompatible inputs: intents without a source drop both;
         // removebg/animate keep the source but drop a stale mask. Video/animate
         // mirror setMode's reset so image resolution never leaks into video.
@@ -847,7 +853,9 @@ export const useCreateStore = create<CreateState>()(
               width: d.width, height: d.height, ...(d.frames ? { frames: d.frames } : {}), ...(d.fps ? { fps: d.fps } : {}) }
           }
         }
-      }),
+      })
+        if (changed) set({ cloudStudioOptions: {} })
+      },
       toggleNegative: () => set((s) => ({ showNegative: !s.showNegative })),
       toggleLora: (name) => set((s) => ({ selectedLoras: s.selectedLoras.some((l) => l.name === name) ? s.selectedLoras.filter((l) => l.name !== name) : [...s.selectedLoras, { name, strength: 0.8 }] })),
       setLoraStrengthFor: (name, strength) => set((s) => ({ selectedLoras: s.selectedLoras.map((l) => l.name === name ? { ...l, strength: Math.max(0, Math.min(2, strength)) } : l) })),
@@ -980,8 +988,11 @@ export const useCreateStore = create<CreateState>()(
           }
           return patch
         }),
-      setCloudImageModel: (cloudImageModel) => set({ cloudImageModel }),
-      setCloudVideoModel: (cloudVideoModel) => set({ cloudVideoModel }),
+      // Wie setCloudOpModel: ein anderer Endpunkt, andere erlaubte Felder. Dieselbe
+      // Wahl noch einmal zu setzen (der Waehler tut das nach jedem Lauf) behaelt
+      // die Optionen.
+      setCloudImageModel: (cloudImageModel) => set((s) => s.cloudImageModel === cloudImageModel ? {} : { cloudImageModel, cloudStudioOptions: {} }),
+      setCloudVideoModel: (cloudVideoModel) => set((s) => s.cloudVideoModel === cloudVideoModel ? {} : { cloudVideoModel, cloudStudioOptions: {} }),
       setCaps: (caps) => set({ caps }),
       resetParamsToModelDefaults: () => {
         const s = get()

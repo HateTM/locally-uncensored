@@ -49,7 +49,10 @@ beforeEach(() => {
 describe('cloudCatalogStore', () => {
   it('falls back to the static seed before any fetch', () => {
     expect(cloudModelsFor('image').length).toBeGreaterThan(0)
-    expect(defaultCloudModel('image')?.id).toBe('flux-schnell')
+    // 02.10.2026: der neue Standard fuer Bild steht im Notvorrat (klassisch), der
+    // fuer Video (minimax-h3-t2v, ein Studio-Modell) nicht: ohne Server bleibt
+    // es beim ersten klassischen Videomodell.
+    expect(defaultCloudModel('image')?.id).toBe('z-image-turbo')
     expect(defaultCloudModel('video')?.id).toBe('wan-2.2-720p')
     expect(isEditCapable('flux-dev')).toBe(true)
     expect(isEditCapable('flux-schnell')).toBe(false)
@@ -160,8 +163,19 @@ describe('cloudCatalogStore', () => {
       expect(runCredits('image', 'edit', 'some-t2i-only', undefined, 999)).toBe(300)
     })
 
-    it('unknown model falls back to the quota figure', () => {
+    it('an unknown pick is priced as the model the run really uses, the default', () => {
+      // Seit 02.10.2026 faengt modelForOp eine Wahl ab, die der Katalog nicht
+      // (mehr) kennt, und Zaehler und Start rechnen beide mit dem Standard.
       useCloudCatalogStore.getState().setCatalog(serverCatalog)
+      expect(runCredits('image', 'generate', 'not-in-catalog', undefined, 321)).toBe(300)
+    })
+
+    it('falls back to the quota figure when the entry carries no price', () => {
+      useCloudCatalogStore.getState().setCatalog({
+        ...serverCatalog,
+        models: [{ id: 'flux-9', label: 'Flux 9', kind: 'image' }],
+      })
+      expect(runCredits('image', 'generate', 'flux-9', undefined, 321)).toBe(321)
       expect(runCredits('image', 'generate', 'not-in-catalog', undefined, 321)).toBe(321)
     })
   })

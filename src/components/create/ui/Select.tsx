@@ -17,6 +17,8 @@ export interface SelectOption {
   /** Ueberschrift ueber diesem und den folgenden Eintraegen derselben Gruppe. */
   group?: string
   badge?: { label: string; color: string }
+  /** Kleine Marken hinter dem Namen, nur in der aufgeklappten Liste (etwa Stufe und Herkunft). */
+  tags?: { label: string; color: string }[]
 }
 
 interface Props {
@@ -389,6 +391,10 @@ export function Select({
                           <span className="truncate">
                             {option.label}
                           </span>
+
+                          {option.tags?.map((t) => (
+                            <Badge key={t.label} color={t.color} label={t.label} />
+                          ))}
 
                           {option.sublabel && (
                             <span className="t-mono truncate text-gray-600">

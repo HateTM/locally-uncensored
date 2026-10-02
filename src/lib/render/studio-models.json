@@ -4,6 +4,8 @@
     "endpoint": "wavespeed-ai/open-video/image-to-video",
     "kind": "video",
     "adult": true,
+    "tier": "standard",
+    "weights": "closed",
     "price": {
       "mode": "output",
       "rates": {
@@ -23,6 +25,8 @@
     "endpoint": "wavespeed-ai/open-video/image-to-video-lora",
     "kind": "video",
     "adult": true,
+    "tier": "standard",
+    "weights": "closed",
     "price": {
       "mode": "output",
       "rates": {
@@ -42,6 +46,8 @@
     "endpoint": "wavespeed-ai/mmaudio-v2",
     "kind": "video",
     "adult": false,
+    "tier": "standard",
+    "weights": "open",
     "price": {
       "mode": "output",
       "rates": {
@@ -61,6 +67,8 @@
     "endpoint": "wavespeed-ai/hunyuan-video-foley",
     "kind": "video",
     "adult": false,
+    "tier": "standard",
+    "weights": "open",
     "price": {
       "mode": "flat",
       "rates": {
@@ -78,6 +86,8 @@
     "endpoint": "wavespeed-ai/infinitetalk",
     "kind": "video",
     "adult": false,
+    "tier": "standard",
+    "weights": "open",
     "price": {
       "mode": "input",
       "rates": {
@@ -99,6 +109,8 @@
     "endpoint": "wavespeed-ai/infinitetalk/multi",
     "kind": "video",
     "adult": false,
+    "tier": "standard",
+    "weights": "open",
     "price": {
       "mode": "input",
       "rates": {
@@ -120,6 +132,8 @@
     "endpoint": "wavespeed-ai/qwen-image/edit-multiple-angles",
     "kind": "image",
     "adult": false,
+    "tier": "standard",
+    "weights": "open",
     "price": {
       "mode": "flat",
       "rates": {
@@ -137,6 +151,8 @@
     "endpoint": "wavespeed-ai/minimax-h3/image-edit",
     "kind": "image",
     "adult": false,
+    "tier": "standard",
+    "weights": "open",
     "price": {
       "mode": "flat",
       "rates": {
@@ -156,6 +172,8 @@
     "endpoint": "wavespeed-ai/scail-2",
     "kind": "video",
     "adult": false,
+    "tier": "standard",
+    "weights": "open-family",
     "price": {
       "mode": "input",
       "rates": {
@@ -178,6 +196,8 @@
     "endpoint": "wavespeed-ai/wan-2.1/ditto",
     "kind": "video",
     "adult": false,
+    "tier": "older",
+    "weights": "open-family",
     "price": {
       "mode": "input",
       "rates": {
@@ -197,6 +217,8 @@
     "endpoint": "bytedance/seedance-2.5/image-to-video",
     "kind": "video",
     "adult": false,
+    "tier": "best",
+    "weights": "closed",
     "price": {
       "mode": "output",
       "rates": {
@@ -220,6 +242,8 @@
     "endpoint": "wavespeed-ai/minimax-h3/image-to-video",
     "kind": "video",
     "adult": false,
+    "tier": "best",
+    "weights": "open",
     "price": {
       "mode": "output",
       "rates": {
@@ -243,6 +267,8 @@
     "endpoint": "alibaba/wan-3.0/image-to-video",
     "kind": "video",
     "adult": false,
+    "tier": "best",
+    "weights": "open-family",
     "price": {
       "mode": "output",
       "rates": {
@@ -265,6 +291,8 @@
     "endpoint": "alibaba/wan-3.0/image-to-video-spicy",
     "kind": "video",
     "adult": true,
+    "tier": "best",
+    "weights": "open-family",
     "price": {
       "mode": "output",
       "rates": {
@@ -287,6 +315,8 @@
     "endpoint": "wavespeed-ai/chroma",
     "kind": "image",
     "adult": true,
+    "tier": "standard",
+    "weights": "open",
     "inputs": {},
     "defaults": {},
     "price": {
@@ -303,6 +333,8 @@
     "endpoint": "wavespeed-ai/prefect-pony-xl",
     "kind": "image",
     "adult": true,
+    "tier": "standard",
+    "weights": "open",
     "inputs": {},
     "defaults": {},
     "price": {
@@ -319,6 +351,8 @@
     "endpoint": "wavespeed-ai/neta-lumina",
     "kind": "image",
     "adult": true,
+    "tier": "standard",
+    "weights": "open",
     "inputs": {},
     "defaults": {},
     "price": {
@@ -335,6 +369,8 @@
     "endpoint": "wavespeed-ai/wan-2.2-spicy/image-to-video",
     "kind": "video",
     "adult": true,
+    "tier": "older",
+    "weights": "open",
     "inputs": {
       "image": "source_path"
     },
@@ -354,6 +390,8 @@
     "endpoint": "alibaba/wan-2.7/image-to-video-spicy",
     "kind": "video",
     "adult": true,
+    "tier": "standard",
+    "weights": "open-family",
     "inputs": {
       "image": "source_path",
       "audio": "audio_path"
@@ -374,6 +412,8 @@
     "endpoint": "wavespeed-ai/wan-2.2-spicy/video-extend",
     "kind": "video",
     "adult": true,
+    "tier": "older",
+    "weights": "open",
     "inputs": {
       "video": "video_path"
     },
@@ -393,6 +433,8 @@
     "endpoint": "wavespeed-ai/qwen3-tts/text-to-speech",
     "kind": "audio",
     "adult": false,
+    "tier": "standard",
+    "weights": "open",
     "inputs": {},
     "defaults": {},
     "price": {
@@ -410,6 +452,8 @@
     "endpoint": "bytedance/seedance-2.5/talking-avatar",
     "kind": "video",
     "adult": false,
+    "tier": "standard",
+    "weights": "closed",
     "inputs": {
       "image": "source_path",
       "audio": "audio_path"
@@ -433,6 +477,8 @@
     "endpoint": "wavespeed-ai/longcat-avatar-1.5",
     "kind": "video",
     "adult": false,
+    "tier": "standard",
+    "weights": "open-family",
     "inputs": {
       "image": "source_path",
       "audio": "audio_path"
@@ -453,6 +499,8 @@
     "endpoint": "wavespeed-ai/longcat-avatar-1.5/multi",
     "kind": "video",
     "adult": false,
+    "tier": "standard",
+    "weights": "open-family",
     "inputs": {
       "image": "source_path",
       "left_audio": "audio_path",
@@ -474,6 +522,8 @@
     "endpoint": "sync/lipsync-3/avatar",
     "kind": "video",
     "adult": false,
+    "tier": "standard",
+    "weights": "closed",
     "inputs": {
       "image": "source_path",
       "audio": "audio_path"
@@ -493,6 +543,8 @@
     "endpoint": "heygen/avatar-v/digital-twin",
     "kind": "video",
     "adult": false,
+    "tier": "standard",
+    "weights": "closed",
     "inputs": {
       "audio": "audio_path"
     },
@@ -513,6 +565,8 @@
     "endpoint": "bytedance/seed-speech-tts-2.0",
     "kind": "audio",
     "adult": false,
+    "tier": "standard",
+    "weights": "closed",
     "inputs": {},
     "defaults": {},
     "promptField": "text",
@@ -529,6 +583,8 @@
     "endpoint": "chatterbox/text-to-speech",
     "kind": "audio",
     "adult": false,
+    "tier": "standard",
+    "weights": "open",
     "inputs": {
       "reference_audio": "audio_path"
     },
@@ -547,6 +603,8 @@
     "endpoint": "minimax/speech-2.8-hd",
     "kind": "audio",
     "adult": false,
+    "tier": "standard",
+    "weights": "closed",
     "inputs": {},
     "defaults": {
       "voice_id": "Wise_Woman"
@@ -565,6 +623,8 @@
     "endpoint": "minimax/speech-2.8-turbo",
     "kind": "audio",
     "adult": false,
+    "tier": "standard",
+    "weights": "closed",
     "inputs": {},
     "defaults": {
       "voice_id": "Wise_Woman"
@@ -583,6 +643,8 @@
     "endpoint": "elevenlabs/eleven-v3",
     "kind": "audio",
     "adult": false,
+    "tier": "standard",
+    "weights": "closed",
     "inputs": {},
     "defaults": {},
     "promptField": "text",
@@ -599,6 +661,8 @@
     "endpoint": "inworld/realtime-tts-2",
     "kind": "audio",
     "adult": false,
+    "tier": "standard",
+    "weights": "closed",
     "inputs": {},
     "defaults": {},
     "promptField": "text",
@@ -615,6 +679,8 @@
     "endpoint": "minimax/music-3.0",
     "kind": "audio",
     "adult": false,
+    "tier": "standard",
+    "weights": "closed",
     "inputs": {},
     "defaults": {},
     "price": {
@@ -630,6 +696,8 @@
     "endpoint": "mureka-ai/mureka-v9.5/generate-song",
     "kind": "audio",
     "adult": false,
+    "tier": "standard",
+    "weights": "closed",
     "inputs": {},
     "defaults": {},
     "promptField": "lyrics",
@@ -646,6 +714,8 @@
     "endpoint": "elevenlabs/music-v2.5",
     "kind": "audio",
     "adult": false,
+    "tier": "standard",
+    "weights": "closed",
     "inputs": {},
     "defaults": {},
     "price": {
@@ -664,6 +734,8 @@
     "endpoint": "alibaba/wan-3.0-prime/image-to-video",
     "kind": "video",
     "adult": false,
+    "tier": "standard",
+    "weights": "open-family",
     "inputs": {
       "image": "source_path",
       "last_image": "last_image_path"
@@ -686,6 +758,8 @@
     "endpoint": "alibaba/wan-3.0-prime/image-to-video-spicy",
     "kind": "video",
     "adult": true,
+    "tier": "standard",
+    "weights": "open-family",
     "inputs": {
       "image": "source_path",
       "last_image": "last_image_path"
@@ -708,6 +782,8 @@
     "endpoint": "bytedance/seedance-2.5/image-to-video-turbo",
     "kind": "video",
     "adult": false,
+    "tier": "standard",
+    "weights": "closed",
     "inputs": {
       "image": "source_path",
       "last_image": "last_image_path"
@@ -729,6 +805,8 @@
     "endpoint": "wavespeed-ai/wan-2.2/animate-2",
     "kind": "video",
     "adult": false,
+    "tier": "standard",
+    "weights": "open-family",
     "inputs": {
       "image": "source_path",
       "video": "video_path"
@@ -749,6 +827,8 @@
     "endpoint": "bytedance/seedance-2.5/video-extend",
     "kind": "video",
     "adult": false,
+    "tier": "standard",
+    "weights": "closed",
     "inputs": {
       "video": "video_path"
     },
@@ -772,6 +852,8 @@
     "endpoint": "alibaba/wan-3.0/video-extend",
     "kind": "video",
     "adult": false,
+    "tier": "best",
+    "weights": "open-family",
     "inputs": {
       "video": "video_path",
       "last_image": "last_image_path"
@@ -794,6 +876,8 @@
     "endpoint": "bytedance/seedream-v5.0-pro/edit",
     "kind": "image",
     "adult": false,
+    "tier": "best",
+    "weights": "closed",
     "inputs": {
       "images": "image_paths"
     },
@@ -816,6 +900,8 @@
     "endpoint": "alibaba/qwen-image-3.0/edit",
     "kind": "image",
     "adult": false,
+    "tier": "standard",
+    "weights": "open-family",
     "inputs": {
       "images": "image_paths"
     },
@@ -837,6 +923,8 @@
     "endpoint": "wavespeed-ai/flashvsr",
     "kind": "video",
     "adult": false,
+    "tier": "standard",
+    "weights": "open",
     "inputs": {
       "video": "video_path"
     },
@@ -859,6 +947,8 @@
     "endpoint": "wavespeed-ai/video-upscaler-pro",
     "kind": "video",
     "adult": false,
+    "tier": "standard",
+    "weights": "closed",
     "inputs": {
       "video": "video_path"
     },
@@ -881,6 +971,8 @@
     "endpoint": "wavespeed-ai/ultimate-video-upscaler",
     "kind": "video",
     "adult": false,
+    "tier": "standard",
+    "weights": "closed",
     "inputs": {
       "video": "video_path"
     },
@@ -903,6 +995,8 @@
     "endpoint": "clarity-ai/crystal-video-upscaler",
     "kind": "video",
     "adult": false,
+    "tier": "standard",
+    "weights": "closed",
     "inputs": {
       "video": "video_path"
     },
@@ -922,6 +1016,8 @@
     "endpoint": "black-forest-labs/flux-3/video-upscale",
     "kind": "video",
     "adult": false,
+    "tier": "best",
+    "weights": "open-family",
     "inputs": {
       "video": "video_path"
     },
@@ -940,6 +1036,8 @@
     "endpoint": "wavespeed-ai/video-upscaler",
     "kind": "video",
     "adult": false,
+    "tier": "standard",
+    "weights": "closed",
     "inputs": {
       "video": "video_path"
     },
@@ -962,6 +1060,8 @@
     "endpoint": "wavespeed-ai/z-image/base",
     "kind": "image",
     "adult": true,
+    "tier": "best",
+    "weights": "open",
     "price": {
       "mode": "flat",
       "rates": {
@@ -977,6 +1077,8 @@
     "endpoint": "wavespeed-ai/nucleus-image/text-to-image",
     "kind": "image",
     "adult": true,
+    "tier": "standard",
+    "weights": "open-family",
     "price": {
       "mode": "flat",
       "rates": {
@@ -993,6 +1095,8 @@
     "endpoint": "wavespeed-ai/jib-mix-qwen-image/text-to-image",
     "kind": "image",
     "adult": true,
+    "tier": "standard",
+    "weights": "open-family",
     "price": {
       "mode": "flat",
       "rates": {
@@ -1008,6 +1112,8 @@
     "endpoint": "wavespeed-ai/wan-2.2/text-to-image-realism",
     "kind": "image",
     "adult": true,
+    "tier": "older",
+    "weights": "open-family",
     "price": {
       "mode": "flat",
       "rates": {
@@ -1017,5 +1123,800 @@
     "inputs": {},
     "defaults": {},
     "baselineUsd": 0.025
+  },
+  "qwen-image-3-pro": {
+    "label": "Qwen Image 3.0 Pro",
+    "endpoint": "alibaba/qwen-image-3.0-pro/text-to-image",
+    "kind": "image",
+    "adult": false,
+    "tier": "best",
+    "weights": "open-family",
+    "price": {
+      "mode": "flat",
+      "rates": {
+        "1k": 0.04,
+        "2k": 0.075
+      }
+    },
+    "inputs": {},
+    "defaults": {},
+    "baselineUsd": 0.04
+  },
+  "qwen-image-3": {
+    "label": "Qwen Image 3.0",
+    "endpoint": "alibaba/qwen-image-3.0/text-to-image",
+    "kind": "image",
+    "adult": false,
+    "tier": "standard",
+    "weights": "open-family",
+    "price": {
+      "mode": "flat",
+      "rates": {
+        "1k": 0.03,
+        "2k": 0.03
+      }
+    },
+    "inputs": {},
+    "defaults": {},
+    "baselineUsd": 0.03
+  },
+  "qwen-image-2.1": {
+    "label": "Qwen Image 2.1",
+    "endpoint": "wavespeed-ai/qwen-image-2.1/text-to-image",
+    "kind": "image",
+    "adult": false,
+    "tier": "standard",
+    "weights": "open",
+    "price": {
+      "mode": "flat",
+      "rates": {
+        "1k": 0.02,
+        "1.5k": 0.04,
+        "2k": 0.08
+      }
+    },
+    "inputs": {},
+    "defaults": {},
+    "baselineUsd": 0.02
+  },
+  "flux-3": {
+    "label": "FLUX 3",
+    "endpoint": "black-forest-labs/flux-3/text-to-image",
+    "kind": "image",
+    "adult": false,
+    "tier": "best",
+    "weights": "open-family",
+    "price": {
+      "mode": "flat",
+      "rates": {
+        "1k": 0.05,
+        "2k": 0.12,
+        "4k": 0.65
+      }
+    },
+    "inputs": {},
+    "defaults": {},
+    "baselineUsd": 0.05
+  },
+  "flux-2-klein-9b": {
+    "label": "FLUX.2 Klein 9B (fast)",
+    "endpoint": "wavespeed-ai/flux-2-klein-9b/text-to-image",
+    "kind": "image",
+    "adult": false,
+    "tier": "standard",
+    "weights": "open-family",
+    "price": {
+      "mode": "flat",
+      "rates": {
+        "default": 0.01
+      }
+    },
+    "inputs": {},
+    "defaults": {},
+    "baselineUsd": 0.01
+  },
+  "krea-2-large": {
+    "label": "Krea 2 Large",
+    "endpoint": "wavespeed-ai/krea-v2-large/text-to-image",
+    "kind": "image",
+    "adult": false,
+    "tier": "standard",
+    "weights": "open-family",
+    "price": {
+      "mode": "flat",
+      "rates": {
+        "default": 0.06
+      }
+    },
+    "inputs": {},
+    "defaults": {},
+    "baselineUsd": 0.06
+  },
+  "cosmos-3-super": {
+    "label": "Cosmos 3 Super",
+    "endpoint": "nvidia/cosmos-3-super/text-to-image",
+    "kind": "image",
+    "adult": false,
+    "tier": "best",
+    "weights": "open",
+    "price": {
+      "mode": "flat",
+      "rates": {
+        "default": 0.04
+      }
+    },
+    "inputs": {},
+    "defaults": {},
+    "baselineUsd": 0.04
+  },
+  "ideogram-4.5": {
+    "label": "Ideogram 4.5",
+    "endpoint": "ideogram-ai/ideogram-v4.5",
+    "kind": "image",
+    "adult": false,
+    "tier": "best",
+    "weights": "open-family",
+    "price": {
+      "mode": "flat",
+      "rates": {
+        "low": 0.03,
+        "medium": 0.06,
+        "high": 0.22
+      },
+      "resolutionField": "quality"
+    },
+    "inputs": {},
+    "defaults": {},
+    "baselineUsd": 0.06
+  },
+  "hidream-o1": {
+    "label": "HiDream O1",
+    "endpoint": "wavespeed-ai/hidream-o1-image/text-to-image",
+    "kind": "image",
+    "adult": false,
+    "tier": "standard",
+    "weights": "open-family",
+    "price": {
+      "mode": "flat",
+      "rates": {
+        "default": 0.04
+      }
+    },
+    "inputs": {},
+    "defaults": {},
+    "baselineUsd": 0.04
+  },
+  "hunyuan-image-3": {
+    "label": "HunyuanImage 3 Instruct",
+    "endpoint": "wavespeed-ai/hunyuan-image-3-instruct/text-to-image",
+    "kind": "image",
+    "adult": false,
+    "tier": "standard",
+    "weights": "open-family",
+    "price": {
+      "mode": "flat",
+      "rates": {
+        "default": 0.45
+      }
+    },
+    "inputs": {},
+    "defaults": {},
+    "baselineUsd": 0.45
+  },
+  "ernie-image-turbo": {
+    "label": "ERNIE Image Turbo (fast)",
+    "endpoint": "wavespeed-ai/ernie-image/text-to-image-turbo",
+    "kind": "image",
+    "adult": false,
+    "tier": "standard",
+    "weights": "open-family",
+    "price": {
+      "mode": "flat",
+      "rates": {
+        "default": 0.03
+      }
+    },
+    "inputs": {},
+    "defaults": {},
+    "baselineUsd": 0.03
+  },
+  "qwen-image-3-pro-edit": {
+    "label": "Qwen Image 3.0 Pro",
+    "endpoint": "alibaba/qwen-image-3.0-pro/edit",
+    "kind": "image",
+    "adult": false,
+    "tier": "best",
+    "weights": "open-family",
+    "price": {
+      "mode": "flat",
+      "rates": {
+        "1k": 0.043,
+        "2k": 0.078
+      },
+      "extraImage": 0.003
+    },
+    "inputs": {
+      "images": "image_paths"
+    },
+    "defaults": {},
+    "baselineUsd": 0.04
+  },
+  "qwen-image-2.1-edit": {
+    "label": "Qwen Image 2.1",
+    "endpoint": "wavespeed-ai/qwen-image-2.1/edit",
+    "kind": "image",
+    "adult": false,
+    "tier": "best",
+    "weights": "open",
+    "price": {
+      "mode": "flat",
+      "rates": {
+        "1k": 0.03,
+        "1.5k": 0.06,
+        "2k": 0.12
+      },
+      "extraImage": 0.02
+    },
+    "inputs": {
+      "images": "image_paths"
+    },
+    "defaults": {},
+    "baselineUsd": 0.03
+  },
+  "flux-3-edit": {
+    "label": "FLUX 3",
+    "endpoint": "black-forest-labs/flux-3/edit",
+    "kind": "image",
+    "adult": false,
+    "tier": "best",
+    "weights": "open-family",
+    "price": {
+      "mode": "flat",
+      "rates": {
+        "1k": 0.05,
+        "2k": 0.12,
+        "4k": 0.65
+      }
+    },
+    "inputs": {
+      "images": "image_paths"
+    },
+    "defaults": {},
+    "baselineUsd": 0.05
+  },
+  "ideogram-4.5-edit": {
+    "label": "Ideogram 4.5",
+    "endpoint": "ideogram-ai/ideogram-v4.5/edit",
+    "kind": "image",
+    "adult": false,
+    "tier": "standard",
+    "weights": "open-family",
+    "price": {
+      "mode": "flat",
+      "rates": {
+        "very_low": 0.008,
+        "low": 0.03,
+        "medium": 0.06,
+        "high": 0.22
+      },
+      "resolutionField": "quality"
+    },
+    "inputs": {
+      "image": "source_path"
+    },
+    "defaults": {},
+    "baselineUsd": 0.06
+  },
+  "hidream-o1-edit": {
+    "label": "HiDream O1",
+    "endpoint": "wavespeed-ai/hidream-o1-image/edit",
+    "kind": "image",
+    "adult": false,
+    "tier": "standard",
+    "weights": "open-family",
+    "price": {
+      "mode": "flat",
+      "rates": {
+        "default": 0.04
+      }
+    },
+    "inputs": {
+      "images": "image_paths"
+    },
+    "defaults": {},
+    "baselineUsd": 0.04
+  },
+  "hunyuan-image-3-edit": {
+    "label": "HunyuanImage 3 Instruct",
+    "endpoint": "wavespeed-ai/hunyuan-image-3-instruct/edit",
+    "kind": "image",
+    "adult": false,
+    "tier": "standard",
+    "weights": "open-family",
+    "price": {
+      "mode": "flat",
+      "rates": {
+        "default": 0.45
+      }
+    },
+    "inputs": {
+      "images": "image_paths"
+    },
+    "defaults": {},
+    "baselineUsd": 0.45
+  },
+  "seedvr2-image": {
+    "label": "SeedVR2",
+    "endpoint": "wavespeed-ai/seedvr2/image",
+    "kind": "image",
+    "adult": false,
+    "tier": "standard",
+    "weights": "open",
+    "price": {
+      "mode": "flat",
+      "rates": {
+        "2k": 0.01,
+        "4k": 0.01,
+        "8k": 0.01
+      },
+      "resolutionField": "target_resolution"
+    },
+    "inputs": {
+      "image": "source_path"
+    },
+    "defaults": {},
+    "baselineUsd": 0.01
+  },
+  "ltx-2.5-t2v": {
+    "label": "LTX 2.5",
+    "endpoint": "wavespeed-ai/ltx-2.5/text-to-video",
+    "kind": "video",
+    "adult": false,
+    "tier": "best",
+    "weights": "open",
+    "price": {
+      "mode": "output",
+      "rates": {
+        "720p": 0.1,
+        "1080p": 0.14,
+        "2k": 0.21,
+        "4k": 0.33
+      }
+    },
+    "inputs": {},
+    "defaults": {},
+    "baselineUsd": 0.5
+  },
+  "ltx-2.5-i2v": {
+    "label": "LTX 2.5",
+    "endpoint": "wavespeed-ai/ltx-2.5/image-to-video",
+    "kind": "video",
+    "adult": false,
+    "tier": "best",
+    "weights": "open",
+    "price": {
+      "mode": "output",
+      "rates": {
+        "720p": 0.1,
+        "1080p": 0.14,
+        "2k": 0.21,
+        "4k": 0.33
+      }
+    },
+    "inputs": {
+      "image": "source_path",
+      "last_image": "last_image_path"
+    },
+    "defaults": {},
+    "baselineUsd": 0.5
+  },
+  "flux-3-t2v": {
+    "label": "FLUX 3 Video",
+    "endpoint": "black-forest-labs/flux-3/text-to-video",
+    "kind": "video",
+    "adult": false,
+    "tier": "best",
+    "weights": "open-family",
+    "price": {
+      "mode": "output",
+      "rates": {
+        "720p": 0.17,
+        "1080p": 0.29
+      }
+    },
+    "inputs": {},
+    "defaults": {},
+    "baselineUsd": 0.85
+  },
+  "flux-3-i2v": {
+    "label": "FLUX 3 Video",
+    "endpoint": "black-forest-labs/flux-3/image-to-video",
+    "kind": "video",
+    "adult": false,
+    "tier": "best",
+    "weights": "open-family",
+    "price": {
+      "mode": "output",
+      "rates": {
+        "720p": 0.17,
+        "1080p": 0.29
+      }
+    },
+    "inputs": {
+      "image": "source_path"
+    },
+    "defaults": {},
+    "baselineUsd": 0.85
+  },
+  "flux-3-start-end": {
+    "label": "FLUX 3 Video \u2022 Start to End",
+    "endpoint": "black-forest-labs/flux-3/start-end-to-video",
+    "kind": "video",
+    "adult": false,
+    "tier": "standard",
+    "weights": "open-family",
+    "price": {
+      "mode": "output",
+      "rates": {
+        "720p": 0.17,
+        "1080p": 0.29
+      }
+    },
+    "inputs": {
+      "start_image": "source_path",
+      "end_image": "last_image_path"
+    },
+    "defaults": {},
+    "baselineUsd": 0.85
+  },
+  "flux-3-extend": {
+    "label": "FLUX 3 Video \u2022 Extend",
+    "endpoint": "black-forest-labs/flux-3/video-extend",
+    "kind": "video",
+    "adult": false,
+    "tier": "best",
+    "weights": "open-family",
+    "price": {
+      "mode": "output",
+      "rates": {
+        "720p": 0.41,
+        "1080p": 0.53
+      }
+    },
+    "inputs": {
+      "video": "video_path"
+    },
+    "defaults": {},
+    "baselineUsd": 2.05
+  },
+  "flux-3-video-edit": {
+    "label": "FLUX 3 Video \u2022 Edit",
+    "endpoint": "black-forest-labs/flux-3/video-edit",
+    "kind": "video",
+    "adult": false,
+    "tier": "best",
+    "weights": "open-family",
+    "price": {
+      "mode": "input",
+      "rates": {
+        "default": 0.03
+      },
+      "maxSeconds": 15
+    },
+    "inputs": {
+      "video": "video_path"
+    },
+    "defaults": {},
+    "baselineUsd": 0.03
+  },
+  "cosmos-3-super-i2v": {
+    "label": "Cosmos 3 Super",
+    "endpoint": "nvidia/cosmos-3-super/image-to-video",
+    "kind": "video",
+    "adult": false,
+    "tier": "standard",
+    "weights": "open",
+    "price": {
+      "mode": "output",
+      "rates": {
+        "default": 0.05
+      }
+    },
+    "inputs": {
+      "image": "source_path"
+    },
+    "defaults": {},
+    "baselineUsd": 0.05
+  },
+  "skyreels-v4-t2v": {
+    "label": "SkyReels V4",
+    "endpoint": "skywork-ai/skyreels-v4/text-to-video",
+    "kind": "video",
+    "adult": false,
+    "tier": "standard",
+    "weights": "open-family",
+    "price": {
+      "mode": "output",
+      "rates": {
+        "480p": 0.11,
+        "720p": 0.14,
+        "1080p": 0.35
+      }
+    },
+    "inputs": {},
+    "defaults": {
+      "resolution": "480p"
+    },
+    "baselineUsd": 0.1
+  },
+  "skyreels-v4-i2v": {
+    "label": "SkyReels V4",
+    "endpoint": "skywork-ai/skyreels-v4/image-to-video",
+    "kind": "video",
+    "adult": false,
+    "tier": "standard",
+    "weights": "open-family",
+    "price": {
+      "mode": "output",
+      "rates": {
+        "480p": 0.11,
+        "720p": 0.14,
+        "1080p": 0.35
+      }
+    },
+    "inputs": {
+      "first_frame_image": "source_path",
+      "end_frame_image": "last_image_path"
+    },
+    "defaults": {
+      "resolution": "480p"
+    },
+    "baselineUsd": 0.1
+  },
+  "skyreels-v4-ref": {
+    "label": "SkyReels V4 \u2022 Reference",
+    "endpoint": "skywork-ai/skyreels-v4/reference-to-video",
+    "kind": "video",
+    "adult": false,
+    "tier": "standard",
+    "weights": "open-family",
+    "price": {
+      "mode": "output",
+      "rates": {
+        "480p": 0.11,
+        "720p": 0.14,
+        "1080p": 0.35
+      }
+    },
+    "inputs": {
+      "images": "image_paths"
+    },
+    "defaults": {
+      "resolution": "480p"
+    },
+    "baselineUsd": 0.1
+  },
+  "kandinsky-5-pro-t2v": {
+    "label": "Kandinsky 5 Pro",
+    "endpoint": "wavespeed-ai/kandinsky5-pro/text-to-video",
+    "kind": "video",
+    "adult": false,
+    "tier": "standard",
+    "weights": "open-family",
+    "price": {
+      "mode": "flat",
+      "rates": {
+        "512p": 0.2,
+        "1024p": 0.2
+      }
+    },
+    "inputs": {},
+    "defaults": {},
+    "baselineUsd": 0.2
+  },
+  "kandinsky-5-pro-i2v": {
+    "label": "Kandinsky 5 Pro",
+    "endpoint": "wavespeed-ai/kandinsky5-pro/image-to-video",
+    "kind": "video",
+    "adult": false,
+    "tier": "standard",
+    "weights": "open-family",
+    "price": {
+      "mode": "flat",
+      "rates": {
+        "512p": 0.2,
+        "1024p": 0.2
+      }
+    },
+    "inputs": {
+      "image": "source_path"
+    },
+    "defaults": {},
+    "baselineUsd": 0.2
+  },
+  "minimax-h3-t2v": {
+    "label": "MiniMax H3",
+    "endpoint": "wavespeed-ai/minimax-h3/text-to-video",
+    "kind": "video",
+    "adult": false,
+    "tier": "best",
+    "weights": "open",
+    "price": {
+      "mode": "output",
+      "rates": {
+        "480p": 0.04,
+        "540p": 0.06,
+        "768p": 0.08,
+        "1080p": 0.16
+      }
+    },
+    "inputs": {},
+    "defaults": {
+      "resolution": "480p"
+    },
+    "baselineUsd": 0.2
+  },
+  "minimax-h3-ref": {
+    "label": "MiniMax H3 \u2022 Reference",
+    "endpoint": "wavespeed-ai/minimax-h3/reference-to-video",
+    "kind": "video",
+    "adult": false,
+    "tier": "best",
+    "weights": "open",
+    "price": {
+      "mode": "output",
+      "rates": {
+        "480p": 0.057,
+        "540p": 0.082,
+        "768p": 0.107,
+        "1080p": 0.207
+      },
+      "extraImage": 0.02
+    },
+    "inputs": {
+      "reference_images": "image_paths"
+    },
+    "defaults": {
+      "resolution": "480p"
+    },
+    "baselineUsd": 0.25
+  },
+  "minimax-h3-video-edit": {
+    "label": "MiniMax H3 \u2022 Video Edit",
+    "endpoint": "wavespeed-ai/minimax-h3/video-edit",
+    "kind": "video",
+    "adult": false,
+    "tier": "best",
+    "weights": "open",
+    "price": {
+      "mode": "inout",
+      "rates": {
+        "480p": 0.1,
+        "540p": 0.15,
+        "768p": 0.2,
+        "1080p": 0.4
+      },
+      "maxSeconds": 15
+    },
+    "inputs": {
+      "video": "video_path"
+    },
+    "defaults": {
+      "resolution": "480p"
+    },
+    "baselineUsd": 0.25
+  },
+  "wan-3.0-ref": {
+    "label": "Wan 3.0 \u2022 Reference",
+    "endpoint": "alibaba/wan-3.0/reference-to-video",
+    "kind": "video",
+    "adult": false,
+    "tier": "best",
+    "weights": "open-family",
+    "price": {
+      "mode": "output",
+      "rates": {
+        "480p": 0.05,
+        "720p": 0.1,
+        "1080p": 0.2
+      }
+    },
+    "inputs": {
+      "reference_images": "image_paths"
+    },
+    "defaults": {
+      "resolution": "480p"
+    },
+    "baselineUsd": 0.5
+  },
+  "wan-3.0-video-edit": {
+    "label": "Wan 3.0 \u2022 Video Edit",
+    "endpoint": "alibaba/wan-3.0/video-edit",
+    "kind": "video",
+    "adult": false,
+    "tier": "best",
+    "weights": "open-family",
+    "price": {
+      "mode": "inout",
+      "rates": {
+        "480p": 0.1,
+        "720p": 0.2,
+        "1080p": 0.4
+      },
+      "maxSeconds": 15
+    },
+    "inputs": {
+      "video": "video_path"
+    },
+    "defaults": {
+      "resolution": "480p"
+    },
+    "baselineUsd": 0.5
+  },
+  "seedvr2-video": {
+    "label": "SeedVR2",
+    "endpoint": "wavespeed-ai/seedvr2/video",
+    "kind": "video",
+    "adult": false,
+    "tier": "standard",
+    "weights": "open",
+    "price": {
+      "mode": "input",
+      "rates": {
+        "720p": 0.02,
+        "1080p": 0.04,
+        "2k": 0.06,
+        "4k": 0.08
+      },
+      "resolutionField": "target_resolution",
+      "maxSeconds": 120
+    },
+    "inputs": {
+      "video": "video_path"
+    },
+    "defaults": {},
+    "baselineUsd": 0.1
+  },
+  "davinci-magihuman": {
+    "label": "daVinci MagiHuman",
+    "endpoint": "wavespeed-ai/davinci-magihuman/image-to-video",
+    "kind": "video",
+    "adult": false,
+    "tier": "standard",
+    "weights": "open",
+    "price": {
+      "mode": "output",
+      "rates": {
+        "256p": 0.02,
+        "720p": 0.04,
+        "1080p": 0.06
+      }
+    },
+    "inputs": {
+      "image": "source_path",
+      "audio": "audio_path"
+    },
+    "defaults": {},
+    "baselineUsd": 0.1
+  },
+  "yue2": {
+    "label": "YuE2 (song from lyrics)",
+    "endpoint": "wavespeed-ai/yue2-3b/text-to-music",
+    "kind": "audio",
+    "adult": false,
+    "tier": "standard",
+    "weights": "open",
+    "price": {
+      "mode": "flat",
+      "rates": {
+        "default": 0.1
+      }
+    },
+    "inputs": {},
+    "defaults": {
+      "style": "pop, female vocal, bright, upbeat"
+    },
+    "baselineUsd": 0.1,
+    "promptField": "lyrics"
   }
 }
