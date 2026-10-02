@@ -6,6 +6,7 @@ import { createStudioCost, intentRoles, isStudioModel, resolveIntentPick, startI
 import { STUDIO_MODELS } from '../../../lib/render/studio-contract'
 import { resolveCharacterModel } from '../../../hooks/useCloudCreate'
 import { meterState } from '../../../lib/render/credits-meter'
+import { runImageCount } from '../../../lib/render/image-count'
 import { Tooltip } from '../ui/Tooltip'
 import { openExternal } from '../../../api/backend'
 import { CLOUD_BASE } from '../../../api/cloud/config'
@@ -40,6 +41,8 @@ export function CreditsMeter() {
   const cloudStudioOptions = useCreateStore((s) => s.cloudStudioOptions)
   const cloudStudioCredits = useCreateStore((s) => s.cloudStudioCredits)
   const prompt = useCreateStore((s) => s.prompt)
+  const cloudImageCount = useCreateStore((s) => s.cloudImageCount)
+  const references = useCreateStore((s) => s.references)
   if (!quota) return null
   // No character picked yet: there is no run to price (resolveCharacterModel
   // would fall onto the family's first model and show a number for a run
@@ -89,12 +92,18 @@ export function CreditsMeter() {
   // Abschnitt 7, Risiko 1). The Composer fetches the live number once
   // (useStudioPrice) and leaves it here; this chip never asks twice for the
   // same figure.
-  const cost = studioPick
-    ? cloudStudioCredits ?? createStudioCost(studioPick, cloudStudioOptions, Array.from(prompt).length, undefined, startImageCount(studioPick) ?? 1)
+  const extraPhotos = intent === 'edit' || intent === 'animate' ? references.length : 0
+  const unitCost = studioPick
+    ? cloudStudioCredits ?? createStudioCost(studioPick, cloudStudioOptions, Array.from(prompt).length, undefined, startImageCount(studioPick, extraPhotos) ?? 1)
     : runCredits(kind, op, picked, seconds, quota.costs[kind === 'audio' ? 'image' : kind], targetResolution)
+  // Mehrere Bilder: jedes ist ein eigener Auftrag zum vollen Preis, die Summe
+  // ist, was der Lauf bindet. Der Zaehler "noch N Bilder" rechnet je Bild.
+  const imageCount = runImageCount(intent, cloudImageCount, characterUse)
+  const cost = unitCost * imageCount
   const remaining = quota.remaining.credits
   const limit = quota.limits.credits
-  const state = meterState(quota, cost, kind, op)
+  const gate = meterState(quota, cost, kind, op)
+  const state = gate.kind === 'ok' && imageCount > 1 ? meterState(quota, unitCost, kind, op) : gate
   // Every shortfall this chip can show is wallet-fixable now, trainings
   // included since a topup wallet can fund a run past the included count
   // (server migration 0047), so all three send the customer to the credits
@@ -148,7 +157,7 @@ export function CreditsMeter() {
 
   return (
     <Tooltip
-      content={`${remaining} of ${limit} credits left this billing period. This ${noun} uses ${cost}${tail}${videoTail}${trainingTail}.`}
+      content={`${remaining} of ${limit} credits left this billing period. This ${noun} uses ${unitCost}${imageCount > 1 ? ` (${imageCount} images, ${cost} in all)` : ''}${tail}${videoTail}${trainingTail}.`}
     >
       <div className="flex items-center gap-1.5 px-2 h-[var(--control-h-sm)] rounded-md bg-white/[0.04] text-gray-400 t-control">
         <div className="w-12 h-1 rounded-full bg-white/10 overflow-hidden">

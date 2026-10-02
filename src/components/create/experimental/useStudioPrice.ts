@@ -97,10 +97,12 @@ export function useStudioPrice(
   options: Record<string, unknown>,
   prompt: string,
   seconds: number | undefined,
+  /** Fotos der Referenzleiste neben dem Standbild. */
+  extraPhotos = 0,
 ): StudioPrice | null {
   // Die Bildzahl, die der Start wirklich schickt: der Anbieter rechnet sie ein
   // (MiniMax H3 Reference, je Bild). Ohne sie bliebe der Vorab-Preis aus.
-  const images = model ? startImageCount(model) : undefined
+  const images = model ? startImageCount(model, extraPhotos) : undefined
   // Ein Modell, das ein Pflichtbild liest, laesst sich vor dem Hochladen nur bei
   // einem Server bepreisen, der `quote_images` kennt (studio-quote, 02.10.2026).
   // Dass ein Server das kann, sagt er selbst: sein Katalog fuehrt Stufen. Ein

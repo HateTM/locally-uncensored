@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { maxTrainImages } from '../lib/train-image-cap'
-import { MAX_EXTRA_REFERENCES } from '../lib/edit-references'
+import { MAX_STORED_REFERENCES } from '../lib/edit-references'
+import { clampImageCount } from '../lib/render/image-count'
 import type { FixupPrompt } from '../lib/render-fixups'
 import { persist } from 'zustand/middleware'
 import { safeJSONStorage } from '../lib/storage-quota'
@@ -18,6 +19,9 @@ const RUNTIME_ONLY_KEYS: readonly string[] = [
   // unten): auch wenn ein fremder/aelterer Blob ihn doch mitbringt, darf er
   // nie zurueckkommen.
   'cloudStudioCredits',
+  // Die Zahl der Bilder pro Lauf ist Laufzeit: eine Zahl von gestern buchte
+  // sonst unbemerkt mehrfach.
+  'cloudImageCount',
   // Review A kleiner Punkt 1 (studio-r2): the cloud video length selection,
   // own fields since this bugfix. Session-scratch like source/mask, not a
   // preference worth remembering across restarts.
@@ -366,6 +370,8 @@ interface CreateState {
   /** Studio: the last confirmed studio-quote price, shown next to the start
    *  button. Never persisted: a stale price is a lie, see partialize. */
   cloudStudioCredits: number | null
+  /** Runtime-only: images per cloud run, 1 to 4 (Image and Edit). */
+  cloudImageCount: number
   /** Runtime-only: the LOCAL model picked inside a specialized lane (ACE
    *  checkpoint / S2V UNet / Animate-VACE UNet). One slot for all lanes —
    *  resolveLocalOpPick coerces a stale cross-lane pick onto the lane's list
@@ -475,6 +481,7 @@ interface CreateState {
   setMusicLyrics: (l: string) => void
   setMusicHowtoSeen: (v: boolean) => void
   setSource: (img: ImageRef | null) => void
+  setCloudImageCount: (count: number) => void
   addReference: (img: ImageRef) => void
   removeReference: (index: number) => void
   setReferences: (refs: ImageRef[]) => void
@@ -679,6 +686,7 @@ export const useCreateStore = create<CreateState>()(
       cloudOpPicks: {} as Record<string, string>,
       cloudStudioOptions: {} as Record<string, unknown>,
       cloudStudioCredits: null as number | null,
+      cloudImageCount: 1,
       localOpModel: '',
       charactersVersion: 0,
       caps: { rmbg: false, 'inpaint-nodes': false, dwpose: false } as Record<'rmbg' | 'inpaint-nodes' | 'dwpose', boolean>,
@@ -929,6 +937,7 @@ export const useCreateStore = create<CreateState>()(
       setCloudOpModel: (cloudOpModel) => set({ cloudOpModel, cloudStudioOptions: {} }),
       setCloudStudioOptions: (cloudStudioOptions) => set({ cloudStudioOptions }),
       setCloudStudioCredits: (cloudStudioCredits) => set({ cloudStudioCredits }),
+      setCloudImageCount: (count) => set({ cloudImageCount: clampImageCount(count) }),
       // Picking a lane model adopts its architecture defaults (like
       // setVideoModel does) — an inherited 1024×1024 from the Image tab would
       // OOM a 14B S2V run on consumer VRAM.
@@ -951,9 +960,9 @@ export const useCreateStore = create<CreateState>()(
       setMusicLyrics: (musicLyrics) => set({ musicLyrics: musicLyrics.slice(0, 2000) }),
       setMusicHowtoSeen: (musicHowtoSeen) => set({ musicHowtoSeen }),
       setSource: (source) => set({ source, sourceSetAt: source ? Date.now() : 0, ...(source ? {} : { mask: null, references: [] }) }),
-      // Capped at the most any family takes (lib/edit-references); the UI
-      // offers fewer for a model with fewer slots and the builder slices.
-      addReference: (img) => set((s) => ({ references: [...s.references, img].slice(0, MAX_EXTRA_REFERENCES) })),
+      // Capped at the most any model takes, local or cloud (lib/edit-references);
+      // the UI offers fewer for a model with fewer slots and the builder slices.
+      addReference: (img) => set((s) => ({ references: [...s.references, img].slice(0, MAX_STORED_REFERENCES) })),
       removeReference: (index) => set((s) => ({ references: s.references.filter((_, i) => i !== index) })),
       setReferences: (references) => set({ references }),
       setMask: (mask) => set({ mask }),

@@ -11,7 +11,7 @@
 // deckt beide Oberflaechen ab.
 
 import type { CreateIntent } from '../../stores/createStore'
-import { STUDIO_MODELS, studioBaseCredits, studioPreviewCredits } from './studio-contract'
+import { STUDIO_MODELS, studioBaseCredits, studioPreviewCredits, studioSchema } from './studio-contract'
 import { presetModels, requiredRoleInputs, type PresetModel, type StepRole } from './preset-models'
 import { defaultCloudModel, modelForOp, opPickerModels } from '../../stores/cloudCatalogStore'
 import { intentToJob } from './cloud-jobs'
@@ -155,14 +155,48 @@ export function createStudioCost(
   return studioPreviewCredits(model, options, seconds, imageCount, promptLength) ?? studioBaseCredits(model)
 }
 
+/** Mehr als so viele eigene Fotos nimmt die Oberflaeche in einem Lauf nicht an,
+ *  auch wenn ein Endpunkt bis zu zehn liest: darueber hilft mehr Material
+ *  selten, und jedes Foto ist ein Upload und beim Anbieter oft ein Aufpreis. */
+export const MAX_STUDIO_PHOTOS = 5
+
+/** Wie viele eigene Fotos (das grosse Standbild eingerechnet) dieses Modell in
+ *  einem Lauf liest. 0, wo es keine Bilderliste hat. Die Grenze ist die des
+ *  Anbieter-Schemas (maxItems), gedeckelt auf MAX_STUDIO_PHOTOS. */
+export function studioPhotoCap(model: string): number {
+  const m = STUDIO_MODELS[model]
+  const field = m && Object.entries(m.inputs).find(([, key]) => key === 'image_paths')?.[0]
+  if (!field) return 0
+  return Math.min(studioSchema(model).properties?.[field]?.maxItems ?? 1, MAX_STUDIO_PHOTOS)
+}
+
+/** Wie viele WEITERE Fotos neben dem Standbild die Referenzleiste fuer dieses
+ *  Modell anbietet. */
+export function studioExtraPhotoSlots(model: string): number {
+  return Math.max(0, studioPhotoCap(model) - 1)
+}
+
+/** Das Studio-Modell, das Bearbeiten oder Animate gerade fahren wuerde, wenn es
+ *  mehrere Fotos lesen kann. Dieselbe Aufloesung wie der Start (studioPickFor),
+ *  damit die Leiste nie ein Modell meint, das der Start dann umbiegt. */
+export function referenceModel(
+  intent: StudioIntent,
+  s: { cloudImageModel: string; cloudVideoModel: string; cloudOpModel: string },
+): string | undefined {
+  if (intent !== 'edit' && intent !== 'animate') return undefined
+  const model = studioPickFor(intent, s)
+  return model && studioPhotoCap(model) > 1 ? model : undefined
+}
+
 /** Wie viele Bilder der Start eines Studio-Modells im Create-Tab schickt: das
- *  eine Standbild der Oberflaeche, als Einzelbild oder als Liste mit einem
- *  Eintrag (useCloudCreate). `undefined`, wo ein Modell mehr als Bilder liest
- *  (Ton, Video) oder keines. Dann gibt es keinen Vorab-Preis ohne Datei. */
-export function startImageCount(model: string): number | undefined {
+ *  Standbild der Oberflaeche plus die Fotos der Referenzleiste, soweit das Modell
+ *  sie liest (Einzelbild oder Liste). `extra` ist die Zahl der Leistenfotos.
+ *  `undefined`, wo ein Modell mehr als Bilder liest (Ton, Video) oder keines.
+ *  Dann gibt es keinen Vorab-Preis ohne Datei. */
+export function startImageCount(model: string, extra = 0): number | undefined {
   const reads = Object.values(STUDIO_MODELS[model]?.inputs ?? {})
   if (!reads.length || reads.some((k) => k !== 'source_path' && k !== 'image_paths' && k !== 'last_image_path')) return undefined
-  return 1
+  return 1 + Math.min(Math.max(0, Math.floor(extra)), studioExtraPhotoSlots(model))
 }
 
 /** Haengt der Preis dieses Modells an der Laenge einer hochgeladenen Datei?

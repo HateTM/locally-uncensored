@@ -22,6 +22,7 @@ import {
   CloudJobError,
   QuoteChangedError,
   type CloudJobParams,
+  type CloudJob,
 } from '../api/cloud/jobs'
 import {
   defaultCloudModel,
@@ -37,7 +38,8 @@ import { checkPromptSafety, blockMessageFor, type SafetyVerdict } from '../lib/r
 import { contentPolicySnapshot, loadContentPolicy } from './useContentPolicy'
 import { signalCreditsExhausted } from '../lib/credits-exhausted'
 import { resolveRunSeed } from '../lib/run-seed'
-import { STANDARD_UPSCALE, intentRoles, intentRequiredInputs, isStudioModel, resolveIntentPick } from '../lib/render/create-studio'
+import { STANDARD_UPSCALE, intentRoles, intentRequiredInputs, isStudioModel, resolveIntentPick, studioExtraPhotoSlots } from '../lib/render/create-studio'
+import { bumpSeed, runImageCount } from '../lib/render/image-count'
 import { STUDIO_MODELS, studioFields } from '../lib/render/studio-contract'
 import { modelLabel } from '../lib/render/preset-models'
 import { bookedVideoSeconds } from '../lib/render/video-duration'
@@ -199,6 +201,9 @@ export const RENDER_CANNOT_STOP =
   "This render already started and can't be stopped. It will finish, is charged, and lands in your gallery."
 
 let activeJobId: string | null = null
+// Alle Auftraege eines Laufs mit mehreren Bildern; der erste steht auch in
+// activeJobId. Cancel bricht jeden einzelnen ab.
+let activeJobIds: string[] = []
 let activeAbort: AbortController | null = null
 
 /** True while a cloud run (generate or enhance) is in flight. CreateContext
@@ -268,6 +273,8 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
       ? (picked === STANDARD_UPSCALE ? (s.cloudImageModel || defaultCloudModel('image')?.id || model) : model)
       : model !== picked && model === utilityOpModel(kind, op, picked) ? picked : model
 
+    // Bilder in diesem Lauf: nur Bild und Bearbeiten kennen mehr als eins.
+    const count = runImageCount(intent, s.cloudImageCount, characterUse)
     s.setError(null)
     if (!cloudMediaLive()) {
       // Server MEDIA_LIVE switch is off — the GPU fleet isn't up, a submit
@@ -467,7 +474,19 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
         // einzigen Eintrag. Liest es kein source_path, geht das Bild nur dorthin.
         if (studioModel) {
           const reads = Object.values(STUDIO_MODELS[studioModel].inputs)
-          if (reads.includes('image_paths')) params.image_paths = [params.source_path]
+          if (reads.includes('image_paths')) {
+            // Das Standbild ist das erste Foto, die Leiste liefert die weiteren
+            // bis zur Grenze dieses Modells. Jedes geht in die eigene Ablage.
+            const extras = intent === 'edit' || intent === 'animate'
+              ? s.references.slice(0, studioExtraPhotoSlots(studioModel)) : []
+            const more: string[] = []
+            for (const [i, ref] of extras.entries()) {
+              if (ac.signal.aborted) return
+              s.setProgress(6, `Uploading photos… ${i + 2}/${extras.length + 1}`)
+              more.push(await uploadInput(dataUrlToBlob(ref.url), 'source'))
+            }
+            params.image_paths = [params.source_path, ...more]
+          }
           if (!reads.includes('source_path')) delete params.source_path
         }
       }
@@ -616,16 +635,24 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
       }
 
       s.setProgress(10, 'Submitting to the render queue…')
-      const { id } = await submitCloudJob({ kind, model, prompt: s.prompt, params })
+      // Mehrere Bilder: der Server bucht jedes als eigenen Auftrag und nennt alle.
+      if (count > 1) params.count = count
+      const submitted = await submitCloudJob({ kind, model, prompt: s.prompt, params })
+      const id = submitted.id
+      // Ein Server, der die Anzahl nicht kennt, bucht genau einen Auftrag und
+      // nennt keine Liste: dann laeuft ein Bild, und der Kunde erfaehrt es.
+      const ids = submitted.jobs?.map((j) => j.id) ?? [id]
+      const oneOnly = count > 1 && !submitted.jobs
       // A Cancel during the submit round-trip saw activeJobId still null, so
       // nothing was cancelled server-side. Now that the id exists, cancel the
       // just-queued job so its claimed credits refund instead of orphaning a
       // render we're no longer watching.
       if (ac.signal.aborted) {
-        cancelJob(id).then(() => onQuotaChange?.()).catch(() => {})
+        for (const jid of ids) cancelJob(jid).then(() => onQuotaChange?.()).catch(() => {})
         return
       }
       activeJobId = id
+      activeJobIds = ids
       onQuotaChange?.()
       if (s.prompt.trim()) s.addToPromptHistory(s.prompt.trim())
 
@@ -634,8 +661,76 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
       // and can queue behind other jobs on the shared fleet — give them a
       // much longer client deadline than images.
       const verb = opProgressVerb(op)
+      const timeoutMs = kind === 'video' || op === 'lora-train' ? 45 * 60_000 : 15 * 60_000
+      const addResult = (job: CloudJob, index = 0) => useCreateStore.getState().addToGallery({
+        ...galleryItemFromJob(job),
+        model: galleryModel,
+        prompt: OP_GALLERY_LABEL[op] ?? s.prompt,
+        label,
+        negativePrompt: s.negativePrompt,
+        // Jeder Auftrag eines Laufs rechnet mit Keim + Index (der Server bumpt
+        // den klassischen Keim; ein Studio-Lauf schickt keinen).
+        seed: studioModel ? runSeed : bumpSeed(runSeed, index),
+        steps: s.steps,
+        cfgScale: s.cfgScale,
+        sampler: s.sampler,
+        scheduler: s.scheduler,
+        width: s.width,
+        height: s.height,
+        intent,
+      })
+
+      if (ids.length > 1) {
+        // Jedes Bild landet in der Galerie, sobald es fertig ist. Ein Auftrag,
+        // der scheitert, stoppt die anderen nicht und gibt nur seinen Preis zurueck.
+        if (submitted.stopped === 'credits_exhausted') signalCreditsExhausted('credits')
+        const finished = new Set<string>()
+        const outcomes = await Promise.allSettled(ids.map(async (jid, index) => {
+          const job = await pollJob(jid, {
+            timeoutMs,
+            signal: ac.signal,
+            onTick: (j) => {
+              const st = useCreateStore.getState()
+              const elapsed = Math.round((Date.now() - startedAt) / 1000)
+              const base = 20 + Math.round((70 * finished.size) / ids.length)
+              if (j.status === 'running') st.setProgressPhase('sampling')
+              st.setProgress(Math.min(90, Math.max(base, 20 + elapsed)), `${verb} ${finished.size} of ${ids.length} done, ${elapsed}s`)
+            },
+          })
+          finished.add(jid)
+          if (job.status === 'succeeded' && job.result_url) addResult(job, index)
+          return job
+        }))
+        const jobs = outcomes.flatMap((o) => (o.status === 'fulfilled' ? [o.value] : []))
+        const landed = jobs.filter((j) => j.status === 'succeeded' && j.result_url).length
+        const failed = jobs.filter((j) => j.status === 'failed')
+        const lost = outcomes.flatMap((o) => (o.status === 'rejected' ? [o.reason] : []))
+          .filter((e) => !(e instanceof CloudJobError && e.message === 'polling aborted'))
+        const st = useCreateStore.getState()
+        if (landed > 0) {
+          st.setProgressPhase('complete')
+          st.setProgress(100, 'Complete!')
+        }
+        const notes: string[] = []
+        if (failed.length) notes.push(`${failed.length} of ${ids.length} images failed${failed[0].error ? `: ${failed[0].error}` : ''}. Failed images are refunded.`)
+        if (lost.some((e) => e instanceof CloudJobError && e.message === 'render timed out')) {
+          notes.push('Still rendering, some images are taking longer than expected. When they complete you can view them in your account at lu-labs.ai.')
+        } else if (lost.length) {
+          notes.push(lost[0] instanceof Error ? lost[0].message : String(lost[0]))
+        }
+        if (submitted.stopped) {
+          notes.push(
+            `Started ${ids.length} of ${submitted.requested ?? count} images. ` +
+            (submitted.stopped === 'credits_exhausted' ? 'There were not enough credits for the rest.' : 'The rest could not be prepared. Nothing was charged for them.'),
+          )
+        }
+        if (notes.length) st.setError(notes.join(' '))
+        onQuotaChange?.() // Abbruch und Fehlschlag geben die Einheiten zurueck
+        return
+      }
+
       const job = await pollJob(id, {
-        timeoutMs: kind === 'video' || op === 'lora-train' ? 45 * 60_000 : 15 * 60_000,
+        timeoutMs,
         signal: ac.signal,
         onTick: (j) => {
           const st = useCreateStore.getState()
@@ -662,21 +757,8 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
       } else if (job.status === 'succeeded' && job.result_url) {
         st.setProgressPhase('complete')
         st.setProgress(100, 'Complete!')
-        st.addToGallery({
-          ...galleryItemFromJob(job),
-          model: galleryModel,
-          prompt: OP_GALLERY_LABEL[op] ?? s.prompt,
-          label,
-          negativePrompt: s.negativePrompt,
-          seed: runSeed,
-          steps: s.steps,
-          cfgScale: s.cfgScale,
-          sampler: s.sampler,
-          scheduler: s.scheduler,
-          width: s.width,
-          height: s.height,
-          intent,
-        })
+        addResult(job)
+        if (oneOnly) st.setError('This server renders one image per run, so one image was made and charged.')
       } else if (job.status === 'canceled') {
         st.setError(null)
       } else {
@@ -720,6 +802,7 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
       onQuotaChange?.()
     } finally {
       activeJobId = null
+      activeJobIds = []
       activeAbort = null
       const st = useCreateStore.getState()
       st.setIsGenerating(false)
@@ -728,26 +811,26 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
   }, [onQuotaChange])
 
   const cancel = useCallback(async () => {
-    const id = activeJobId
-    if (!id) {
+    const ids = activeJobIds.length ? activeJobIds : activeJobId ? [activeJobId] : []
+    if (!ids.length) {
       activeAbort?.abort()
       return
     }
-    try {
-      await cancelJob(id)
-      activeAbort?.abort()
-      onQuotaChange?.() // queued-cancel refunds
-    } catch (err) {
-      // 409: a GPU already took the job (bug hunt 01.10.2026, K7). The cancel
-      // used to stop the polling and say nothing, so it looked cancelled while
-      // it finished and kept its credits, and the desktop has no job list to
-      // bring it back later. Say so, and keep polling so the result lands.
-      if (err instanceof CloudJobError && err.status === 409) {
-        useCreateStore.getState().setError(RENDER_CANNOT_STOP)
-        return
-      }
-      activeAbort?.abort()
+    // Bei mehreren Bildern wird jeder Auftrag einzeln abgebrochen: die noch
+    // wartenden geben ihren Preis zurueck, ein schon laufender nicht.
+    const results = await Promise.allSettled(ids.map((id) => cancelJob(id)))
+    // 409: a GPU already took the job (bug hunt 01.10.2026, K7). The cancel
+    // used to stop the polling and say nothing, so it looked cancelled while
+    // it finished and kept its credits, and the desktop has no job list to
+    // bring it back later. Say so, and keep polling so the result lands.
+    const running = results.some((r) => r.status === 'rejected' && r.reason instanceof CloudJobError && r.reason.status === 409)
+    if (running) {
+      useCreateStore.getState().setError(RENDER_CANNOT_STOP)
+      if (results.some((r) => r.status === 'fulfilled')) onQuotaChange?.() // the queued ones refunded
+      return
     }
+    activeAbort?.abort()
+    if (results.some((r) => r.status === 'fulfilled')) onQuotaChange?.() // queued-cancel refunds
   }, [onQuotaChange])
 
   // Talking-character voice maker (qwen3-tts speak/design): a small tts run

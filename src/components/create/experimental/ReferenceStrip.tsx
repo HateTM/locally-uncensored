@@ -3,12 +3,16 @@
 // this photo into that scene" could not be asked. Layout picked by David on
 // 2026-10-01: the source stays large, the further images sit as small tiles
 // below it with a "+ Reference" tile, and the prompt names them image 2,
-// image 3. Shown only for a local model that takes more than one image.
+// image 3. Shown for a local model that takes more than one image, and (02.10.2026,
+// figure from photos without training) in the cloud for the Studio models that
+// read a list of images: the multi-image editors and the reference-to-video
+// models. The photos go to the user's own storage at the start, never as a URL.
 import { useRef, useState } from 'react'
 import { ImagePlus, Loader2, X } from 'lucide-react'
 import { useCreateStore } from '../../../stores/createStore'
 import { classifyModel } from '../../../api/comfyui'
 import { extraReferenceSlots } from '../../../lib/edit-references'
+import { referenceModel, studioExtraPhotoSlots } from '../../../lib/render/create-studio'
 import { loadImageRef } from './loadImage'
 import { GALLERY_DRAG_TYPE, fetchGalleryItemBlob } from './galleryUrl'
 import { cn } from '../ui/cn'
@@ -25,14 +29,21 @@ export function ReferenceStrip() {
   const intent = useCreateStore((s) => s.intent())
   const imageModel = useCreateStore((s) => s.imageModel)
   const listedType = useCreateStore((s) => s.imageModelList.find((m) => m.name === s.imageModel)?.type)
+  const cloudImageModel = useCreateStore((s) => s.cloudImageModel)
+  const cloudVideoModel = useCreateStore((s) => s.cloudVideoModel)
+  const cloudOpModel = useCreateStore((s) => s.cloudOpModel)
   const inputRef = useRef<HTMLInputElement>(null)
   const [loading, setLoading] = useState(false)
   const [drag, setDrag] = useState(false)
 
   // The type from the fetched list carries the header sniff; the name is the
   // fallback, exactly as useCreate decides the pipeline.
-  const slots = extraReferenceSlots(listedType ?? classifyModel(imageModel), imageModel)
-  if (intent !== 'edit' || backend !== 'local' || slots === 0) return null
+  const cloud = backend === 'cloud'
+  const cloudPick = cloud ? referenceModel(intent, { cloudImageModel, cloudVideoModel, cloudOpModel }) : undefined
+  const slots = cloud
+    ? (cloudPick ? studioExtraPhotoSlots(cloudPick) : 0)
+    : intent === 'edit' ? extraReferenceSlots(listedType ?? classifyModel(imageModel), imageModel) : 0
+  if (slots === 0) return null
   const shown = references.slice(0, slots)
   const canAdd = shown.length < slots
 
@@ -48,12 +59,19 @@ export function ReferenceStrip() {
     }
   }
 
-  const addFile = (file: File) => {
-    if (!file.type.startsWith('image/')) {
-      setError('That file type is not supported. Use PNG, JPG or WebP.')
-      return
+  // Mehrere Dateien auf einmal, soweit Platz ist (die Cloud-Modelle lesen bis zu
+  // vier weitere Fotos). Jede Datei geht durch dieselbe Pruefung wie eine einzelne.
+  const addFiles = async (files: File[]) => {
+    let room = slots - shown.length
+    for (const file of files) {
+      if (room <= 0) break
+      if (!file.type.startsWith('image/')) {
+        setError('That file type is not supported. Use PNG, JPG or WebP.')
+        continue
+      }
+      await add(async () => file)
+      room--
     }
-    void add(async () => file)
   }
 
   return (
@@ -66,8 +84,7 @@ export function ReferenceStrip() {
           e.preventDefault()
           setDrag(false)
           if (!canAdd || loading) return
-          const f = e.dataTransfer.files[0]
-          if (f) { addFile(f); return }
+          if (e.dataTransfer.files.length) { void addFiles(Array.from(e.dataTransfer.files)); return }
           const item = gallery.find((g) => g.id === e.dataTransfer.getData(GALLERY_DRAG_TYPE))
           if (item) {
             void add(async () => {
@@ -81,15 +98,15 @@ export function ReferenceStrip() {
           <div key={`${ref.url.slice(-24)}-${i}`} className={cn(TILE, 'relative')}>
             <img
               src={ref.url}
-              alt={`image ${i + 2}`}
+              alt={`${cloud ? 'photo' : 'image'} ${i + 2}`}
               className={cn(TILE, 'object-cover border border-white/[0.06]')}
             />
             <span className="absolute bottom-1 left-1 t-micro text-gray-200 bg-black/60 px-1 rounded">{i + 2}</span>
             <button
               onClick={() => removeReference(i)}
               className="absolute top-1 right-1 w-5 h-5 flex items-center justify-center rounded-md bg-black/60 text-gray-300 hover:text-white"
-              title={`Remove image ${i + 2}`}
-              aria-label={`Remove image ${i + 2}`}
+              title={`Remove ${cloud ? 'photo' : 'image'} ${i + 2}`}
+              aria-label={`Remove ${cloud ? 'photo' : 'image'} ${i + 2}`}
             >
               <X size={11} />
             </button>
@@ -100,27 +117,30 @@ export function ReferenceStrip() {
             onClick={() => inputRef.current?.click()}
             disabled={loading}
             className={cn(TILE, 'border-2 border-dashed border-white/10 hover:border-white/25 text-gray-500 hover:text-gray-300 flex flex-col items-center justify-center gap-0.5 transition-colors')}
-            title="Add another image the edit can use"
+            title={cloud ? 'Add another photo of your character' : 'Add another image the edit can use'}
           >
             {loading ? <Loader2 size={16} className="animate-spin" /> : <ImagePlus size={16} />}
-            <span className="t-micro">Reference</span>
+            <span className="t-micro">{cloud ? 'Photo' : 'Reference'}</span>
           </button>
         )}
       </div>
       <p className="t-label text-gray-600 text-center max-w-sm">
-        {shown.length === 0
-          ? `Add up to ${slots} more images, for example a person or an outfit to bring into this one.`
-          : `Name them in the prompt as ${shown.map((_, i) => `image ${i + 2}`).join(', ')}.`}
+        {cloud
+          ? `Add up to ${slots + 1} photos of your character.${intent === 'edit' && shown.length > 0 ? ` Name them in the prompt as ${shown.map((_, i) => `image ${i + 2}`).join(', ')}.` : ''}`
+          : shown.length === 0
+            ? `Add up to ${slots} more images, for example a person or an outfit to bring into this one.`
+            : `Name them in the prompt as ${shown.map((_, i) => `image ${i + 2}`).join(', ')}.`}
       </p>
       <input
         ref={inputRef}
         type="file"
         accept="image/*"
+        multiple
         className="hidden"
         onChange={(e) => {
-          const f = e.target.files?.[0]
+          const files = Array.from(e.target.files ?? [])
           e.target.value = ''
-          if (f) addFile(f)
+          if (files.length) void addFiles(files)
         }}
       />
     </div>

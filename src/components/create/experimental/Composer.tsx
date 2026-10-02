@@ -6,6 +6,7 @@ import { classifyModel } from '../../../api/comfyui'
 import { useCreateExp } from './CreateContext'
 import { intentToJob } from '../../../lib/render/cloud-jobs'
 import { meterState } from '../../../lib/render/credits-meter'
+import { runImageCount } from '../../../lib/render/image-count'
 import {
   useCloudCatalogStore,
   cloudModelById,
@@ -193,7 +194,14 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
   const inputSeconds =
     (measured && measured.url === mediaUrl ? measured.seconds : undefined) ??
     (measuredVoice && measuredVoice.jobId === voiceJobId ? measuredVoice.seconds : undefined)
-  const studioPrice = useStudioPrice(studioPick, cloudStudioOptions, prompt, runSeconds ?? inputSeconds)
+  // Fotos der Referenzleiste und Bilder pro Lauf gehen in den Preis ein: die
+  // Fotos in den Preis EINES Bildes (der Anbieter rechnet sie je Bild), die
+  // Anzahl als Faktor darueber.
+  const references = useCreateStore((s) => s.references)
+  const cloudImageCount = useCreateStore((s) => s.cloudImageCount)
+  const extraPhotos = intent === 'edit' || intent === 'animate' ? references.length : 0
+  const imageCount = backend === 'cloud' ? runImageCount(intent, cloudImageCount, characterUse) : 1
+  const studioPrice = useStudioPrice(studioPick, cloudStudioOptions, prompt, runSeconds ?? inputSeconds, extraPhotos)
   const setCloudStudioCredits = useCreateStore((s) => s.setCloudStudioCredits)
   useEffect(() => {
     setCloudStudioCredits(studioPrice?.credits ?? null)
@@ -212,7 +220,7 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
       !(studioPick && studioPrice?.error) &&
       meterState(
         quota,
-        studioPick ? (studioPrice?.credits ?? costFallback) : runCredits(intentKind, intentOp, pickedModel, runSeconds, costFallback, targetResolution),
+        imageCount * (studioPick ? (studioPrice?.credits ?? costFallback) : runCredits(intentKind, intentOp, pickedModel, runSeconds, costFallback, targetResolution)),
         runKind,
         intentOp,
       ).kind === 'ok')

@@ -10,6 +10,11 @@ export function isQwenImageEditModel(name: string): boolean {
 /** The most extra references any family takes in LU (Qwen-Image 2.1). */
 export const MAX_EXTRA_REFERENCES = 3
 
+/** The most further photos the store keeps for a cloud run: the cap of five
+ *  photos (create-studio MAX_STUDIO_PHOTOS) minus the large source image. Each
+ *  model shows and sends only as many as it reads. */
+export const MAX_STORED_REFERENCES = 4
+
 /**
  * How many reference images an Edit may carry BESIDES the source, for one
  * local image model. 0 hides the reference strip.

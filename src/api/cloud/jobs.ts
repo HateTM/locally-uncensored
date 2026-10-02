@@ -13,6 +13,11 @@ export interface CloudJobParams {
   /** Idempotency key (a UUID minted client-side): a retried submit after a
    *  dropped response replays the same job instead of booking twice. */
   client_request_id?: string
+  /** Bilder in diesem Lauf, 1 bis 4 (nur Bild und Bearbeiten). Fehlt das Feld,
+   *  bucht der Server genau einen Auftrag, wie vor dem 02.10.2026. Ein Server
+   *  ohne die Anzahl bucht ebenfalls einen, deshalb schickt der Start sie nur,
+   *  wenn er mehr als ein Bild will, und prueft die Antwort (`jobs`). */
+  count?: number
   /** The picked step's option values, validated client-side against the same
    *  provider schema studio-contract.ts reads (createStore.cloudStudioOptions). */
   studio_options?: Record<string, unknown>
@@ -132,6 +137,13 @@ export interface CloudJobSubmitResult {
    *  `cost` is guaranteed. */
   quota: { cost: number; used?: number; limit?: number }
   replayed?: boolean
+  /** Nur bei einem Lauf mit mehreren Bildern: alle gebuchten Auftraege. Fehlt
+   *  das Feld trotz count > 1, kennt der Server die Anzahl nicht und hat genau
+   *  einen Auftrag gebucht. */
+  jobs?: { id: string; status: string; cost: number }[]
+  requested?: number
+  /** Gesetzt, wenn weniger liefen als gewuenscht. Gebucht ist nur, was in `jobs` steht. */
+  stopped?: 'credits_exhausted' | 'error'
 }
 
 /** The server re-quoted at submit time (prepareStudio()) and its own number
