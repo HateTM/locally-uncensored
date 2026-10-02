@@ -197,7 +197,11 @@ function vorWieLangem(ms: number, jetzt: number): string {
 /** Die Zeilen fuer das Panel. Sichtbarer Text ist Englisch. */
 export function nutzungZeilen(u: LocalApiNutzung, jetzt: number): Array<{ feld: string; wert: string }> {
   return [
-    { feld: 'Requests', wert: u.failed > 0 ? `${zahl(u.requests)} (${zahl(u.failed)} failed)` : zahl(u.requests) },
+    // Gezaehlt wird, was ein Modell erreicht (chat, completions, embeddings),
+    // nicht das Abfragen der Modellliste, das viele Werkzeuge im Sekundentakt
+    // tun. Die 3.0.4-Gegenprobe (02.10.2026) rief /v1/models auf und las
+    // "Requests 0" als Fehler; der Name sagt jetzt, was gezaehlt wird.
+    { feld: 'Model requests', wert: u.failed > 0 ? `${zahl(u.requests)} (${zahl(u.failed)} failed)` : zahl(u.requests) },
     { feld: 'Running now', wert: zahl(u.active) },
     { feld: 'Tokens in', wert: zahl(u.promptTokens) },
     { feld: 'Tokens out', wert: zahl(u.completionTokens) },

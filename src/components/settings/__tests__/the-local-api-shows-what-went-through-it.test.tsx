@@ -37,6 +37,8 @@ describe('the Local API panel', () => {
     render(<LocalApiSettings />)
     await screen.findByTestId('local-api-usage')
     expect(screen.getByText('1,234 (2 failed)')).toBeTruthy()
+    // Says what it counts: calls that reach a model, not the model list.
+    expect(screen.getByText('Model requests')).toBeTruthy()
     expect(screen.getByText('48,210')).toBeTruthy()
     expect(screen.getByText('9,034')).toBeTruthy()
     expect(screen.getByText('ollama/qwen3:8b, just now')).toBeTruthy()

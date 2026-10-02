@@ -8,6 +8,7 @@ import { displayModelName } from '../../api/providers/model-name'
 import { splitForMiddleEllipsis } from '../../lib/model-label'
 import { isBuiltinEngineEntry } from '../../lib/lmstudio-match'
 import type { AIModel } from '../../types/models'
+import { fileFormat } from '../../lib/model-file-format'
 
 interface Props {
   model: AIModel
@@ -146,8 +147,11 @@ export function ModelCard({ model, isActive, onSelect, onDelete, onInfo, infoTit
         {model.type === 'text' && 'details' in model && model.details?.quantization_level && (
           <><span className="opacity-40">·</span><span>{model.details.quantization_level}</span></>
         )}
-        {(model.type === 'image' || model.type === 'video') && (
-          <><span className="opacity-40">·</span><span>{model.format || 'safetensors'}</span></>
+        {/* The file's own ending when nothing set a format. The fixed fallback
+            labelled an AnimateDiff .ckpt "safetensors" (3.0.4 Gegenprobe,
+            02.10.2026). */}
+        {(model.type === 'image' || model.type === 'video') && fileFormat(model) && (
+          <><span className="opacity-40">·</span><span>{fileFormat(model)}</span></>
         )}
       </span>
 

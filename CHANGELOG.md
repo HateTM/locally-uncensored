@@ -62,6 +62,11 @@ cloud catalogue. It also fixes the bugs reported on GitHub and Discord since
 - **Turbo checkpoints start at a few steps.** SD-Turbo, SDXL-Turbo,
   Lightning, Hyper-SD and LCM checkpoints start at 4 steps and CFG 1 instead
   of the family's 25 steps.
+- **Installed models show their real file format.** A .ckpt such as the
+  AnimateDiff motion module was labelled "safetensors"; the card now reads the
+  file ending.
+- **Local API counts say what they count.** "Requests" is now "Model
+  requests", since listing the models is not counted.
 - **No download offer while ComfyUI is starting.** Right after launch the
   Create stage could offer the 6.5 GB starter download while ComfyUI was still
   coming up and the models were already on disk. It now waits.
