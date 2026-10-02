@@ -144,7 +144,7 @@ export const RELEASE_NOTES: ReleaseNote[] = [
       },
       {
         title: 'MiniMax H3 runs as a video model with sound.',
-        detail: 'A MiniMax H3 file showed up as an image model. It now sits in the video list, also under a CivitAI name, and renders picture and sound together, from a prompt or from a first frame. The Model Manager offers it as one download.',
+        detail: 'A MiniMax H3 file showed up as an image model. It now sits in the video list, also under a CivitAI name, and renders picture and sound together, from a prompt or from a first frame. The Model Manager offers it as one download, and the 8-step turbo LoRA runs at 8 steps.',
       },
       {
         title: 'The setup offers models without refusals.',

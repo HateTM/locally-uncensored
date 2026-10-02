@@ -1874,7 +1874,13 @@ async function buildMiniMaxH3Workflow(params: VideoParams, seed: number, allNode
   const noiseId = String(n++)
   const sampleId = String(n++)
   workflow[guiderId] = { class_type: 'BasicGuider', inputs: { model: [modelSrc, 0], conditioning: [encodeId, 0] } }
-  workflow[schedulerId] = { class_type: 'BasicScheduler', inputs: { model: [modelSrc, 0], scheduler: params.scheduler || 'simple', steps: params.steps, denoise: 1 } }
+  // The H3 turbo LoRA says its step count in its name (minimax_h3_fl2v_turbo_
+  // 8step_...), and the official template runs it at exactly that (Discord
+  // 2026-10-02, checkedlemon788's ComfyUI screenshot: turbo_steps 8). The
+  // slider's 20 or more would only cost time on a 24 GB model.
+  const turbo = loras.map((l) => /turbo\D*?(\d+)\s*_?steps?/i.exec(l)).find((m) => m)
+  const steps = turbo ? Number(turbo[1]) : params.steps
+  workflow[schedulerId] = { class_type: 'BasicScheduler', inputs: { model: [modelSrc, 0], scheduler: params.scheduler || 'simple', steps, denoise: 1 } }
   workflow[samplerSelectId] = { class_type: 'KSamplerSelect', inputs: { sampler_name: params.sampler || 'res_multistep' } }
   workflow[noiseId] = { class_type: 'RandomNoise', inputs: { noise_seed: seed } }
   workflow[sampleId] = {

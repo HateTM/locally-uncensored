@@ -22,7 +22,8 @@ cloud catalogue. It also fixes the bugs reported on GitHub and Discord since
   as an image model. It now sits in the video list, also under a CivitAI name,
   and renders picture and sound together, from a prompt or from a first frame.
   The Model Manager offers it as one download with its text encoder and both
-  decoders.
+  decoders. With the 8-step turbo LoRA in the stack it runs 8 steps, as the
+  official template does.
 - **A download speed limit.** Settings, Model Storage takes a limit in MB/s
   for the model files LU downloads itself, shared by all downloads at once.
   0 means no limit. Ollama pulls and installs are not limited.

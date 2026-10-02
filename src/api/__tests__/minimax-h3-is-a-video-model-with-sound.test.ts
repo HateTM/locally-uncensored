@@ -137,6 +137,15 @@ describe('the graph follows the official templates', () => {
     expect(nodeOf(wf, 'BasicScheduler')![1].inputs.model).toEqual([loraId, 0])
   })
 
+  // Discord 2026-10-02 (checkedlemon788): the turbo LoRA runs at the step
+  // count in its name, the way the official template runs it.
+  it('the 8-step turbo LoRA runs 8 steps, without it the slider counts', async () => {
+    const turbo = await buildDynamicWorkflow(run(FL2VA, { lora: 'minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors' }), 'minimaxh3')
+    expect(nodeOf(turbo, 'BasicScheduler')![1].inputs.steps).toBe(8)
+    const plain = await buildDynamicWorkflow(run(FL2VA, { lora: 'some_style_lora.safetensors' }), 'minimaxh3')
+    expect(nodeOf(plain, 'BasicScheduler')![1].inputs.steps).toBe(20)
+  })
+
   it('frame counts snap up to the 17k+5 grid', () => {
     expect(snapMiniMaxH3Length(124)).toBe(124)
     expect(snapMiniMaxH3Length(120)).toBe(124)
