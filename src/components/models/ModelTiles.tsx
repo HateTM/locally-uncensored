@@ -534,6 +534,8 @@ export function ModelTile({ variants, vramGb, isInstalled, dlState, onDownload, 
 
 export interface BundleTileProps {
   bundle: ModelBundle
+  /** Which Create lane a non-video bundle belongs to (Music, Lip sync, Motion). */
+  lane?: string
   vramGb: number | null
   complete: boolean
   downloading: boolean
@@ -544,7 +546,7 @@ export interface BundleTileProps {
   onOpenUrl: (url: string) => void
 }
 
-export function BundleTile({ bundle, vramGb, complete, downloading, hasErrors, onInstall, onRetry, onClear, onOpenUrl }: BundleTileProps) {
+export function BundleTile({ bundle, lane, vramGb, complete, downloading, hasErrors, onInstall, onRetry, onClear, onOpenUrl }: BundleTileProps) {
   // No COMING SOON overlay any more (2026-07-24). It was driven by
   // `!bundle.verified && !complete`, a hand-set boolean, and it dimmed the tile
   // behind a full-cover "COMING SOON" pill while that tile's own working
@@ -572,6 +574,9 @@ export function BundleTile({ bundle, vramGb, complete, downloading, hasErrors, o
           <div className="flex items-center gap-1.5 min-w-0">
             <h3 className="text-[0.78rem] font-semibold text-gray-900 dark:text-white truncate">{bundle.name}</h3>
             {bundle.hot && !complete && <HotMark />}
+            {lane && (
+              <span data-bundle-lane={lane} className="shrink-0 rounded px-1.5 py-0.5 t-micro font-semibold bg-gray-200 text-gray-600 dark:bg-white/10 dark:text-gray-300">{lane}</span>
+            )}
             {tierMarks(bundle).map((t) => (
               <span key={t.label} className={`shrink-0 rounded px-1.5 py-0.5 t-micro font-semibold ${t.color}`}>{t.label}</span>
             ))}

@@ -25,8 +25,8 @@ const mainFile = (b: ModelBundle) =>
 const tierOfFile = (name: string) => localTier({ name, type: classifyModel(name) })
 
 describe('jedes lokale Bundle traegt eine Stufe', () => {
-  it('alle 37 Bundles haben best, standard oder older', () => {
-    expect(ALL.length).toBe(37)
+  it('alle 38 Bundles haben best, standard oder older', () => {
+    expect(ALL.length).toBe(38)
     for (const b of ALL) expect(['best', 'standard', 'older'], b.name).toContain(b.tier)
   })
 

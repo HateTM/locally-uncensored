@@ -554,7 +554,7 @@ const MODEL_SUBDIRS: &[&str] = &[
     "checkpoints", "diffusion_models", "unet", "vae", "loras",
     "text_encoders", "clip", "clip_vision", "audio_encoders",
     "controlnet", "upscale_models", "embeddings", "style_models",
-    // LTX 2.5's x2 latent upscaler, written by the Get button since 2.x.
+    // LTX 2.5's x2 latent upscaler (LatentUpscaleModelLoader reads this folder).
     "latent_upscale_models",
 ];
 
@@ -2598,6 +2598,23 @@ pub async fn check_model_sizes(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_model_subdirs_are_plain_folder_names_and_cover_the_ltx_upscaler() {
+        // Delete searches exactly these folders under models/. Each must be a single
+        // lowercase path segment (no separators, so the join behaves the same on
+        // every platform) and the LTX 2.5 upscaler folder must be among them, or a
+        // file the Get button wrote there could never be deleted from the list.
+        assert!(MODEL_SUBDIRS.contains(&"latent_upscale_models"));
+        for d in MODEL_SUBDIRS {
+            assert!(!d.is_empty() && !d.contains('/') && !d.contains('\\') && !d.contains(".."), "{d}");
+            assert_eq!(*d, d.to_lowercase(), "{d}");
+        }
+        let mut sorted: Vec<&&str> = MODEL_SUBDIRS.iter().collect();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(sorted.len(), MODEL_SUBDIRS.len(), "duplicate entry");
+    }
+
 
     #[test]
     fn the_download_limit_is_shared_and_off_at_zero() {

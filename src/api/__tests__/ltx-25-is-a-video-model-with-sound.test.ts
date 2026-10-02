@@ -128,51 +128,98 @@ describe('LTX 2.5 is its own family, not LTX 2.3', () => {
   })
 })
 
-describe('the Model Manager offers every file of the official template', () => {
-  const bundle = () => getVideoBundles().find((b) => b.workflow === 'ltx25')!
+describe('the Model Manager offers every file of the official template, from free mirrors', () => {
+  const bundles = () => getVideoBundles().filter((b) => b.workflow === 'ltx25')
+  const full = () => bundles().find((b) => !b.files.some((f) => f.filename!.endsWith('.gguf')))!
+  const small = () => bundles().find((b) => b.files.some((f) => f.filename!.endsWith('.gguf')))!
+  /** The official repo is gated: a customer has no token, so no URL may point there. */
+  const FREE = /^https:\/\/huggingface\.co\/(comfyicu\/LTX-2\.5|deAPI-ai\/ltx2-5-22b-dist-int8|agosh\/LTX-2\.5-Comfy-GGUF)\/resolve\/main\//
 
-  it('five files, from the official repo, in the folders the loaders read', () => {
-    expect(bundle().files.map((f) => [f.filename, f.subfolder])).toEqual([
+  it('two bundles, the full int8 one first (it is the starter), then the small GGUF one', () => {
+    expect(bundles()).toHaveLength(2)
+    expect(bundles()[0].name).toBe(full().name)
+  })
+
+  it('the full bundle has five files in the folders the loaders read', () => {
+    expect(full().files.map((f) => [f.filename, f.subfolder])).toEqual([
       [DIT, 'diffusion_models'],
       [ENCODER, 'text_encoders'],
       [VIDEO_VAE, 'vae'],
       [AUDIO_VAE, 'vae'],
       [UPSCALER, 'latent_upscale_models'],
     ])
-    for (const f of bundle().files) {
-      expect(f.downloadUrl).toBe(`https://huggingface.co/Lightricks/LTX-2.5/resolve/main/${f.subfolder}/${f.filename}`)
-      expect(f.sizeGB).toBeGreaterThan(0)
+  })
+
+  it('the small bundle swaps only the transformer for a Q4 GGUF and asks for ComfyUI-GGUF', () => {
+    expect(small().files.slice(1).map((f) => f.filename)).toEqual(full().files.slice(1).map((f) => f.filename))
+    expect(small().files[0].filename).toBe('ltx-2.5-22b-distilled-transformer-bf16-Q4_K_M.gguf')
+    expect(small().files[0].subfolder).toBe('diffusion_models')
+    expect(small().customNodes).toContain('gguf')
+    expect(small().totalSizeGB).toBeLessThan(full().totalSizeGB - 8)
+    expect(small().vramRequired).toBe('16 GB')
+  })
+
+  it('every URL is a free mirror, ends in subfolder/filename and carries a sha256', () => {
+    for (const b of bundles()) {
+      for (const f of b.files) {
+        expect(f.downloadUrl, f.filename).toMatch(FREE)
+        expect(f.downloadUrl, f.filename).not.toContain('Lightricks/LTX-2.5/')
+        expect(f.downloadUrl!.endsWith(f.filename!), f.filename).toBe(true)
+        expect(f.sha256, f.filename).toMatch(/^[0-9a-f]{64}$/)
+        expect(f.sizeGB).toBeGreaterThan(0)
+      }
     }
   })
 
-  it('sizes are the Hugging Face byte counts of 2026-10-02 in GiB and add up to the total', () => {
+  it('sizes are the byte counts of 2026-10-02 in GiB and add up to the totals', () => {
     const bytes: Record<string, number> = {
       [DIT]: 21504034224, [ENCODER]: 15372969374, [VIDEO_VAE]: 1472223346, [AUDIO_VAE]: 364866540, [UPSCALER]: 995778752,
+      'ltx-2.5-22b-distilled-transformer-bf16-Q4_K_M.gguf': 12220864608,
     }
-    let sum = 0
-    for (const f of bundle().files) {
-      expect(f.sizeGB!, f.filename).toBeCloseTo(bytes[f.filename!] / 1_073_741_824, 2)
-      sum += f.sizeGB!
+    for (const b of bundles()) {
+      let sum = 0
+      for (const f of b.files) {
+        expect(f.sizeGB!, f.filename).toBeCloseTo(bytes[f.filename!] / 1_073_741_824, 2)
+        sum += f.sizeGB!
+      }
+      expect(b.totalSizeGB).toBeCloseTo(sum, 0)
     }
-    expect(bundle().totalSizeGB).toBeCloseTo(sum, 1)
   })
 
-  it('is a best-tier bundle that says what the gate needs', () => {
-    expect(bundle().tier).toBe('best')
-    expect(bundle().description).toMatch(/Hugging Face token/)
+  it('both are best tier and no longer talk about a token', () => {
+    for (const b of bundles()) {
+      expect(b.tier).toBe('best')
+      expect(b.description).not.toMatch(/token/i)
+    }
   })
 
   it('the latent upscaler folder is one the app reads back', () => {
     expect(COMFY_MODEL_FOLDERS.map((f) => f.subfolder)).toContain('latent_upscale_models')
   })
 
-  it('the registry can fetch every companion the builder looks for', () => {
+  it('the registry can fetch every companion the builder looks for, from the same free mirrors', () => {
     const r = COMPONENT_REGISTRY.ltx25
     expect([r.vae, r.clip, r.audioVae, r.upscaler].map((s) => s?.downloadFilename)).toEqual([VIDEO_VAE, ENCODER, AUDIO_VAE, UPSCALER])
+    for (const s of [r.vae, r.clip, r.audioVae, r.upscaler]) expect(s!.downloadUrl).toMatch(FREE)
   })
 })
 
 describe('the graph follows the official templates', () => {
+  it('the GGUF file loads through UnetLoaderGGUF, and says so when the pack is missing', async () => {
+    const GG = 'ltx-2.5-22b-distilled-transformer-bf16-Q4_K_M.gguf'
+    vi.mocked(getAllNodeInfo).mockResolvedValue({
+      ...LTX25_NODES, UnetLoaderGGUF: { input: { required: { unet_name: [[GG]] } } },
+    } as never)
+    const wf = await buildDynamicWorkflow(run(GG), 'ltx25')
+    expect(nodeOf(wf, 'UnetLoaderGGUF')![1].inputs.unet_name).toBe(GG)
+    expect(nodeOf(wf, 'UNETLoader')).toBeUndefined()
+    // The rest of the graph is the same two pass graph.
+    expect(nodesOf(wf, 'SamplerCustomAdvanced')).toHaveLength(2)
+
+    vi.mocked(getAllNodeInfo).mockResolvedValue(LTX25_NODES as never)
+    await expect(buildDynamicWorkflow(run(GG), 'ltx25')).rejects.toThrow(/ComfyUI-GGUF/)
+  })
+
   it('text to video: both passes, the upscale between them, sound muxed into the video', async () => {
     const wf = await buildDynamicWorkflow(run(DIT), 'ltx25')
 

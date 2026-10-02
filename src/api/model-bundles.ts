@@ -913,22 +913,24 @@ export function getVideoBundles(): ModelBundle[] {
         ...H3_SHARED_FILES,
       ],
     },
-    // LTX 2.5 (Lightricks, open weights since 11.08.2026). Every file below is
-    // the one the official Comfy-Org template video_ltx2_5_t2v/_i2v loads, from
-    // the official repo; sizes (GiB) from the Hugging Face tree API on
-    // 2026-10-02. The repo is GATED: Hugging Face asks for a one time licence
-    // accept and every download needs a token (Settings, AI Backends, Hugging
-    // Face token); the downloader answers an unauthorised request with a
-    // sentence that names that field. The model patch for 2.5 reached ComfyUI
-    // in 0.32.0 (PR 15499), and the graph needs LTXVDualCFGGuider, which
-    // arrived in the same release. There is no FP8 file in the repo: the small
-    // official variant is the distilled INT8 transformer.
+    // LTX 2.5 (Lightricks, open weights since 11.08.2026). Every file is the one
+    // the official Comfy-Org template video_ltx2_5_t2v/_i2v loads. The official
+    // repo Lightricks/LTX-2.5 is GATED (a download needs a Hugging Face token a
+    // customer does not have), so the files come from FREE mirrors, checked on
+    // 2026-10-02 with an anonymous HEAD (HTTP 200 on every file). Byte counts
+    // equal the official repo's, and the SHA-256 of each file agrees between
+    // independent mirrors (comfyicu/LTX-2.5, deAPI-ai/ltx2-5-22b-dist-int8,
+    // osantinello/LTX25_Models). comfyicu's copy of the Gemma encoder differs
+    // from the official byte count, so the encoder comes from deAPI-ai. The small
+    // variant is a GGUF Q4_K_M of the distilled transformer (agosh/LTX-2.5-Comfy-GGUF),
+    // loaded through ComfyUI-GGUF. The model patch for 2.5 reached ComfyUI in
+    // 0.32.0 (PR 15499), and the graph needs LTXVDualCFGGuider from the same release.
     {
       name: 'LTX 2.5 · Video with Sound',
-      description: 'Video with its own sound from a prompt or a first frame, with cuts between connected shots. Fast distilled version. Needs a free Hugging Face token in Settings.',
+      description: 'Video with its own sound from a prompt or a first frame, with cuts between connected shots. Fast distilled version, full quality.',
       tags: ['LTX 2.5', 'Audio', 'Multishot'],
       totalSizeGB: 37.0,
-      vramRequired: '16+ GB',
+      vramRequired: '24+ GB',
       workflow: 'ltx25',
       tier: 'best',
       url: 'https://huggingface.co/Lightricks/LTX-2.5',
@@ -937,36 +939,94 @@ export function getVideoBundles(): ModelBundle[] {
           name: 'LTX 2.5 22B Distilled (int8)',
           description: 'Main video model, distilled for fast renders. Video and sound in one pass.',
           pulls: '', tags: ['Model', '21.5 GB'], updated: 'New',
-          downloadUrl: 'https://huggingface.co/Lightricks/LTX-2.5/resolve/main/diffusion_models/ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors',
+          downloadUrl: 'https://huggingface.co/comfyicu/LTX-2.5/resolve/main/diffusion_models/ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors',
           filename: 'ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors', subfolder: 'diffusion_models', sizeGB: 20.03,
+          sha256: 'c4279eeff115cbeaca494bd2183e7d768c38fe85a184dc6afbb7159157c44334',
         },
         {
           name: 'Gemma 4 12B Text Encoder (LTX 2.5, int8)',
           description: 'Required text encoder for LTX 2.5.',
           pulls: '', tags: ['Text Encoder', '15.4 GB'], updated: 'New',
-          downloadUrl: 'https://huggingface.co/Lightricks/LTX-2.5/resolve/main/text_encoders/gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors',
+          downloadUrl: 'https://huggingface.co/deAPI-ai/ltx2-5-22b-dist-int8/resolve/main/text_encoders/gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors',
           filename: 'gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors', subfolder: 'text_encoders', sizeGB: 14.32,
+          sha256: '6ce688a0aa98a5fa36a9f1e6c3f42152a498cc2b53ee8c15674c64244f91487f',
         },
         {
           name: 'LTX 2.5 Video VAE',
           description: 'Required, decodes the picture.',
           pulls: '', tags: ['VAE', '1.5 GB'], updated: 'New',
-          downloadUrl: 'https://huggingface.co/Lightricks/LTX-2.5/resolve/main/vae/ltx-2.5-video-vae-bf16.safetensors',
+          downloadUrl: 'https://huggingface.co/comfyicu/LTX-2.5/resolve/main/vae/ltx-2.5-video-vae-bf16.safetensors',
           filename: 'ltx-2.5-video-vae-bf16.safetensors', subfolder: 'vae', sizeGB: 1.37,
+          sha256: '847e14ca7f3355debca0cea4eaa24ac0fbcdf0061da054ac89ca638a869ddba3',
         },
         {
           name: 'LTX 2.5 Audio VAE',
           description: 'Required, decodes the sound.',
           pulls: '', tags: ['VAE', '365 MB'], updated: 'New',
-          downloadUrl: 'https://huggingface.co/Lightricks/LTX-2.5/resolve/main/vae/ltx-2.5-audio-vae-bf16.safetensors',
+          downloadUrl: 'https://huggingface.co/comfyicu/LTX-2.5/resolve/main/vae/ltx-2.5-audio-vae-bf16.safetensors',
           filename: 'ltx-2.5-audio-vae-bf16.safetensors', subfolder: 'vae', sizeGB: 0.34,
+          sha256: 'c52733d37f6a7fb7949c3dc0fb468c6cb2169e4d836983a73babb9f0d54837a5',
         },
         {
           name: 'LTX 2.5 Latent Upscaler x2',
           description: 'Required, sharpens the picture in the second pass.',
           pulls: '', tags: ['Upscaler', '996 MB'], updated: 'New',
-          downloadUrl: 'https://huggingface.co/Lightricks/LTX-2.5/resolve/main/latent_upscale_models/ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors',
+          downloadUrl: 'https://huggingface.co/comfyicu/LTX-2.5/resolve/main/latent_upscale_models/ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors',
           filename: 'ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors', subfolder: 'latent_upscale_models', sizeGB: 0.93,
+          sha256: 'eb5a71fe4068ee87ccdb1c3aa635e547ca76bd2d30ae20ae889f2c325c0677e8',
+        },
+      ],
+    },
+    {
+      name: 'LTX 2.5 · Small (GGUF Q4)',
+      description: 'The same video with sound model in a smaller 4 bit version for 16 GB graphics cards. Needs the ComfyUI-GGUF node pack, the install offers it. Slightly softer detail than the full version.',
+      tags: ['LTX 2.5', 'Audio', 'GGUF'],
+      totalSizeGB: 28.4,
+      vramRequired: '16 GB',
+      workflow: 'ltx25',
+      tier: 'best',
+      customNodes: ['gguf'],
+      url: 'https://huggingface.co/agosh/LTX-2.5-Comfy-GGUF',
+      files: [
+        {
+          name: 'LTX 2.5 22B Distilled (GGUF Q4_K_M)',
+          description: 'Main video model, 4 bit. Video and sound in one pass.',
+          pulls: '', tags: ['Model', '12.2 GB', 'GGUF'], updated: 'New',
+          downloadUrl: 'https://huggingface.co/agosh/LTX-2.5-Comfy-GGUF/resolve/main/ltx-2.5-22b-distilled-transformer-bf16-Q4_K_M.gguf',
+          filename: 'ltx-2.5-22b-distilled-transformer-bf16-Q4_K_M.gguf', subfolder: 'diffusion_models', sizeGB: 11.38,
+          sha256: '0b1bca38240087117bb0d1379fdaf1bcdb53c40e63f5f9bcb1a7e793f9520cfb',
+        },
+        {
+          name: 'Gemma 4 12B Text Encoder (LTX 2.5, int8)',
+          description: 'Required text encoder for LTX 2.5.',
+          pulls: '', tags: ['Text Encoder', '15.4 GB'], updated: 'New',
+          downloadUrl: 'https://huggingface.co/deAPI-ai/ltx2-5-22b-dist-int8/resolve/main/text_encoders/gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors',
+          filename: 'gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors', subfolder: 'text_encoders', sizeGB: 14.32,
+          sha256: '6ce688a0aa98a5fa36a9f1e6c3f42152a498cc2b53ee8c15674c64244f91487f',
+        },
+        {
+          name: 'LTX 2.5 Video VAE',
+          description: 'Required, decodes the picture.',
+          pulls: '', tags: ['VAE', '1.5 GB'], updated: 'New',
+          downloadUrl: 'https://huggingface.co/comfyicu/LTX-2.5/resolve/main/vae/ltx-2.5-video-vae-bf16.safetensors',
+          filename: 'ltx-2.5-video-vae-bf16.safetensors', subfolder: 'vae', sizeGB: 1.37,
+          sha256: '847e14ca7f3355debca0cea4eaa24ac0fbcdf0061da054ac89ca638a869ddba3',
+        },
+        {
+          name: 'LTX 2.5 Audio VAE',
+          description: 'Required, decodes the sound.',
+          pulls: '', tags: ['VAE', '365 MB'], updated: 'New',
+          downloadUrl: 'https://huggingface.co/comfyicu/LTX-2.5/resolve/main/vae/ltx-2.5-audio-vae-bf16.safetensors',
+          filename: 'ltx-2.5-audio-vae-bf16.safetensors', subfolder: 'vae', sizeGB: 0.34,
+          sha256: 'c52733d37f6a7fb7949c3dc0fb468c6cb2169e4d836983a73babb9f0d54837a5',
+        },
+        {
+          name: 'LTX 2.5 Latent Upscaler x2',
+          description: 'Required, sharpens the picture in the second pass.',
+          pulls: '', tags: ['Upscaler', '996 MB'], updated: 'New',
+          downloadUrl: 'https://huggingface.co/comfyicu/LTX-2.5/resolve/main/latent_upscale_models/ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors',
+          filename: 'ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors', subfolder: 'latent_upscale_models', sizeGB: 0.93,
+          sha256: 'eb5a71fe4068ee87ccdb1c3aa635e547ca76bd2d30ae20ae889f2c325c0677e8',
         },
       ],
     },

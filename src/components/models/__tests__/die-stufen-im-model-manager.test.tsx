@@ -36,7 +36,7 @@ vi.mock('../CivitaiSearchPanel', () => ({ CivitaiSearchPanel: () => null }))
 vi.mock('../../chat/LuEngineSwitchBar', () => ({ LuEngineSwitchBar: () => null }))
 
 import { DiscoverModels } from '../DiscoverModels'
-import { getImageBundles, getVideoBundles } from '../../../api/model-bundles'
+import { getImageBundles, getVideoBundles, getAudioBundles, getLipsyncBundles, getMotionBundles } from '../../../api/model-bundles'
 import { OLDER_GROUP } from '../../../lib/render/model-tier'
 
 beforeEach(() => {
@@ -66,10 +66,11 @@ describe('der Video-Reiter', () => {
     await waitFor(() => expect(document.querySelectorAll('[data-bundle-tile]').length).toBeGreaterThan(5))
     const reihe = lies()
     const karten = reihe.filter((r) => r.typ === 'karte')
-    const mainstream = getVideoBundles().filter((b) => !b.uncensored)
+    const alle = [...getVideoBundles(), ...getAudioBundles(), ...getLipsyncBundles(), ...getMotionBundles()]
+    const mainstream = alle.filter((b) => !b.uncensored)
     expect(karten.map((r) => r.text).sort()).toEqual(mainstream.map((b) => b.name).sort())
 
-    const tierVon = (name: string) => getVideoBundles().find((b) => b.name === name)!.tier
+    const tierVon = (name: string) => alle.find((b) => b.name === name)!.tier
     const rank = { best: 0, standard: 1, older: 2 }
     const ranks = karten.map((r) => rank[tierVon(r.text)])
     expect(ranks).toEqual([...ranks].sort((a, b) => a - b))
@@ -89,6 +90,28 @@ describe('der Video-Reiter', () => {
     expect(tierVon(reihe[i - 1].text)).not.toBe('older')
     // Der alte LTX steht unten, nicht verschwunden.
     expect(karten.map((r) => r.text).slice(i)).toContain('LTX Video 2.3 · 22B FP8')
+  })
+})
+
+describe('die anderen Create-Spuren sind im Video-Reiter installierbar', () => {
+  // 02.10.2026: Musik, Lip Sync und Motion gab es nur ueber die Startkarte der
+  // leeren Spur. Ein zweites Musikmodell (YuE2 neben ACE) oder die FP8-Variante
+  // von S2V liess sich danach nie mehr holen.
+  it('YuE2, ACE v1 und S2V FP8 haben eine Karte mit Spur-Marke und Get-Knopf', async () => {
+    render(<DiscoverModels category="video" />)
+    await waitFor(() => expect(document.querySelectorAll('[data-bundle-tile]').length).toBeGreaterThan(5))
+    const karte = (teil: string) => {
+      const el = Array.from(document.querySelectorAll('[data-bundle-tile]')).find((e) => (e.getAttribute('data-bundle-tile') ?? '').includes(teil))
+      if (!el) throw new Error(`keine Karte fuer ${teil}`)
+      return el as HTMLElement
+    }
+    for (const [teil, spur] of [['YuE2', 'Music'], ['ACE Step v1', 'Music'], ['S2V FP8', 'Lip sync'], ['Animate Q4', 'Motion']] as const) {
+      const k = karte(teil)
+      expect(k.querySelector('[data-bundle-lane]')?.getAttribute('data-bundle-lane'), teil).toBe(spur)
+      expect(Array.from(k.querySelectorAll('button')).some((b) => /^Get/.test((b.textContent ?? '').trim())), teil).toBe(true)
+    }
+    // Die Videokarten tragen keine Spur-Marke.
+    expect(karte('LTX 2.5 · Video with Sound').querySelector('[data-bundle-lane]')).toBeNull()
   })
 })
 

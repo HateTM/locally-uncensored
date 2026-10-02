@@ -1848,6 +1848,12 @@ async function buildMiniMaxH3Workflow(params: VideoParams, seed: number, allNode
     // FastH3 runs on FastVideo's sparse attention, which ComfyUI has had since
     // 0.35.0 (BlockSparseAttention), and it only distilled text to video.
     requireRelease(allNodes, ['BlockSparseAttention', 'MiniMaxH3SigmaShift'], FASTH3_NEEDS_UPDATE, 'minimaxh3')
+    // Read in comfy_extras/nodes_sparse_attention.py (ComfyUI master, 2026-10-02):
+    // BlockSparseAttention does NOT use Triton. It calls the compiled sol_attn
+    // kernels of comfy_kitchen (CUDA sm_80+ on Linux and Windows x64 wheels, or
+    // HIP). Where they are not available (older GPU, CPU) h3_eligible() returns
+    // False and the block runs the model's normal dense attention, so the graph
+    // is valid on every machine and only loses the speed gain. No platform gate.
     if (params.inputImage) {
       throw new WorkflowUnavailableError('FastH3 makes video from a prompt only. Pick MiniMax H3 to start from an image.', 'minimaxh3')
     }
@@ -2034,7 +2040,9 @@ async function buildLtx25Workflow(params: VideoParams, seed: number, allNodes: N
     return id
   }
 
-  const unetId = add('UNETLoader', { unet_name: params.model, weight_dtype: 'default' })
+  // The small variant is a GGUF quant (ComfyUI-GGUF), the full one a safetensors file.
+  const unetId = String(n++)
+  addUnetLoader(workflow, unetId, params.model, allNodes)
   const clipId = add('CLIPLoader', { clip_name: clipName, type: 'ltxv', device: 'default' })
   const vaeId = add('VAELoader', { vae_name: vaeName })
   const audioVaeId = add('VAELoader', { vae_name: audioVaeName })

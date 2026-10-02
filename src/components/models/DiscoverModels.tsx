@@ -6,7 +6,7 @@ import { Search, XCircle, Sparkles, Unlock, ShieldCheck, ExternalLink, Info } fr
 import { X } from 'lucide-react'
 import {
   searchHuggingFaceModels,
-  getImageBundles, getVideoBundles,
+  getImageBundles, getVideoBundles, getAudioBundles, getLipsyncBundles, getMotionBundles,
   getUncensoredTextModels, getMainstreamTextModels,
   detectProviderModelPath, startModelDownloadToPath, luEngineDownloadDir,
   startModelDownload,
@@ -281,7 +281,7 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
   // no re-subscription loop.
   const refreshBundleStatuses = useCallback(() => {
     if (category !== 'image' && category !== 'video') return
-    const allBundles = [...getImageBundles(), ...getVideoBundles()]
+    const allBundles = [...getImageBundles(), ...getVideoBundles(), ...getAudioBundles(), ...getLipsyncBundles(), ...getMotionBundles()]
     checkBundlesInstalled(allBundles).then(statuses => setBundleStatuses(statuses))
   }, [category])
   useEffect(() => {
@@ -303,7 +303,19 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
   const isText = category === 'text'
   const isImage = category === 'image'
   const isVideo = category === 'video'
-  const bundles = isImage ? getImageBundles() : isVideo ? getVideoBundles() : []
+  // The Video tab also carries the other Create lanes (music, lip sync, motion).
+  // They used to be installable only from the empty-lane starter card of Create,
+  // so a second music model (YuE2 next to ACE Step) or the Wan S2V FP8 variant
+  // could never be fetched once the first one was on disk. Each such tile says
+  // which lane it belongs to.
+  const laneOf = new Map<string, string>([
+    ...getAudioBundles().map((b) => [b.name, 'Music'] as const),
+    ...getLipsyncBundles().map((b) => [b.name, 'Lip sync'] as const),
+    ...getMotionBundles().map((b) => [b.name, 'Motion'] as const),
+  ])
+  const bundles = isImage
+    ? getImageBundles()
+    : isVideo ? [...getVideoBundles(), ...getAudioBundles(), ...getLipsyncBundles(), ...getMotionBundles()] : []
 
   // How much VRAM a bundle wants, read by the ONE shared parser in
   // lib/hardware. The local copy that used to live here answered 99 GB to the
@@ -965,6 +977,7 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
             <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: Math.min(bi, 12) * 0.025 }}>
               <BundleTile
                 bundle={bundle}
+                lane={laneOf.get(bundle.name)}
                 vramGb={systemVRAM}
                 complete={isBundleComplete(bundle)}
                 downloading={isBundleDownloading(bundle) || installingBundle === bundle.name}
