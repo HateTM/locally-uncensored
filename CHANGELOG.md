@@ -56,6 +56,9 @@ cloud catalogue. It also fixes the bugs reported on GitHub and Discord since
   bin, because LM Studio offers no way to delete a model from outside, and
   Details showed nothing. Details now says to delete it in LM Studio under
   My Models, and does the same for other local servers.
+- **The Code area always has an input box.** With no code conversation open
+  it showed "Type below to start." over nothing; the first instruction can now
+  be typed right there.
 - **Turbo checkpoints start at a few steps.** SD-Turbo, SDXL-Turbo,
   Lightning, Hyper-SD and LCM checkpoints start at 4 steps and CFG 1 instead
   of the family's 25 steps.

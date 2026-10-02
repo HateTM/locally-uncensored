@@ -299,7 +299,13 @@ export function ChatView() {
           traegt seinen eigenen `overflow-y-auto` weiter unten. */}
       <div className="flex-1 flex overflow-clip min-h-0">
         <div className="flex-1 flex flex-col min-w-0 relative">
-          {chatMode === 'codex' && activeConversationId ? (
+          {/* 3.0.4 Gegenprobe on the Windows box (02.10.2026): the Code area
+              with no conversation fell through to the chat landing page, which
+              says "Type below to start." over a composer the Code area hides,
+              so there was nothing to type into until New Chat. The Code view
+              has its own composer and its first send creates the code
+              conversation (useCodex), so it serves the empty state too. */}
+          {chatMode === 'codex' ? (
             <CodexView />
           ) : (<>
           <AnimatePresence mode="wait">
@@ -765,94 +771,88 @@ export function ChatView() {
               LoopBar und GoalBar sind Bedienelemente (Bremse, Loeschen) und
               bleiben sichtbar, nur eine Etage hoeher; die Wartezeile der
               lokalen Spur ist ein Hinweis und war vorher im Kasten. */}
-          {chatMode !== 'codex' && (
-            <>
-              <LoopBar onStop={stopGeneration} />
-              <GoalBar />
-              <LocalLaneWaitLine
-                waiting={!!queuedForLocalLane}
-                queuePosition={localLaneQueuePosition}
-                onApproval={waitingOnApproval}
-                onApprovalIn={localLaneHolderTitle}
-              />
-            </>
-          )}
+          <LoopBar onStop={stopGeneration} />
+          <GoalBar />
+          <LocalLaneWaitLine
+            waiting={!!queuedForLocalLane}
+            queuePosition={localLaneQueuePosition}
+            onApproval={waitingOnApproval}
+            onApprovalIn={localLaneHolderTitle}
+          />
 
-          {/* Code mode brings its own composer, so it stays out of this one. */}
-          {chatMode !== 'codex' && (
-            <ChatInput
-              onSend={sendMessage}
-              onStop={stopGeneration}
-              isGenerating={busy.thisChat || queuedForLocalLane}
-              waitingForLocalLane={queuedForLocalLane}
-              pendingApproval={pendingApproval}
-              onApprove={approveToolCall}
-              onReject={rejectToolCall}
-              // Commands need the tool catalog to drive, which only Agent
-              // mode has here. Plain chat leaves "/cmd" as ordinary text.
-              slashCommands={isAgentActive ? 'agent' : 'chat'}
-              composerModel={
-                /* What this chat's answers were written by rides on the
-                   picker itself now, as a dot plus a tooltip, instead of a
-                   second chip in the row (Meldung 4, R5 re-measure; David
-                   2026-09-02 wanted it hidden away). */
-                <ModelSelector openUpward answeredBy={conversationModelHint} />
-              }
-              // No plan lives here. The prompt window is the prompt window
-              // (David, 2026-08-22): the plan band sits in the session strip
-              // above, next to the other standing status controls.
-              // Was HIER noch steht, ist genau eine Zeile, und sie steht
-              // unter Vorbehalt: `GroupCostHint` sagt, was der naechste Enter
-              // kostet („1 round = 3 answers = 3x the cost"). Geld wird nicht
-              // stumm geschaltet, ohne dass der Eigner es entschieden hat, und
-              // die Zeile gibt es ueberhaupt nur in einem Gruppenchat. Alles
-              // andere, was hier stand, ist ausgezogen (siehe oben).
-              composerAbove={<GroupCostHint />}
-              composerActions={
-                <>
-                  {/* Documents (RAG), shown in both modes since A9. In
-                      Cloud mode without an embedding lane it stays visible
-                      and says what is missing. */}
-                  <DocsButton
-                    availability={docs}
-                    open={ragPanelOpen}
-                    ragEnabled={ragEnabled}
-                    docCount={docCount}
-                    onToggle={() => setRagPanelOpen(!ragPanelOpen)}
-                  />
+          {/* Code mode brings its own composer (CodexView above). */}
+          <ChatInput
+            onSend={sendMessage}
+            onStop={stopGeneration}
+            isGenerating={busy.thisChat || queuedForLocalLane}
+            waitingForLocalLane={queuedForLocalLane}
+            pendingApproval={pendingApproval}
+            onApprove={approveToolCall}
+            onReject={rejectToolCall}
+            // Commands need the tool catalog to drive, which only Agent
+            // mode has here. Plain chat leaves "/cmd" as ordinary text.
+            slashCommands={isAgentActive ? 'agent' : 'chat'}
+            composerModel={
+              /* What this chat's answers were written by rides on the
+                 picker itself now, as a dot plus a tooltip, instead of a
+                 second chip in the row (Meldung 4, R5 re-measure; David
+                 2026-09-02 wanted it hidden away). */
+              <ModelSelector openUpward answeredBy={conversationModelHint} />
+            }
+            // No plan lives here. The prompt window is the prompt window
+            // (David, 2026-08-22): the plan band sits in the session strip
+            // above, next to the other standing status controls.
+            // Was HIER noch steht, ist genau eine Zeile, und sie steht
+            // unter Vorbehalt: `GroupCostHint` sagt, was der naechste Enter
+            // kostet („1 round = 3 answers = 3x the cost"). Geld wird nicht
+            // stumm geschaltet, ohne dass der Eigner es entschieden hat, und
+            // die Zeile gibt es ueberhaupt nur in einem Gruppenchat. Alles
+            // andere, was hier stand, ist ausgezogen (siehe oben).
+            composerAbove={<GroupCostHint />}
+            composerActions={
+              <>
+                {/* Documents (RAG), shown in both modes since A9. In
+                    Cloud mode without an embedding lane it stays visible
+                    and says what is missing. */}
+                <DocsButton
+                  availability={docs}
+                  open={ragPanelOpen}
+                  ragEnabled={ragEnabled}
+                  docCount={docCount}
+                  onToggle={() => setRagPanelOpen(!ragPanelOpen)}
+                />
 
-                  {/* Plugins (Chat Tools + Caveman + Personas) */}
-                  <PluginsDropdown openUpward />
+                {/* Plugins (Chat Tools + Caveman + Personas) */}
+                <PluginsDropdown openUpward />
 
-                  {/* Tools: agent permission overrides (only when agent active) */}
-                  {isAgentActive && (
-                    <div className="relative">
-                      <button
-                        onClick={() => setToolsDropdownOpen(!toolsDropdownOpen)}
-                        aria-expanded={toolsDropdownOpen}
-                        className="lu-control"
-                      >
-                        {/* Kein eigener Gruenton mehr: das Icon erbt die
-                            Farbe des Controls, sonst traegt ein neutrales
-                            Control wieder einen Akzent von sich aus. */}
-                        <Wrench size={11} />
-                        <span>Tools</span>
-                        <ChevronDown size={9} className={`transition-transform ${toolsDropdownOpen ? 'rotate-180' : ''}`} />
-                      </button>
-                      {toolsDropdownOpen && (
-                        <>
-                          <div className="fixed inset-0 z-40" onClick={() => setToolsDropdownOpen(false)} />
-                          <div className="absolute left-0 bottom-full mb-0.5 z-50 w-28 rounded-md bg-white dark:bg-[#1a1a1a] border border-gray-200 dark:border-white/10 shadow-xl py-0.5 px-0.5">
-                            <PermissionOverrideBar />
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  )}
-                </>
-              }
-            />
-          )}
+                {/* Tools: agent permission overrides (only when agent active) */}
+                {isAgentActive && (
+                  <div className="relative">
+                    <button
+                      onClick={() => setToolsDropdownOpen(!toolsDropdownOpen)}
+                      aria-expanded={toolsDropdownOpen}
+                      className="lu-control"
+                    >
+                      {/* Kein eigener Gruenton mehr: das Icon erbt die
+                          Farbe des Controls, sonst traegt ein neutrales
+                          Control wieder einen Akzent von sich aus. */}
+                      <Wrench size={11} />
+                      <span>Tools</span>
+                      <ChevronDown size={9} className={`transition-transform ${toolsDropdownOpen ? 'rotate-180' : ''}`} />
+                    </button>
+                    {toolsDropdownOpen && (
+                      <>
+                        <div className="fixed inset-0 z-40" onClick={() => setToolsDropdownOpen(false)} />
+                        <div className="absolute left-0 bottom-full mb-0.5 z-50 w-28 rounded-md bg-white dark:bg-[#1a1a1a] border border-gray-200 dark:border-white/10 shadow-xl py-0.5 px-0.5">
+                          <PermissionOverrideBar />
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
+              </>
+            }
+          />
           </>)}
         </div>
 

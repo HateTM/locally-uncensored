@@ -30,6 +30,7 @@ import { useSettingsStore } from '../../stores/settingsStore'
 import { useModelStore } from '../../stores/modelStore'
 import { useAnyAgentLoopActive } from '../../stores/agentLoopStore'
 import { useUIStore } from '../../stores/uiStore'
+import { RecentChats } from './RecentChats'
 import { useAgentModeStore } from '../../stores/agentModeStore'
 import {
   CODEX_WORKDIR_LOCK_TITLE,
@@ -157,6 +158,7 @@ export function CodexView() {
   const lockReason = codexBusyReason({ sendsInFlight, threads, generating: generatingMap, loop })
   // The open explorer already says why the folder is held (explorer-workdir-lock).
   const explorerCollapsed = useUIStore((s) => s.explorerCollapsed)
+  const sidebarOpen = useUIStore((s) => s.sidebarOpen)
 
   // Where the agent goes while no folder is picked: a per-chat workspace or
   // settings.defaultWorkspace both beat an empty picker, so the header and the
@@ -370,7 +372,7 @@ export function CodexView() {
         {/* Messages */}
         <div ref={scrollRef} className="flex-1 min-h-[10rem] overflow-y-auto scrollbar-thin" data-testid="codex-transcript">
           {messages.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full text-center">
+            <div className="flex flex-col items-center justify-center h-full text-center" data-testid="codex-landing">
               <Code size={28} className="text-gray-300 dark:text-gray-700 mb-2" />
               <p className="text-[0.7rem] text-gray-500 font-medium">Coding Agent</p>
               <p className="text-[0.55rem] text-gray-400 dark:text-gray-600 mt-0.5 max-w-[300px]">
@@ -385,6 +387,14 @@ export function CodexView() {
                   No folder picked. The agent works in {fallbackLabel}. Pick a project with
                   "Select folder..." in the file tree panel on the right.
                 </p>
+              )}
+              {/* With the side panel collapsed the latest code chats stand
+                  here, as they did on the old Code landing (GH #141). With no
+                  conversation open this is the Code area's start screen. */}
+              {!sidebarOpen && !activeConversationId && (
+                <div className="w-full pt-3 flex flex-col items-center text-left">
+                  <RecentChats />
+                </div>
               )}
             </div>
           ) : (
