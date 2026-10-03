@@ -55,11 +55,9 @@ import { buildDynamicWorkflow, buildLocalOpWorkflow, checkVideoOutputCapability 
 import { getAllNodeInfo, clearNodeCache } from '../api/comfyui-nodes'
 import { apiNodes, type ComfyApiGraph, type ComfyExecutionMessage, type ComfyHistoryEntry } from '../types/comfy-graph'
 import { restartComfyForNewNodes } from '../api/comfy-restart'
-import { installCustomNodes, startModelDownload, getDownloadProgress, modelsNotVisibleInComfy, comfyModelTarget, catalogDigestFor } from '../api/discover'
-import { downloadBundleFiles, waitForModelsVisible } from '../lib/bundle-install'
-import { buildWithFixups, wasDeclined, type FixupDeps } from '../lib/render-fixups'
-import { useDownloadStore } from '../stores/downloadStore'
-import { useComfyInstallStore } from '../stores/comfyInstallStore'
+import { installCustomNodes } from '../api/discover'
+import { buildWithFixups, wasDeclined } from '../lib/render-fixups'
+import { renderFixupDeps } from '../api/render-fixup-deps'
 import { checkPromptSafety, SAFETY_BLOCK_MESSAGE } from '../lib/render/safety'
 import { wantsTransparent } from '../lib/transparent-image'
 import { scenePromptFor } from '../lib/ltx-multishot'
@@ -100,70 +98,6 @@ import {
 function historyMessages(entry: ComfyHistoryEntry | null): [string, ComfyExecutionMessage][] {
   const raw = entry?.status?.messages
   return Array.isArray(raw) ? raw : []
-}
-
-/** The side effects lib/render-fixups.ts needs, wired to the app. */
-function renderFixupDeps(onStatus: (line: string) => void, signal?: AbortSignal): FixupDeps {
-  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
-  const refreshLists = async () => {
-    await refreshComfyModels().catch(() => false)
-    clearNodeCache()
-  }
-  return {
-    ask: (prompt) => new Promise<boolean>((resolve) => {
-      useCreateStore.getState().setFixupPrompt({
-        ...prompt,
-        resolve: (go) => { useCreateStore.getState().setFixupPrompt(null); resolve(go) },
-      })
-    }),
-    download: async (files) => {
-      const dl = useDownloadStore.getState()
-      for (const f of files) dl.setMeta(f.downloadFilename, f.downloadUrl, f.subfolder)
-      dl.startPolling()
-      await downloadBundleFiles(
-        files.map((f) => ({ filename: f.downloadFilename, subfolder: f.subfolder, downloadUrl: f.downloadUrl, sizeGB: f.sizeGB, sha256: catalogDigestFor(f.downloadFilename, f.downloadUrl).sha256 })),
-        {
-          start: startModelDownload,
-          progress: getDownloadProgress,
-          onStatus,
-          keepTrayLive: () => useDownloadStore.getState().startPolling(),
-          stop: (filename) => { void useDownloadStore.getState().cancel(filename) },
-          signal,
-        },
-      )
-      // A ComfyUI on another machine cannot list them before they are copied
-      // over; buildWithFixups says so (GH #143).
-      if ((await comfyModelTarget()).remote) return
-      const wanted = files.map((f) => f.downloadFilename)
-      const left = await waitForModelsVisible({ missing: () => modelsNotVisibleInComfy(wanted), refresh: refreshLists, onStatus, signal })
-      if (left.length > 0) throw new Error(`Downloaded ${left.join(', ')}, but ComfyUI does not list ${left.length === 1 ? 'it' : 'them'} yet. Restart ComfyUI and hit Create again.`)
-    },
-    remote: async () => {
-      const t = await comfyModelTarget()
-      return t.remote && t.host && t.root ? { host: t.host, root: t.root } : null
-    },
-    updateComfy: async () => {
-      onStatus('Updating ComfyUI…')
-      await useComfyInstallStore.getState().runUpdate()
-      for (;;) {
-        await sleep(2000)
-        const st = useComfyInstallStore.getState()
-        if (st.phase === 'error') throw new Error(st.error || 'Updating ComfyUI did not finish.')
-        if (st.phase === 'idle') break
-        const last = st.logs[st.logs.length - 1]
-        if (last) onStatus(String(last))
-      }
-      onStatus('Starting the updated ComfyUI…')
-      await backendCall('start_comfyui').catch(() => undefined)
-      for (let i = 0; i < 90; i++) {
-        if (await checkComfyConnection()) return
-        onStatus(`Starting the updated ComfyUI… ${i * 2}s`)
-        await sleep(2000)
-      }
-      throw new Error('ComfyUI was updated but did not come back up. Start it from Settings and hit Create again.')
-    },
-    refresh: refreshLists,
-  }
 }
 
 export function useCreate() {
@@ -1143,7 +1077,11 @@ export function useCreate() {
         }
         setProgress(5, 'Building workflow...')
         const laneDefaults = COMFY_MODEL_DEFAULTS[imageModelType] ?? COMFY_MODEL_DEFAULTS.unknown
-        workflow = await buildLocalOpWorkflow({
+        // The lanes carry the same version gate as a picture (YuE2, S2V,
+        // Animate): a too-old ComfyUI is offered the update, then the build
+        // runs again. The box, 03.10.2026: Music failed with the update
+        // sentence because this build never went through the question.
+        const laneParams = {
           op: localOp,
           model: activeModel,
           prompt,
@@ -1161,7 +1099,11 @@ export function useCreate() {
           audioFile,
           refImage: source?.filename || undefined,
           drivingVideo,
-        })
+        }
+        workflow = await buildWithFixups(
+          () => buildLocalOpWorkflow(laneParams),
+          renderFixupDeps((line) => setProgress(5, line), abortRef.current?.signal),
+        )
         builderUsed = 'dynamic'
       }
 

@@ -5,8 +5,9 @@ import { Modal } from '../../ui/Modal'
 /**
  * Discord 2026-09-28: a model that needs a text encoder / VAE that is not on
  * disk, or a newer ComfyUI, gets the fix offered right here instead of a
- * sentence pointing at the Model Manager. Same pattern as VhsInstallModal:
- * useCreate sets `fixupPrompt`, this resolves it.
+ * sentence pointing at the Model Manager. api/render-fixup-deps.ts sets
+ * `fixupPrompt`, this resolves it. Mounted in the app shell, because the
+ * agent's image tool asks the same question from Chat.
  */
 export function RenderFixupModal() {
   const prompt = useCreateStore((s) => s.fixupPrompt)

@@ -144,6 +144,19 @@ describe('the version lock is per model', () => {
     expect((caught as WorkflowUnavailableError).needsComfyUpdate).toBe(true)
     expect(() => buildMusicWorkflow(params({ model: ACE }), 7, old)).not.toThrow()
   })
+
+  // The box, 03.10.2026: "Update ComfyUI" in the sentence is not what Create
+  // asks on, the flag is. A lane whose core nodes are missing is a ComfyUI
+  // that is too old, so it carries the flag like a model with a known release.
+  it('a ComfyUI without the core nodes of a lane is offered the update too', () => {
+    const old = { ...NODES }
+    delete old['TextEncodeAceStepAudio1.5']
+    let caught: unknown
+    try { buildMusicWorkflow(params({ model: ACE }), 7, old) } catch (e) { caught = e }
+    expect(caught).toBeInstanceOf(WorkflowUnavailableError)
+    expect((caught as WorkflowUnavailableError).message).toContain('Update ComfyUI')
+    expect((caught as WorkflowUnavailableError).needsComfyUpdate).toBe(true)
+  })
 })
 
 beforeEach(() => { vi.mocked(localFetch).mockReset() })

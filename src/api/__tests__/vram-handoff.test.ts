@@ -85,6 +85,20 @@ vi.mock('../dynamic-workflow', () => ({
   buildDynamicWorkflow: (...a: unknown[]) => buildDynamicWorkflow(...a),
 }))
 
+// The real question and the real retry (lib/render-fixups.ts). Only the update
+// itself is replaced: it would run git and pip.
+const updateComfy = vi.fn()
+vi.mock('../render-fixup-deps', async () => {
+  const actual = await vi.importActual<typeof import('../render-fixup-deps')>('../render-fixup-deps')
+  return {
+    renderFixupDeps: (...args: Parameters<typeof actual.renderFixupDeps>) => ({
+      ...actual.renderFixupDeps(...args),
+      updateComfy: (...a: unknown[]) => updateComfy(...a),
+      refresh: async () => undefined,
+    }),
+  }
+})
+
 vi.mock('../agent-context', () => ({
   getActiveAgentModel: () => getActiveAgentModel(),
 }))
@@ -347,6 +361,46 @@ function completedHistory() {
     outputs: { '9': { images: [{ filename: 'out.png', subfolder: '', type: 'output' }] } },
   }
 }
+
+// ── The version gate in the agent's tool ──────────────────────────
+
+describe('vramHandoffGenerate, a ComfyUI too old for the model', () => {
+  const GATE = 'Qwen-Image 2.1 needs ComfyUI 0.37.0 or newer. Update ComfyUI in Settings.'
+  const tooOld = () => Object.assign(new Error(GATE), { name: 'WorkflowUnavailableError', needsComfyUpdate: true })
+
+  beforeEach(() => {
+    updateComfy.mockReset()
+    updateComfy.mockResolvedValue(undefined)
+    useCreateStore.setState({ fixupPrompt: null } as never)
+    getActiveAgentModel.mockReturnValue({ name: 'gpt-4o', providerId: 'openai', remote: false })
+    getImageModels.mockResolvedValue([{ name: 'qwen_image_2.1_int8_convrot.safetensors', type: 'qwenimage21', source: 'unet' }])
+    submitWorkflow.mockResolvedValue('pid-1')
+    getHistory.mockResolvedValue(completedHistory())
+  })
+
+  it('the image tool asks once, updates on yes, builds again and renders', async () => {
+    buildDynamicWorkflow.mockRejectedValueOnce(tooOld()).mockResolvedValue({ '9': { class_type: 'SaveImage' } })
+    const run = vramHandoffGenerate('image', { prompt: 'a cat' })
+    await vi.waitFor(() => expect(useCreateStore.getState().fixupPrompt).not.toBeNull())
+    expect(useCreateStore.getState().fixupPrompt?.title).toBe('ComfyUI needs an update')
+    useCreateStore.getState().fixupPrompt?.resolve(true)
+    const out = await run
+    expect(updateComfy).toHaveBeenCalledTimes(1)
+    expect(buildDynamicWorkflow).toHaveBeenCalledTimes(2)
+    expect(out).toContain('Image generated: out.png')
+  })
+
+  it('a no is reported to the model as not started, with the reason', async () => {
+    buildDynamicWorkflow.mockRejectedValue(tooOld())
+    const run = vramHandoffGenerate('image', { prompt: 'a cat' })
+    await vi.waitFor(() => expect(useCreateStore.getState().fixupPrompt).not.toBeNull())
+    useCreateStore.getState().fixupPrompt?.resolve(false)
+    const out = await run
+    expect(updateComfy).not.toHaveBeenCalled()
+    expect(submitWorkflow).not.toHaveBeenCalled()
+    expect(out).toBe(`Image generation was not started. ${GATE}`)
+  })
+})
 
 // ── 2. cloud/remote SKIP path ─────────────────────────────────────
 

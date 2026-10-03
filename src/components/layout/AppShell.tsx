@@ -50,6 +50,7 @@ import { CloudGateModal } from '../cloud/CloudGateModal'
 import { CloudTeaserModal } from '../cloud/CloudTeaserModal'
 import { ReleaseNotesModal } from '../release/ReleaseNotesModal'
 import { ShortcutsModal } from './ShortcutsModal'
+import { RenderFixupModal } from '../create/experimental/RenderFixupModal'
 import { CommandPalette } from '../ui/CommandPalette'
 import { CreditsExhaustedModal } from './CreditsExhaustedModal'
 import { Titlebar } from './Titlebar'
@@ -1168,6 +1169,10 @@ export function AppShell() {
       {/* Out-of-credits purchase prompt: opens when LU Cloud answers
           code:'credits_exhausted' (monthly budget + top-up wallet empty). */}
       <CreditsExhaustedModal />
+      {/* "One more file is needed" / "ComfyUI needs an update": asked by every
+          local render, from Create and from the agent's tool in Chat, so it
+          lives here and not inside Create. */}
+      <RenderFixupModal />
     </div>
   )
 }

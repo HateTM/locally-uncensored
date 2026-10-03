@@ -83,6 +83,8 @@ import { PaceTracker, overBudget, renderBudgetNotice, renderTimeoutNotice, warmu
 import { asComfyGpuMode } from '../lib/comfy-cpu-banner'
 import { comfyHoldsNoVram } from '../lib/comfy-device'
 import { log } from '../lib/logger'
+import { buildWithFixups, wasDeclined } from '../lib/render-fixups'
+import { renderFixupDeps } from './render-fixup-deps'
 
 /**
  * Is the ComfyUI we are about to render on running on the processor?
@@ -1241,6 +1243,23 @@ async function runHandoff(
 
 // ── Generation bodies ─────────────────────────────────────────────
 
+/** The agent's tool builds through the same question Create asks: a model
+ *  whose companion file is missing or whose ComfyUI is too old gets the
+ *  download or the update offered once, then the build runs again. Without it
+ *  the chat only ever read "needs ComfyUI 0.37.0 or newer" as a failure. */
+function buildFixable<T>(kind: 'image' | 'video', build: () => Promise<T>): Promise<T> {
+  return buildWithFixups(build, renderFixupDeps((line) => emitHandoff('loading_image_model', { kind, detail: line })))
+}
+
+/** How a build error reads in the tool result. A no to the question is the
+ *  user's own decision, not a failure. */
+function buildErrorResult(kind: 'image' | 'video', err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err)
+  return wasDeclined(err)
+    ? `${label(kind)} generation was not started. ${message}`
+    : `${label(kind)} generation failed: ${message}`
+}
+
 /** Image path — mirrors the legacy executeImageGenerate, via buildDynamicWorkflow. */
 async function generateImage(
   prompt: string,
@@ -1294,7 +1313,7 @@ async function generateImage(
     // with the same one.
     const { useCreateStore } = await import('../stores/createStore')
     const qwenTextEncoder = useCreateStore.getState().qwenTextEncoder
-    const workflow = await buildDynamicWorkflow(
+    const workflow = await buildFixable('image', () => buildDynamicWorkflow(
       {
         prompt,
         negativePrompt: typeof args.negativePrompt === 'string' ? args.negativePrompt : '',
@@ -1327,7 +1346,7 @@ async function generateImage(
         ...(listed?.parts ? { modelParts: listed.parts } : {}),
       },
       type,
-    )
+    ))
     // Phase markers (chat-agent hang 2026-06-03): make it obvious in the log
     // whether a stall is in the workflow build (/object_info) or the submit
     // (/prompt). Both are now timeout-bounded, so neither can strand the
@@ -1347,7 +1366,7 @@ async function generateImage(
     return result
   } catch (err) {
     // Surface ComfyUI's message verbatim — an OOM must NOT be masked.
-    return `${label('image')} generation failed: ${err instanceof Error ? err.message : String(err)}`
+    return buildErrorResult('image', err)
   }
 }
 
@@ -1421,7 +1440,7 @@ async function generateVideo(
       const snapped = snapToVideoGrid(clampInt(av.width, base.width, 64, 2048), clampInt(av.height, base.height, 64, 2048))
       const seed = (typeof av.seed === 'number' && Number.isFinite(av.seed)) ? Math.floor(av.seed) : -1
 
-      const workflow = await buildDynamicWorkflow(
+      const workflow = await buildFixable('video', () => buildDynamicWorkflow(
         {
           prompt,
           negativePrompt: typeof args.negativePrompt === 'string' ? args.negativePrompt : '',
@@ -1439,7 +1458,7 @@ async function generateVideo(
           ...(inputImage ? { inputImage } : {}),
         },
         type,
-      )
+      ))
       log.info('vram_handoff.video.submit', { model, mode: inputImage ? 'i2v' : 't2v', family: type, steps: tunSteps, cfg: tunCfg })
       const submitted = await submitCancellable(workflow, seq)
       if (submitted === CANCELLED) return `${label('video')} generation cancelled.`
@@ -1491,7 +1510,7 @@ async function generateVideo(
       )
       const seed = (typeof av.seed === 'number' && Number.isFinite(av.seed)) ? Math.floor(av.seed) : -1
       const motionBucketId = clampInt(av.motionBucketId ?? av.motion_bucket_id, 90, 1, 255)
-      const workflow = await buildDynamicWorkflow(
+      const workflow = await buildFixable('video', () => buildDynamicWorkflow(
         {
           prompt,
           negativePrompt: typeof args.negativePrompt === 'string' ? args.negativePrompt : '',
@@ -1510,7 +1529,7 @@ async function generateVideo(
           motionBucketId,
         },
         type,
-      )
+      ))
       log.info('vram_handoff.video.submit', { model, i2v: true })
       const submitted = await submitCancellable(workflow, seq)
       if (submitted === CANCELLED) return `${label('video')} generation cancelled.`
@@ -1558,7 +1577,7 @@ async function generateVideo(
     log.info('vram_handoff.video.submitted', { promptId })
     return await pollAndExtract(promptId, prompt, label('video'), getVideoTimeoutMs())
   } catch (err) {
-    return `${label('video')} generation failed: ${err instanceof Error ? err.message : String(err)}`
+    return buildErrorResult('video', err)
   }
 }
 

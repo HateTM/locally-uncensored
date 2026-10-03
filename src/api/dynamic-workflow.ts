@@ -2153,6 +2153,8 @@ function requireNodes(allNodes: NodePresence, needed: string[], lane: string): v
     throw new WorkflowUnavailableError(
       `${lane} needs ComfyUI nodes this install does not have yet (${missing.join(', ')}). ${UPDATE_COMFY_HINT}`,
       'unavailable',
+      undefined,
+      { needsComfyUpdate: true },
     )
   }
 }

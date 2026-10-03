@@ -21,7 +21,6 @@ import { Hinweis } from '../../ui/Hinweis'
 import { BannerText } from './BannerText'
 import { MaskEditor } from './MaskEditor'
 import { VhsInstallModal } from './VhsInstallModal'
-import { RenderFixupModal } from './RenderFixupModal'
 import { PresetShelf } from './PresetShelf'
 import type { CreatePreset } from '../../../lib/render/create-presets'
 import { Modal } from '../../ui/Modal'
@@ -504,7 +503,6 @@ function CreateExperimentalInner() {
       <Lightbox item={lightbox} onClose={() => setLightbox(null)} onSaveCharacter={setCharacterFrom} />
       <SaveCharacterModal item={characterFrom} onClose={() => setCharacterFrom(null)} />
       <VhsInstallModal />
-      <RenderFixupModal />
     </div>
   )
 }
