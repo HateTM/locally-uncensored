@@ -490,20 +490,13 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
       log.error('[DiscoverModels] Bundle install failed', { err })
       setInstallError(`${bundle.name}: ${err instanceof Error ? err.message : String(err)}`)
     }
-    // Wait for polling to pick up at least one active download before clearing spinner
-    // This prevents the "disappearing" UI — spinner stays until downloads are visible
-    const waitForDownloads = () => {
-      const active = filenames.some(fn => {
-        const dl = dlStore.getState().downloads[fn]
-        return dl && (dl.status === 'downloading' || dl.status === 'connecting' || dl.status === 'complete')
-      })
-      if (active) {
-        setInstallingBundle(null)
-      } else {
-        setTimeout(waitForDownloads, 500)
-      }
-    }
-    setTimeout(waitForDownloads, 1000)
+    // One poll, so the rows of the downloads that did start are in the store
+    // before the card stops saying "Installing" on its own account. From here
+    // the card shows what the rows say: nothing started (no space, no network,
+    // cancelled) is "Get" again at once, a failed file is "Retry". The loop
+    // that stood here waited for a running row and never ended without one.
+    await dlStore.getState().refresh().catch(() => {})
+    setInstallingBundle(null)
   }
 
   // The three card states live in lib/bundle-state.ts, pure, because bundles
