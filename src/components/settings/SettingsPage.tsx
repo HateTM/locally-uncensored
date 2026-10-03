@@ -1846,8 +1846,9 @@ export function SettingsPage() {
           <Section title="LU Cloud Account" defaultOpen>
             <AccountPanel />
             {/* Local-mode discovery layer (2.5.8): the locked Create tabs +
-                hosted-model rows. The teaser sheet's "Hide Cloud features"
-                link flips this off; this is the way back on. */}
+                hosted-model rows. The teaser sheet's "Don't show Cloud
+                features in Local mode" link flips this off, and nothing else
+                on that sheet does; this is the way back on. */}
             <div className="flex items-center justify-between pt-1">
               <div className="min-w-0 pr-3">
                 <span className="text-[0.7rem] text-gray-700 dark:text-gray-400">Show Cloud features in Local mode</span>

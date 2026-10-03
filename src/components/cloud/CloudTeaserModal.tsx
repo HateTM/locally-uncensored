@@ -2,8 +2,9 @@
 // tools + hosted models as tappable teasers, and THIS is what a tap opens — a
 // small sheet with an animated "show me" demo of the tool, one line of copy,
 // and the path into LU Cloud. Never blocks a local flow (it only opens from
-// explicitly cloud-tagged surfaces), never shows in cloud mode, and the
-// footer link turns the whole discovery layer off (Settings can re-enable).
+// explicitly cloud-tagged surfaces), never shows in cloud mode. Closing it is
+// only closing; the footer link is the one thing here that turns the whole
+// discovery layer off (Settings can re-enable).
 
 import { useEffect, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
@@ -60,7 +61,6 @@ export function CloudTeaserModal() {
   const setCloudTeaser = useUIStore((s) => s.setCloudTeaser)
   const setIntent = useCreateStore((s) => s.setIntent)
   const { updateSettings } = useSettingsStore()
-  const teasersEnabled = useSettingsStore((s) => s.settings.cloudTeasersEnabled)
   // The card's own number (David, 2026-09-07): "Your GPU has 6 GB" says why
   // the tool is greyed out better than any adjective. Read once per opening,
   // from the same detect_gpus the hardware settings use; null when nothing
@@ -75,14 +75,15 @@ export function CloudTeaserModal() {
     return () => { alive = false }
   }, [target])
 
-  // One-time onboarding (David 2026-07-19): the Cloud discovery layer is meant
-  // to appear ONCE per user, never again — not after updates either. Any
-  // dismissal of this sheet (button, backdrop, X, Try local / Get LU Cloud) retires
-  // the whole discovery layer permanently; the persisted flag survives updates,
-  // and Settings can re-enable it. Cloud-only *features* (upscale / eraser) stay
-  // accessible regardless — their sheet renders on tap, not on this flag.
-  const close = () => {
-    if (teasersEnabled) updateSettings({ cloudTeasersEnabled: false })
+  // Closing the sheet changes nothing (the box, 03.10.2026). From 2026-07-19
+  // until 3.0.5 every way out of it (Escape, a click beside it, X, "Not now",
+  // both buttons) also switched "Show Cloud features in Local mode" off, so
+  // one Escape silently took the LU Cloud group out of the model pickers. The
+  // setting now has exactly one control on this sheet, the link at the bottom
+  // that says what it does, and the switch in Settings, General.
+  const close = () => setCloudTeaser(null)
+  const hideCloudFeatures = () => {
+    updateSettings({ cloudTeasersEnabled: false })
     setCloudTeaser(null)
   }
   // 2.5.8: the lanes that ALSO run locally get a "Try local" path — the sheet
@@ -126,6 +127,9 @@ export function CloudTeaserModal() {
             exit={{ opacity: 0, y: 10, scale: 0.97 }}
             transition={{ duration: 0.15, ease: 'easeOut' }}
             onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-label={copy.title}
             className="m-auto shrink-0 w-[360px] max-w-[92vw] rounded-2xl bg-[#232323] border border-white/[0.08] shadow-2xl shadow-black/50 overflow-hidden"
           >
             {/* Demo stage */}
@@ -188,6 +192,13 @@ export function CloudTeaserModal() {
                   Not now
                 </button>
               </div>
+              <button
+                onClick={hideCloudFeatures}
+                title="Turns off Show Cloud features in Local mode. Settings, General turns it back on."
+                className="w-full text-center t-micro text-gray-500 hover:text-gray-300 transition-colors pt-0.5"
+              >
+                Don't show Cloud features in Local mode
+              </button>
             </div>
           </motion.div>
         </motion.div>
