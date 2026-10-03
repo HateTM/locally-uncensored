@@ -574,7 +574,9 @@ export async function installCustomNodes(nodeKeys: string[], opts: CustomNodeIns
       }
       try {
         opts.onProgress?.(`Installing ${entry.name}…`)
-        const result = await backendCall('install_custom_node', { repoUrl: entry.repo, nodeName: entry.name })
+        const result = await backendCall('install_custom_node', {
+          repoUrl: entry.repo, nodeName: entry.name, ...(entry.commit ? { commit: entry.commit } : {}),
+        })
         assertNodeInstallOk(result, entry.name)
         log.info(`[discover] Installed custom node: ${entry.name}`)
       } catch (err) {

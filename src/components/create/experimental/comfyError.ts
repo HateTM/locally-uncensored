@@ -64,3 +64,32 @@ export function comfyStartThrowText(
   if (!advice || base.includes(advice)) return base
   return `${base}\n\n${advice}`
 }
+
+/** What ComfyUI itself printed about a node pack it could not load.
+ *
+ *  ComfyUI writes two lines for such a pack at startup: "Cannot import
+ *  <folder> module for custom nodes: <reason>", and further down, in its list
+ *  of import times, "<n> seconds (IMPORT FAILED): <folder>". The first carries
+ *  the reason, so it wins; the second is the fallback. Colour codes and the
+ *  log prefix are dropped. Empty when ComfyUI said nothing about the pack. */
+export function nodePackImportFailure(lines: string[] | undefined, packName: string): string {
+  // eslint-disable-next-line no-control-regex
+  const plain = (lines ?? []).map((l) => l.replace(/\u001b\[[0-9;]*m/g, '').trim())
+  const about = plain.filter((l) => l.includes(packName))
+  const reason = about.filter((l) => l.includes('Cannot import')).pop()
+  if (reason) return reason.slice(reason.indexOf('Cannot import'))
+  return about.filter((l) => l.includes('(IMPORT FAILED)')).pop() ?? ''
+}
+
+/** The error of a node pack that was installed and still did not register its
+ *  node (the box, 03.10.2026, ComfyUI-RMBG). It used to send the user to "the
+ *  ComfyUI console", which the shipped app does not have. It now carries the
+ *  line ComfyUI printed, read from the same buffer the startup errors use. */
+export function nodePackLoadError(packName: string, nodeClass: string, lines?: string[]): string {
+  const failure = nodePackImportFailure(lines, packName)
+  if (failure) {
+    return `ComfyUI could not load ${packName}, so the ${nodeClass} node is missing. ComfyUI reported: ${failure}`
+  }
+  return `Installed ${packName} and restarted ComfyUI, but it still isn't listing the ${nodeClass} node, ` +
+    'and ComfyUI printed no import error for it. Restart ComfyUI under Settings, AI Backends, then try again.'
+}

@@ -53,6 +53,7 @@ pub async fn install_custom_node(
     app: tauri::AppHandle,
     repoUrl: String,
     nodeName: String,
+    commit: Option<String>,
 ) -> Result<serde_json::Value, String> {
     // Snapshot the state the blocking worker needs before spawning it: a Tauri
     // `State` (and the MutexGuard behind it) is not Send, so clone the values
@@ -86,7 +87,7 @@ pub async fn install_custom_node(
                 }
             },
         };
-        install_custom_node_blocking(repoUrl, nodeName, comfy_path, &fallback_python, &pause)
+        install_custom_node_blocking(repoUrl, nodeName, commit, comfy_path, &fallback_python, &pause)
     })
     .await
     .map_err(|e| format!("Custom node install task failed to run: {e}"))?
@@ -99,6 +100,7 @@ pub async fn install_custom_node(
 fn install_custom_node_blocking(
     repoUrl: String,
     nodeName: String,
+    commit: Option<String>,
     comfy_path: Option<String>,
     fallback_python: &str,
     pause: &ComfyPause<'_>,
@@ -130,6 +132,13 @@ fn install_custom_node_blocking(
         || node_name.starts_with('.')
     {
         return Err("Refusing to install: invalid custom-node name.".to_string());
+    }
+    // A pin is a full commit id and nothing else: it ends up as a git
+    // argument, and a branch name or a leading `-` has no business there.
+    if let Some(c) = &commit {
+        if !is_full_commit_id(c) {
+            return Err("Refusing to install: the pinned commit must be a full 40 character commit id.".to_string());
+        }
     }
 
     info!(node = %node_name, "custom node install start");
@@ -194,21 +203,29 @@ fn install_custom_node_blocking(
     if target_dir.exists() {
         if target_dir.join(".git").exists() {
             println!("[Install] Custom node {} already exists, updating...", node_name);
-            let mut cmd = crate::process_util::foreign_system_command("git");
-            cmd.args(["pull"]).current_dir(&target_dir)
-                .stdout(Stdio::piped()).stderr(Stdio::piped());
-            #[cfg(target_os = "windows")]
-            cmd.creation_flags(CREATE_NO_WINDOW);
-            let output = cmd.output()
-                .map_err(|e| format!("Git pull failed: {}", os_error::english(&e)))?;
-            if !output.status.success() {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                error!(node = %node_name, "custom node git pull failed");
-                return Err(format!(
-                    "Failed to update {} (git pull): {}\n\nIf this keeps failing, \
+            // A pinned pack is set to its commit further down and never
+            // pulled: a pull is exactly what brings in the newer state the
+            // pin is there to keep out.
+            if commit.is_none() {
+                // A checkout that sat on a pin has no branch to pull into.
+                // This is how a pin is released: take it out of the registry
+                // and the next install is back on the default branch.
+                return_to_default_branch(&target_dir).map_err(|e| format!(
+                    "Failed to update {} (git checkout): {}\n\nIf this keeps failing, \
                      delete the folder {} and try the install again.",
-                    node_name, stderr.trim(), target_dir.to_string_lossy()
-                ));
+                    node_name, e, target_dir.to_string_lossy()
+                ))?;
+                let output = git_in(&target_dir, &["pull"])
+                    .map_err(|e| format!("Git pull failed: {e}"))?;
+                if !output.status.success() {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    error!(node = %node_name, "custom node git pull failed");
+                    return Err(format!(
+                        "Failed to update {} (git pull): {}\n\nIf this keeps failing, \
+                         delete the folder {} and try the install again.",
+                        node_name, stderr.trim(), target_dir.to_string_lossy()
+                    ));
+                }
             }
             fresh_clone = false;
         } else {
@@ -238,6 +255,20 @@ fn install_custom_node_blocking(
         }
     }
 
+    // Fresh clone or a checkout that was already there: a pinned pack ends up
+    // on its commit either way, so a clone that ran ahead of the pin (every
+    // install before the pin existed) is set back by the same click.
+    if let Some(c) = &commit {
+        checkout_pinned_commit(&target_dir, c).map_err(|e| {
+            error!(node = %node_name, "custom node pin checkout failed");
+            format!(
+                "Failed to set {} to its tested version (git checkout): {}\n\nIf this keeps failing, \
+                 delete the folder {} and try the install again.",
+                node_name, e, target_dir.to_string_lossy()
+            )
+        })?;
+    }
+
     // A node pack never replaces torch: its requirements go in against a pin
     // of the torch family this ComfyUI runs on, so a pack that asks for
     // another torch fails by name instead of trading the CUDA build for a
@@ -258,6 +289,59 @@ fn install_custom_node_blocking(
         "status": if fresh_clone { "installed" } else { "updated" },
         "path": target_dir.to_string_lossy(),
     }))
+}
+
+/// A full, lowercase or uppercase, 40 character hexadecimal commit id.
+fn is_full_commit_id(s: &str) -> bool {
+    s.len() == 40 && s.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+/// One git call inside a node pack's checkout, output captured, no console
+/// window on Windows.
+fn git_in(dir: &std::path::Path, args: &[&str]) -> Result<std::process::Output, String> {
+    let mut cmd = crate::process_util::foreign_system_command("git");
+    cmd.args(args).current_dir(dir).stdout(Stdio::piped()).stderr(Stdio::piped());
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    cmd.output().map_err(|e| os_error::english(&e))
+}
+
+/// `git_in`, where anything but success is the error text git printed.
+fn git_ok(dir: &std::path::Path, args: &[&str]) -> Result<String, String> {
+    let output = git_in(dir, args)?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+/// Put a node pack's checkout on the commit the registry pins it to.
+///
+/// The box, 03.10.2026, ComfyUI-RMBG: the pack's head of 30.09.2026 no longer
+/// loads on Windows, and the installer cloned whatever the head was. A pinned
+/// pack is set to a commit that was seen loading instead. Nothing is fetched
+/// when the commit is already there, so a second click works offline.
+fn checkout_pinned_commit(target_dir: &std::path::Path, commit: &str) -> Result<(), String> {
+    if git_ok(target_dir, &["rev-parse", "HEAD"]).is_ok_and(|head| head.eq_ignore_ascii_case(commit)) {
+        return Ok(());
+    }
+    let object = format!("{commit}^{{commit}}");
+    if git_ok(target_dir, &["cat-file", "-e", &object]).is_err() {
+        git_ok(target_dir, &["fetch", "origin"])?;
+    }
+    git_ok(target_dir, &["checkout", "--detach", commit]).map(|_| ())
+}
+
+/// Bring a checkout that sits on a bare commit back onto the default branch
+/// of its origin, so that a pull has a branch to update. A checkout that is
+/// on a branch already is left alone.
+fn return_to_default_branch(target_dir: &std::path::Path) -> Result<(), String> {
+    if git_ok(target_dir, &["symbolic-ref", "-q", "HEAD"]).is_ok() {
+        return Ok(());
+    }
+    let remote_head = git_ok(target_dir, &["rev-parse", "--abbrev-ref", "origin/HEAD"])?;
+    let branch = remote_head.strip_prefix("origin/").unwrap_or(&remote_head);
+    git_ok(target_dir, &["checkout", branch]).map(|_| ())
 }
 
 /// How the installer takes this app's own ComfyUI out of the way and brings
@@ -766,6 +850,109 @@ mod tests {
         let body = &body[..body.find("\n}\n").expect("install_custom_node_blocking has no end")];
         assert!(body.contains("install_requirements_freeing_locked_files("), "the install no longer frees a locked file");
         assert!(body.contains("&TORCH_PACKAGES"), "the install no longer pins torch");
+    }
+
+    // ── A pinned node pack (the box, 03.10.2026, ComfyUI-RMBG) ──────────
+
+    fn test_git(dir: &std::path::Path, args: &[&str]) -> String {
+        let mut all = vec!["-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false"];
+        all.extend_from_slice(args);
+        git_ok(dir, &all).unwrap_or_else(|e| panic!("git {args:?} failed: {e}"))
+    }
+
+    /// An origin with two commits and a clone of it that sits on the newer
+    /// one, the state every install before the pin left behind. Returns the
+    /// temp dir, the clone and the two commit ids, older first.
+    fn origin_and_clone() -> (tempfile::TempDir, PathBuf, String, String) {
+        let tmp = tempfile::tempdir().unwrap();
+        let origin = tmp.path().join("origin");
+        std::fs::create_dir(&origin).unwrap();
+        test_git(&origin, &["init", "-b", "main"]);
+        std::fs::write(origin.join("node.py"), "good").unwrap();
+        test_git(&origin, &["add", "."]);
+        test_git(&origin, &["commit", "-m", "good"]);
+        let good = test_git(&origin, &["rev-parse", "HEAD"]);
+        std::fs::write(origin.join("node.py"), "broken").unwrap();
+        test_git(&origin, &["commit", "-am", "broken"]);
+        let broken = test_git(&origin, &["rev-parse", "HEAD"]);
+        let clone = tmp.path().join("clone");
+        test_git(tmp.path(), &["clone", &origin.to_string_lossy(), &clone.to_string_lossy()]);
+        (tmp, clone, good, broken)
+    }
+
+    #[test]
+    fn a_clone_that_ran_ahead_is_set_back_to_the_pinned_commit() {
+        let (_tmp, clone, good, broken) = origin_and_clone();
+        assert_eq!(test_git(&clone, &["rev-parse", "HEAD"]), broken);
+
+        checkout_pinned_commit(&clone, &good).unwrap();
+
+        assert_eq!(test_git(&clone, &["rev-parse", "HEAD"]), good);
+        assert_eq!(std::fs::read_to_string(clone.join("node.py")).unwrap(), "good");
+        // A second click finds the pin in place and has nothing to do.
+        checkout_pinned_commit(&clone, &good).unwrap();
+        assert_eq!(test_git(&clone, &["rev-parse", "HEAD"]), good);
+    }
+
+    #[test]
+    fn a_pin_the_clone_has_not_seen_yet_is_fetched_first() {
+        let (tmp, clone, _good, _broken) = origin_and_clone();
+        let origin = tmp.path().join("origin");
+        std::fs::write(origin.join("node.py"), "fixed").unwrap();
+        test_git(&origin, &["commit", "-am", "fixed"]);
+        let fixed = test_git(&origin, &["rev-parse", "HEAD"]);
+
+        checkout_pinned_commit(&clone, &fixed).unwrap();
+
+        assert_eq!(std::fs::read_to_string(clone.join("node.py")).unwrap(), "fixed");
+    }
+
+    #[test]
+    fn a_pin_that_does_not_exist_is_an_error_and_leaves_the_checkout_alone() {
+        let (_tmp, clone, _good, broken) = origin_and_clone();
+        let err = checkout_pinned_commit(&clone, "0123456789012345678901234567890123456789").unwrap_err();
+        assert!(!err.is_empty());
+        assert_eq!(test_git(&clone, &["rev-parse", "HEAD"]), broken);
+    }
+
+    #[test]
+    fn a_released_pin_goes_back_to_the_default_branch_and_pulls_again() {
+        let (_tmp, clone, good, broken) = origin_and_clone();
+        checkout_pinned_commit(&clone, &good).unwrap();
+        assert!(git_ok(&clone, &["symbolic-ref", "-q", "HEAD"]).is_err(), "the pin leaves no branch checked out");
+
+        return_to_default_branch(&clone).unwrap();
+
+        assert_eq!(test_git(&clone, &["symbolic-ref", "--short", "HEAD"]), "main");
+        test_git(&clone, &["pull"]);
+        assert_eq!(test_git(&clone, &["rev-parse", "HEAD"]), broken);
+        // On a branch already: nothing to do, and no error.
+        return_to_default_branch(&clone).unwrap();
+    }
+
+    #[test]
+    fn only_a_full_commit_id_is_a_pin() {
+        assert!(is_full_commit_id("58f1947a11567a9f8b707223185570850e773856"));
+        assert!(!is_full_commit_id("58f1947"));
+        assert!(!is_full_commit_id("main"));
+        assert!(!is_full_commit_id("--upload-pack=touch /tmp/x; aaaaaaaaaaaaaaaa"));
+        assert!(!is_full_commit_id("58f1947a11567a9f8b707223185570850e77385g"));
+    }
+
+    /// Source guard: the pin is worth nothing if the command pulls a pinned
+    /// pack forward or never runs the checkout.
+    #[test]
+    fn install_custom_node_sets_a_pinned_pack_to_its_commit_and_never_pulls_it() {
+        let src = include_str!("custom_nodes.rs");
+        let start = src.find("fn install_custom_node_blocking(").expect("install_custom_node_blocking is gone");
+        let body = &src[start..];
+        let body = &body[..body.find("\n}\n").expect("install_custom_node_blocking has no end")];
+        let at_guard = body.find("if commit.is_none() {").expect("the pull is no longer skipped for a pinned pack");
+        let at_pull = body.find("\"pull\"").expect("the pull is gone");
+        assert!(at_guard < at_pull, "the pull must sit inside the unpinned branch");
+        let at_pin = body.find("checkout_pinned_commit(").expect("a pinned pack is no longer set to its commit");
+        let at_reqs = body.find("install_requirements_freeing_locked_files(").expect("the requirements install is gone");
+        assert!(at_pin < at_reqs, "the requirements must be the pinned commit's, so the checkout comes first");
     }
 
     // ── install_custom_node helpers (#72 bob: VHS install loop) ─────────

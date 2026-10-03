@@ -6,6 +6,7 @@ import { useCreateStore, type GalleryItem } from '../../../stores/createStore'
 import { listedLoras, getVAEModels, checkComfyConnection, refreshComfyModels, bundleForVideoIntent } from '../../../api/comfyui'
 import { getAllNodeInfo, clearNodeCache } from '../../../api/comfyui-nodes'
 import { installCustomNodes, getImageBundles, getVideoBundles, getAudioBundles, getLipsyncBundles, getMotionBundles, startModelDownload, getDownloadProgress, modelsNotVisibleInComfy, judgeableFolders } from '../../../api/discover'
+import { CUSTOM_NODE_REGISTRY } from '../../../api/model-bundles'
 import { backendCall, isMacOS, isLinux } from '../../../api/backend'
 import { asComfyGpuMode, comfyCpuBannerText, type ComfyCpuBannerFacts } from '../../../lib/comfy-cpu-banner'
 import { installMlxStack } from '../../../api/mlx-install'
@@ -13,7 +14,7 @@ import { useDownloadStore } from '../../../stores/downloadStore'
 import { downloadBundleFiles, waitOrAbort, waitForModelsVisible, InstallCancelled } from '../../../lib/bundle-install'
 import { ensureLocalFilename } from './loadImage'
 import { batchReady, requestBatchStop, runBatchEdit } from './batchRun'
-import { comfyStartupError, COMFY_INSTALLED_BUT_DEAD } from './comfyError'
+import { comfyStartupError, nodePackLoadError, COMFY_INSTALLED_BUT_DEAD } from './comfyError'
 import { restartComfyForNewNodes } from '../../../api/comfy-restart'
 import type { CloudQuota } from '../../../lib/render/cloud-jobs'
 
@@ -406,10 +407,8 @@ export function CreateExpProvider({ children }: { children: ReactNode }) {
         }
       } catch { /* ComfyUI still restarting — keep polling */ }
     }
-    throw new Error(
-      `Installed ${pack} and restarted ComfyUI, but it still isn't listing the ${nodeClass} node. ` +
-      'Open the Model Manager to finish the install, or check the ComfyUI console for a pip error.',
-    )
+    const out = await backendCall<{ lines?: string[] }>('comfyui_last_output').catch(() => null)
+    throw new Error(nodePackLoadError(CUSTOM_NODE_REGISTRY[pack].name, nodeClass, out?.lines))
   }, [setCaps, ensureComfyRunning])
 
   // One-click starter models for a fresh PC: ensure ComfyUI, then pull the

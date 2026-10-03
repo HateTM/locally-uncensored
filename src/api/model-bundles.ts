@@ -753,7 +753,22 @@ export interface CustomNodeDef {
   name: string
 }
 
-export const CUSTOM_NODE_REGISTRY: Record<string, { repo: string; name: string; requiredNodes: string[] }> = {
+export interface CustomNodeEntry {
+  repo: string
+  name: string
+  requiredNodes: string[]
+  /**
+   * A tested commit of the pack. The installer puts the checkout on exactly
+   * this commit (fresh clone or one that is already there) instead of the
+   * head of the repository. Only for a pack whose head was seen broken, with
+   * the date and the reason next to it. To release a pin, delete the field:
+   * the next install goes back to the default branch and pulls
+   * (custom_nodes.rs, return_to_default_branch).
+   */
+  commit?: string
+}
+
+export const CUSTOM_NODE_REGISTRY: Record<string, CustomNodeEntry> = {
   'animatediff-evolved': {
     repo: 'https://github.com/Kosinkadink/ComfyUI-AnimateDiff-Evolved',
     name: 'ComfyUI-AnimateDiff-Evolved',
@@ -796,10 +811,21 @@ export const CUSTOM_NODE_REGISTRY: Record<string, { repo: string; name: string; 
   // for · and auto-downloads its cutout model (BiRefNet / RMBG-2.0, ~300 MB)
   // into ComfyUI/models/RMBG on first use. So the one-click action only needs to
   // install the node; the model lands on the first cutout run.
+  //
+  // Pinned on 03.10.2026 to 58f1947a (21.08.2026, pack version 3.1.0), the last
+  // commit before the pack's 3.2.0 uploads of 30.09.2026. From 54e62337 on,
+  // the pack's own loader dies on the first node file that fails to import
+  // (its error line names a variable that does not exist), and on Windows one
+  // always fails: the SAM3 node imports triton, which exists for Linux only.
+  // ComfyUI then reports IMPORT FAILED for the whole pack and no RMBG node.
+  // Measured on the Windows box: head 229529e0 does not load, 58f1947a lists
+  // RMBG. Release the pin (delete `commit`) once the pack's head loads again
+  // on Windows with no triton installed.
   'rmbg': {
     repo: 'https://github.com/1038lab/ComfyUI-RMBG',
     name: 'ComfyUI-RMBG',
     requiredNodes: ['RMBG'],
+    commit: '58f1947a11567a9f8b707223185570850e773856',
   },
   // GGUF quant loader (city96). Lets the 2.5.8 lanes offer Q4 quants of the
   // 14B Wan models (S2V / Animate / NSFW finetunes) — the difference between

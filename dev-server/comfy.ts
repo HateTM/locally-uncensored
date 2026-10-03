@@ -310,6 +310,11 @@ export function registerComfyInstallRoutes(routes: RouteMount, comfy: ComfyLaunc
         console.log(`[CustomNode] Installing ${nodeName} from ${repoUrl}...`)
         try {
           execFileSync('git', ['clone', repoUrl, targetDir], { timeout: 120000 })
+          // A pinned pack goes onto its tested commit (model-bundles.ts).
+          const commit = bodyString(body, 'commit') ?? ''
+          if (/^[0-9a-f]{40}$/i.test(commit)) {
+            execFileSync('git', ['checkout', '--detach', commit], { cwd: targetDir, timeout: 60000 })
+          }
           // Try pip install if requirements.txt exists
           const reqFile = join(targetDir, 'requirements.txt')
           if (existsSync(reqFile)) {
