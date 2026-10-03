@@ -16,11 +16,18 @@
  *     after the other, so the largest one is what has to fit, and a sampler
  *     needs room next to its weights.
  *   - A card below the minimum needs more, a card from the comfortable value
- *     up fits, everything between is tight: it runs, and it loads slowly.
+ *     up fits, everything between is tight: it runs, and loading can be slow.
  *
- * Nothing here is a measurement. Every number comes out of the catalogue's
- * `vramRequired` text and its file sizes. A text that names no number at all
- * ("depends on the checkpoint") gets no verdict instead of a guessed one.
+ * This file measures nothing. Every number comes out of the catalogue's
+ * `vramRequired` text and its file sizes; where that text is a measurement,
+ * the bundle says so beside it (api/model-bundles.ts). A text that names no
+ * number at all ("depends on the checkpoint") gets no verdict instead of a
+ * guessed one.
+ *
+ * The tight line names no duration. Measured on the same 12 GB card on
+ * 03.10.2026, Z-Image (tight) loaded cold in 65 to 76 s and once in 19
+ * minutes, so "loading takes minutes" was wrong most of the time and too
+ * kind once.
  *
  * Pure and without imports, so api/model-bundles can stamp its entries with it
  * and no import cycle can form.
@@ -149,7 +156,7 @@ export function vramFitLabel(fit: VramFit, vramGb: number | null | undefined): s
 /** The line on a Model Manager card, where there is room to say what tight means. */
 export function vramFitLine(fit: VramFit, vramGb: number | null | undefined): string {
   const label = vramFitLabel(fit, vramGb)
-  return fit === 'tight' && label ? `${label}: runs, but loading takes minutes` : label
+  return fit === 'tight' && label ? `${label}: runs, loading can be slow` : label
 }
 
 /** What the card's verdict rests on, for the tooltip. */

@@ -370,7 +370,7 @@ describe('the two Model Manager bundles', () => {
     for (const b of bundles) {
       expect(b.tier, b.name).toBe('best')
       expect(b.workflow, b.name).toBe('qwenimage')
-      expect(b.vramRequired, b.name).toBe('16 GB')
+      expect(b.vramRequired, b.name).toBe('12 GB best, offloads on less')
       expect(b.tags, b.name).toContain('Addon')
       expect(b.customNodes, b.name).toBeUndefined()
     }

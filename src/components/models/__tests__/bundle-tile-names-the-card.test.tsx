@@ -30,7 +30,7 @@ describe('a bundle tile compares itself with the detected card', () => {
   it('tight: says it runs and what it costs', () => {
     const html = tile('Z-Image Turbo (Unfiltered, Fast)', 12)
     expect(html).toContain('data-bundle-fit="tight"')
-    expect(html).toContain('Tight on your 12 GB card: runs, but loading takes minutes')
+    expect(html).toContain('Tight on your 12 GB card: runs, loading can be slow')
     expect(html).toContain('title="Runs from 10 GB. Loads fully into graphics memory from 16 GB."')
     expect(html).toContain('bg-sky-500/80')
     // Never red: a tight model is slow, not broken.

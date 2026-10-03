@@ -402,7 +402,14 @@ export function getImageBundles(): ModelBundle[] {
       // listing. Needs ComfyUI 0.37.0 or newer for the TextEncodeQwenImage21
       // node; an older one is told so before anything is built.
       totalSizeGB: 16.1,
-      vramRequired: '16-24 GB',
+      // Measured on the test box on 03.10.2026 (RTX 3060, 12 GB, ComfyUI
+      // 0.38.0): cold load 46 s, a 768 x 768 picture in 74 s in all (25 steps,
+      // about 1 s each), 1024 x 1024 warm in 85 s, peak 11.5 GB of graphics
+      // memory, no error. The text encoder and the image model load one after
+      // the other, so the card holds one at a time. Not measured below 12 GB.
+      // The figure before this was "16-24 GB" off the model card, and it told
+      // the owner of a 12 GB card "Needs more".
+      vramRequired: '12 GB best, offloads on less',
       workflow: 'qwenimage',
       tier: 'best',
       url: 'https://huggingface.co/Comfy-Org/Qwen-Image-2.1',
@@ -429,9 +436,11 @@ export function getImageBundles(): ModelBundle[] {
       description: 'Qwen-Image 2.1 with a text encoder that has its refusal direction removed by the community (Heretic). Only the text encoder differs: the image model and the VAE are the official files, shared with the official bundle and not downloaded twice. Generates from a prompt and edits a reference image from a prompt, no mask needed. With both text encoders installed, pick one under Text encoder in the Expert settings. Image model under the Qwen Research License, non-commercial use: https://huggingface.co/Qwen/Qwen-Image-2.1/blob/main/LICENSE. Text encoder under Apache 2.0.',
       tags: ['Qwen Image 2.1', 'Image', 'Edit', '1024px'],
       uncensored: true,
-      // 6.76 + 8.71 + 0.63, in gibibytes like the official bundle.
+      // 6.76 + 8.71 + 0.63, in gibibytes like the official bundle. The VRAM
+      // figure is the official bundle's measurement of 03.10.2026: the same
+      // three file sizes on the same lane.
       totalSizeGB: 16.1,
-      vramRequired: '16-24 GB',
+      vramRequired: '12 GB best, offloads on less',
       workflow: 'qwenimage',
       tier: 'best',
       url: 'https://huggingface.co/pottokao/Qwen-Image-2.1-Text-Encoder-Heretic-int8-convrot',
@@ -471,9 +480,11 @@ export function getImageBundles(): ModelBundle[] {
       description: 'A community finetune of Qwen-Image 2.1 by Noctaluna, published as an unfiltered edition. The image model itself is changed: its notice says the Qwen-Image 2.1 transformer weights were modified. Generates from a prompt and edits a reference image from a prompt, no mask needed. The text encoder and the VAE are the official files, shared with the official bundle and not downloaded twice. Qwen Research License, non-commercial use: https://huggingface.co/Noctaluna/Noct-Q-Uncensored-Qwen-Image-2.1/blob/main/LICENSE',
       tags: ['Qwen Image 2.1', 'Unfiltered', 'Image', 'Edit', '1024px'],
       uncensored: true,
-      // 6.76 + 8.71 + 0.63, in gibibytes like the official bundle.
+      // 6.76 + 8.71 + 0.63, in gibibytes like the official bundle. The VRAM
+      // figure is the official bundle's measurement of 03.10.2026: the same
+      // three file sizes on the same lane.
       totalSizeGB: 16.1,
-      vramRequired: '16-24 GB',
+      vramRequired: '12 GB best, offloads on less',
       workflow: 'qwenimage',
       tier: 'best',
       url: 'https://huggingface.co/Noctaluna/Noct-Q-Uncensored-Qwen-Image-2.1',
@@ -501,16 +512,21 @@ export function getImageBundles(): ModelBundle[] {
     // ComfyUI 0.37.2 or newer. Byte counts and SHA-256 are the Hugging Face
     // LFS values read on 2026-10-03; all four addresses answer without a
     // token. sizeGB is gibibytes, as everywhere in this file. The VRAM figure
-    // is the one the enhancer's node pack author measured for running it
-    // inside ComfyUI ("16 GB recommended"). The tier is the family's, as for
-    // every add-on (local-model-tier.test.ts).
+    // is measured on the test box on 03.10.2026 (RTX 3060, 12 GB, ComfyUI
+    // 0.38.0) with the official enhancer: a 768 x 768 picture with the rewrite
+    // in 160 s in all (74 s without it), the rewrite itself about 70 s for a
+    // new picture and about 175 s for an edit, up to 9.7 GB of graphics memory
+    // while it writes, peak 11.4 GB over the run, no error. The node pack
+    // author's "16 GB recommended" told the owner of that card "Needs more".
+    // The file without refusals has the same size and layout. The tier is the
+    // family's, as for every add-on (local-model-tier.test.ts).
     {
       name: 'Qwen-Image 2.1 Prompt Enhancer (Official)',
       description: 'Add-on for Qwen-Image 2.1. Turns a short prompt or edit instruction into the long, detailed prompt the model works best with, and looks at your pictures when you edit. It runs before the image model and makes room for it afterwards. Made to play it safe: it can soften or refuse an instruction. Turn it on with Improve my prompt in the advanced settings. Qwen Research License, non-commercial use: https://huggingface.co/Qwen/Qwen-Image-2.1-PE-T2I/blob/main/LICENSE',
       tags: ['Qwen Image 2.1', 'Prompt Enhancer', 'Addon'],
       uncensored: false,
       totalSizeGB: 17.64,
-      vramRequired: '16 GB',
+      vramRequired: '12 GB best, offloads on less',
       workflow: 'qwenimage',
       tier: 'best',
       url: 'https://huggingface.co/Comfy-Org/Qwen-Image-2.1',
@@ -541,7 +557,7 @@ export function getImageBundles(): ModelBundle[] {
       tags: ['Qwen Image 2.1', 'Prompt Enhancer', 'Addon'],
       uncensored: true,
       totalSizeGB: 17.64,
-      vramRequired: '16 GB',
+      vramRequired: '12 GB best, offloads on less',
       workflow: 'qwenimage',
       tier: 'best',
       url: 'https://huggingface.co/Adahm/PE-Heretic-INT8-ConvRot-for-Qwen-Image-2.1',

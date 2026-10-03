@@ -153,7 +153,7 @@ export const RELEASE_NOTES: ReleaseNote[] = [
       },
       {
         title: 'Qwen-Image 2.1 gets a transparent background and its prompt enhancer.',
-        detail: 'On your own machine, the image settings have a "Transparent background" switch for new pictures with Qwen-Image 2.1. The picture is saved as a PNG with an alpha channel and shown on a checkerboard. The Model Manager offers the Qwen-Image 2.1 Prompt Enhancer as two downloads, Official and No Refusals, both for 16 GB cards (issue 148). With one installed, "Improve my prompt" lets you choose who writes in the "Rewritten by" row: the enhancer or your chat model. The enhancer needs ComfyUI 0.37.2 or newer.',
+        detail: 'On your own machine, the image settings have a "Transparent background" switch for new pictures with Qwen-Image 2.1. The picture is saved as a PNG with an alpha channel and shown on a checkerboard. The Model Manager offers the Qwen-Image 2.1 Prompt Enhancer as two downloads, Official and No Refusals, both running on a 12 GB card (issue 148). With one installed, "Improve my prompt" lets you choose who writes in the "Rewritten by" row: the enhancer or your chat model. The enhancer needs ComfyUI 0.37.2 or newer.',
       },
       {
         title: 'Dropdowns stay inside the window.',
@@ -190,7 +190,7 @@ export const RELEASE_NOTES: ReleaseNote[] = [
           },
           {
             title: 'Local image, video and music models say whether they fit your graphics card.',
-            detail: 'With a detected graphics card, each download in the Model Manager compares itself with it: "Fits your 12 GB card", "Tight on your 12 GB card: runs, but loading takes minutes" or "Needs more than your 12 GB card". The model picker in Create marks a model that is tight or needs more, and when loading such a model takes longer than a minute, the waiting line says why. The Z-Image Turbo description no longer promises 8 to 15 seconds per image, which did not hold on smaller cards. Without a detected card, as on a Mac, nothing changes.',
+            detail: 'With a detected graphics card, each download in the Model Manager compares itself with it: "Fits your 12 GB card", "Tight on your 12 GB card: runs, loading can be slow" or "Needs more than your 12 GB card". The model picker in Create marks a model that is tight or needs more, and when loading such a model takes longer than a minute, the waiting line says why. The Z-Image Turbo description no longer promises 8 to 15 seconds per image, which did not hold on smaller cards. Without a detected card, as on a Mac, nothing changes.',
           },
           {
             title: '"Save character" on a video keeps frames as a character.',

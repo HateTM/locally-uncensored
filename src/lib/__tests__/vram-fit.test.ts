@@ -115,7 +115,7 @@ describe('the words', () => {
     expect(vramFitLabel('tight', 12)).toBe('Tight on your 12 GB card')
     expect(vramFitLabel('big', 12)).toBe('Needs more than your 12 GB card')
     expect(vramFitLine('fits', 12)).toBe('Fits your 12 GB card')
-    expect(vramFitLine('tight', 12)).toBe('Tight on your 12 GB card: runs, but loading takes minutes')
+    expect(vramFitLine('tight', 12)).toBe('Tight on your 12 GB card: runs, loading can be slow')
     expect(vramFitLine('big', 12)).toBe('Needs more than your 12 GB card')
   })
 
@@ -186,11 +186,12 @@ describe('every bundle in the catalogue carries the two numbers', () => {
     ['FLUX 2 Klein 4B (Next Gen)', 8, 10, 'tight fits fits fits'],
     ['Z-Image Turbo (Unfiltered, Fast)', 10, 16, 'big tight fits fits'],
     ['Z-Image Base (Unfiltered, Quality)', 10, 16, 'big tight fits fits'],
-    ['Qwen-Image 2.1 (Generate and Edit)', 16, 24, 'big big tight fits'],
-    ['Qwen-Image 2.1 (No Refusals)', 16, 24, 'big big tight fits'],
-    ['Noct Q (Qwen-Image 2.1, Unfiltered)', 16, 24, 'big big tight fits'],
-    ['Qwen-Image 2.1 Prompt Enhancer (Official)', 16, 16, 'big big fits fits'],
-    ['Qwen-Image 2.1 Prompt Enhancer (No Refusals)', 16, 16, 'big big fits fits'],
+    // Measured on the box, 03.10.2026 (RTX 3060, 12 GB): see the test below.
+    ['Qwen-Image 2.1 (Generate and Edit)', 0, 12, 'tight fits fits fits'],
+    ['Qwen-Image 2.1 (No Refusals)', 0, 12, 'tight fits fits fits'],
+    ['Noct Q (Qwen-Image 2.1, Unfiltered)', 0, 12, 'tight fits fits fits'],
+    ['Qwen-Image 2.1 Prompt Enhancer (Official)', 0, 12, 'tight fits fits fits'],
+    ['Qwen-Image 2.1 Prompt Enhancer (No Refusals)', 0, 12, 'tight fits fits fits'],
     ['DreamShaper XL Turbo V2 (Anime/Stylized)', 6, 8, 'fits fits fits fits'],
     ['ERNIE-Image Turbo', 24, 24, 'big big big fits'],
     ['ERNIE-Image Base', 24, 24, 'big big big fits'],
@@ -233,10 +234,35 @@ describe('every bundle in the catalogue carries the two numbers', () => {
     }
   })
 
+  // The box, 03.10.2026, RTX 3060 12 GB, ComfyUI 0.38.0: Qwen-Image 2.1 loads
+  // cold in 46 s and makes a 768 picture in 74 s in all, peak 11.5 GB; with the
+  // prompt enhancer a picture takes 160 s, peak 11.4 GB. The catalogue said
+  // "16-24 GB" and "16 GB", which told the owner of that card "Needs more".
+  it('the box that measured it: Qwen-Image 2.1 and its enhancers fit a 12 GB card', () => {
+    const image = getImageBundles()
+    const measured = [
+      'Qwen-Image 2.1 (Generate and Edit)', 'Qwen-Image 2.1 (No Refusals)', 'Noct Q (Qwen-Image 2.1, Unfiltered)',
+      'Qwen-Image 2.1 Prompt Enhancer (Official)', 'Qwen-Image 2.1 Prompt Enhancer (No Refusals)',
+    ]
+    for (const name of measured) {
+      const b = image.find((x) => x.name === name)!
+      expect(b.vramRequired, name).toBe('12 GB best, offloads on less')
+      expect(vramFitLine(vramFit(b, 12), 12), name).toBe('Fits your 12 GB card')
+      expect(vramFit(b, 8), name).toBe('tight')
+    }
+  })
+
+  // Z-Image on the same card: 65 to 76 s to load cold, once 19 minutes. So the
+  // tight line promises neither minutes nor speed.
+  it('the tight line holds for every tight case: it names no duration', () => {
+    expect(vramFitLine('tight', 12)).toBe('Tight on your 12 GB card: runs, loading can be slow')
+    expect(vramFitLine('tight', 12)).not.toMatch(/minute|second/)
+  })
+
   it('the box that raised it: Z-Image is tight on 12 GB, the add-ons fit every card', () => {
     const image = getImageBundles()
     expect(vramFitLine(vramFit(image.find((b) => b.name.startsWith('Z-Image Turbo'))!, 12), 12))
-      .toBe('Tight on your 12 GB card: runs, but loading takes minutes')
+      .toBe('Tight on your 12 GB card: runs, loading can be slow')
     // Counter-check 2026-08-29: the old reader answered 99 GB to "any" and
     // stamped a 0.17 GB LoRA "Too big for your GPU".
     for (const name of ['SDXL VAE (fp16-fix) · addon', 'Pixel Art XL · SDXL LoRA']) {
