@@ -112,6 +112,9 @@ interface UIState {
   cloudGateOpen: boolean
   /** CloudTeaserModal, null = closed. */
   cloudTeaser: CloudTeaserTarget | null
+  /** The Cloud sheet's link has just switched the Cloud features off. Create
+   *  says once where they are switched back on. Never persisted. */
+  cloudHiddenNotice: boolean
   /** The hosted model the user named on the way into cloud mode, by clicking
    *  its row in the local-mode picker. Read once by the mode rule when the
    *  flip lands, then cleared. Never persisted: it describes one click, not a
@@ -144,6 +147,7 @@ interface UIState {
   setSidebarOpen: (open: boolean) => void
   setCloudGateOpen: (open: boolean) => void
   setCloudTeaser: (target: CloudTeaserTarget | null) => void
+  setCloudHiddenNotice: (shown: boolean) => void
   setPendingCloudModel: (name: string | null) => void
   setSidebarWidth: (width: number, viewportWidth: number) => void
   setAgentPanelWidth: (width: number, viewportWidth: number) => void
@@ -197,6 +201,7 @@ export const useUIStore = create<UIState>()(
       sidebarOpen: false,
       cloudGateOpen: false,
       cloudTeaser: null,
+      cloudHiddenNotice: false,
       pendingCloudModel: null,
       sidebarWidth: SIDEBAR_DEFAULT_WIDTH,
       agentPanelWidth: AGENT_PANEL_DEFAULT_WIDTH,
@@ -225,6 +230,7 @@ export const useUIStore = create<UIState>()(
       setSidebarOpen: (open) => set({ sidebarOpen: open }),
       setCloudGateOpen: (open) => set({ cloudGateOpen: open }),
       setCloudTeaser: (target) => set({ cloudTeaser: target }),
+      setCloudHiddenNotice: (shown) => set({ cloudHiddenNotice: shown }),
       setPendingCloudModel: (name) => set({ pendingCloudModel: name }),
       setSidebarWidth: (width, viewportWidth) =>
         set({ sidebarWidth: clampSidebarWidth(width, viewportWidth) }),

@@ -59,6 +59,7 @@ const INTENT_COPY: Record<Extract<CloudTeaserTarget, { surface: 'intent' }>['int
 export function CloudTeaserModal() {
   const target = useUIStore((s) => s.cloudTeaser)
   const setCloudTeaser = useUIStore((s) => s.setCloudTeaser)
+  const setCloudHiddenNotice = useUIStore((s) => s.setCloudHiddenNotice)
   const setIntent = useCreateStore((s) => s.setIntent)
   const { updateSettings } = useSettingsStore()
   // The card's own number (David, 2026-09-07): "Your GPU has 6 GB" says why
@@ -85,6 +86,9 @@ export function CloudTeaserModal() {
   const hideCloudFeatures = () => {
     updateSettings({ cloudTeasersEnabled: false })
     setCloudTeaser(null)
+    // The tabs and rows vanish with this click, so Create says where they
+    // come back (CloudHiddenNotice).
+    setCloudHiddenNotice(true)
   }
   // 2.5.8: the lanes that ALSO run locally get a "Try local" path — the sheet
   // stops being a pure upsell and becomes the fork between the two lanes.

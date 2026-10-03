@@ -1,6 +1,7 @@
 import { Cloud } from 'lucide-react'
 import { useCreateStore } from '../../../stores/createStore'
 import { useUIStore, type CloudTeaserTarget } from '../../../stores/uiStore'
+import { useSettingsStore } from '../../../stores/settingsStore'
 import { isIntentLocked, visibleIntents } from './intents'
 import { isMlxImageHost } from '../../../api/mlx-image'
 import { cn } from '../ui/cn'
@@ -63,7 +64,9 @@ export function IntentBar() {
   const setIntent = useCreateStore((s) => s.setIntent)
   const backend = useCreateStore((s) => s.backend)
   const setCloudTeaser = useUIStore((s) => s.setCloudTeaser)
-  // Every tool is always in the bar. The 2.5.8 lanes with hasLocalLane
+  // Every tool that can run or be previewed is in the bar. With "Show Cloud
+  // features in Local mode" off, the hosted-only tools are left out of the
+  // local bar (visibleIntents). The 2.5.8 lanes with hasLocalLane
   // (lipsync / music / extend / motion) are REAL local tabs, plain selectable
   // pills with NO cloud glyph (David 2026-07-19: the top row only carries a
   // cloud badge for the genuinely hosted-only tools). Only upscale, eraser and
@@ -74,7 +77,8 @@ export function IntentBar() {
   // either, so they lock there too. Both rules live in intents.ts so they stay
   // pure + unit tested; this component only renders the verdict.
   const mlxHost = isMlxImageHost()
-  const intents = visibleIntents(backend, mlxHost)
+  const cloudFeatures = useSettingsStore((s) => s.settings.cloudTeasersEnabled)
+  const intents = visibleIntents(backend, mlxHost, cloudFeatures)
 
   return (
     <div

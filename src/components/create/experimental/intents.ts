@@ -195,10 +195,18 @@ const MLX_LOCAL_INTENTS: ReadonlySet<CreateIntent> = new Set<CreateIntent>(['ima
  * need a ComfyUI node or a ComfyUI-staged source image, so leaving them
  * selectable is a dead affordance that either errors on submit or — worse, the
  * MLX case — silently drops the source and returns an unrelated fresh image.
+ *
+ * `cloudFeatures` is the setting "Show Cloud features in Local mode". Off, the
+ * local bar carries no cloud teaser at all: a tool that cannot run on this
+ * machine is left out, the same way the Mac leaves out what MLX cannot do.
+ * Until 3.0.5 the switch only took the LU Cloud rows out of the model
+ * pickers, and Enhance and Erase kept their cloud tag and kept opening the
+ * Cloud sheet (the box, 04.10.2026).
  */
-export function visibleIntents(backend: CreateBackend, mlxHost: boolean): IntentMeta[] {
-  if (backend === 'cloud' || !mlxHost) return INTENTS
-  return INTENTS.filter((m) => MLX_LOCAL_INTENTS.has(m.id) || m.cloudOnly === true)
+export function visibleIntents(backend: CreateBackend, mlxHost: boolean, cloudFeatures: boolean): IntentMeta[] {
+  if (backend === 'cloud') return INTENTS
+  const shown = mlxHost ? INTENTS.filter((m) => MLX_LOCAL_INTENTS.has(m.id) || m.cloudOnly === true) : INTENTS
+  return cloudFeatures ? shown : shown.filter((m) => !isIntentLocked(m, backend, mlxHost))
 }
 
 /**
@@ -223,5 +231,5 @@ export function isIntentLocked(meta: IntentMeta, backend: CreateBackend, mlxHost
  */
 export function isIntentAvailable(id: CreateIntent, backend: CreateBackend, mlxHost: boolean): boolean {
   const meta = INTENT_MAP[id]
-  return visibleIntents(backend, mlxHost).includes(meta) && !isIntentLocked(meta, backend, mlxHost)
+  return visibleIntents(backend, mlxHost, true).includes(meta) && !isIntentLocked(meta, backend, mlxHost)
 }

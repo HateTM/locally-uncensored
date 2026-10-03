@@ -21,6 +21,7 @@ import { Hinweis } from '../../ui/Hinweis'
 import { BannerText } from './BannerText'
 import { MaskEditor } from './MaskEditor'
 import { VhsInstallModal } from './VhsInstallModal'
+import { CloudHiddenNotice } from '../../cloud/CloudHiddenNotice'
 import { PresetShelf } from './PresetShelf'
 import type { CreatePreset } from '../../../lib/render/create-presets'
 import { Modal } from '../../ui/Modal'
@@ -403,6 +404,8 @@ function CreateExperimentalInner() {
           )}
         </Hinweis>
       )}
+
+      <CloudHiddenNotice />
 
       {/* Cloud gallery retention (David 2026-07-24). Cloud renders live on our
           servers, not on this machine, so the gallery is not permanent storage.
