@@ -235,6 +235,13 @@ export function CreateExpProvider({ children }: { children: ReactNode }) {
   // twice on every connect.
   const charactersVersion = useCreateStore((s) => s.charactersVersion)
   useEffect(() => { void refreshModelLists() }, [charactersVersion, refreshModelLists])
+  // A LoRA downloaded from Models while Create stays open (the MiniMax H3
+  // turbo LoRA add-on, a CivitAI pick) shows up in the stack without a Rescan.
+  useEffect(() => {
+    const onDownloaded = () => { void refreshModelLists() }
+    window.addEventListener('comfyui-model-downloaded', onDownloaded)
+    return () => window.removeEventListener('comfyui-model-downloaded', onDownloaded)
+  }, [refreshModelLists])
 
   // Rebuild the ComfyUI venv via the same status contract the installer uses,
   // narrating pip's progress (GH #98). Throws with the last log line on error.

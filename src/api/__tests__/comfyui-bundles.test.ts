@@ -11,7 +11,7 @@ describe('Video Bundle Definitions', () => {
     bundles = getVideoBundles()
   })
 
-  it('has 17 video bundles', () => {
+  it('has 18 video bundles', () => {
     // 14 original - Allegro (diffusers only) + CogVideoX 2B replaced by 5B I2V,
     // + Wan 2.2 TI2V-5B (unified T2V/I2V, 2026-06-11); 2.5.8 adds the two
     // uncensored GGUF finetunes (NSFW Wan 14B t2v + Wan 2.2 Rapid AIO i2v).
@@ -19,7 +19,8 @@ describe('Video Bundle Definitions', () => {
     // (21 GB each) and Pyramid Flow, whose builders emitted node class names no
     // wrapper registers. See wrapper-node-names.test.ts. 2026-10-01 adds
     // MiniMax H3 (video with sound). 2026-10-02 adds LTX 2.5 and FastH3.
-    expect(bundles.length).toBe(17)
+    // 2026-10-03 adds the MiniMax H3 turbo LoRA as an add-on.
+    expect(bundles.length).toBe(18)
   })
 
   it('every bundle has required fields', () => {
@@ -54,7 +55,7 @@ describe('Video Bundle Definitions', () => {
 
   it('every file has valid subfolder', () => {
     const validSubfolders = ['diffusion_models', 'vae', 'text_encoders', 'checkpoints', 'clip_vision',
-      'latent_upscale_models', 'custom_nodes/ComfyUI-AnimateDiff-Evolved/models']
+      'latent_upscale_models', 'custom_nodes/ComfyUI-AnimateDiff-Evolved/models', 'loras']
     for (const b of bundles) {
       for (const f of b.files) {
         expect(validSubfolders).toContain(f.subfolder)
