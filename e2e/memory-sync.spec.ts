@@ -17,11 +17,11 @@ async function accountFixture(page: Page) {
   await page.getByRole('button', { name: 'Use account memories', exact: true }).click()
 }
 
-test('foreground cancellation stops a held pull and leaving the collection cancels the next run', async ({ page }) => {
+test('foreground cancellation stops a held pull and leaving the collection cancels the next run', async ({ page, baseURL }) => {
   let finish: (() => Promise<void>) | undefined
   let hold = true
   let reads = 0
-  await page.route('**/*', route => new URL(route.request().url()).port === '5273' ? route.continue() : route.abort())
+  await page.route('**/*', route => new URL(route.request().url()).port === new URL(baseURL ?? 'http://localhost:5273').port ? route.continue() : route.abort())
   await page.route('**/api/memory/sync**', async route => {
     expect(route.request().method()).toBe('GET')
     reads++
@@ -66,10 +66,10 @@ test('foreground cancellation stops a held pull and leaving the collection cance
   await expect(page.getByRole('button', { name: 'Cancel synchronization', exact: true })).toHaveCount(0)
 })
 
-test('explicit UI sync uploads, downloads, preserves conflicts and persists shared deletion', async ({ page }, testInfo) => {
+test('explicit UI sync uploads, downloads, preserves conflicts and persists shared deletion', async ({ page, baseURL }, testInfo) => {
   let records: SyncedMemoryRecord[] = []
   let writes = 0
-  await page.route('**/*', route => new URL(route.request().url()).port === '5273' ? route.continue() : route.abort())
+  await page.route('**/*', route => new URL(route.request().url()).port === new URL(baseURL ?? 'http://localhost:5273').port ? route.continue() : route.abort())
   await page.route('**/api/memory/sync**', async route => {
     expect(route.request().headers().authorization).toBe('Bearer synthetic-proof-token')
     if (route.request().method() === 'POST') {
@@ -183,11 +183,11 @@ test('explicit UI sync uploads, downloads, preserves conflicts and persists shar
 })
 
 for (const responseMode of ['lost', 'cancelled'] as const) {
-test(`a ${responseMode} first-upload response cannot revive a locally deleted memory after reload`, async ({ page }) => {
+test(`a ${responseMode} first-upload response cannot revive a locally deleted memory after reload`, async ({ page, baseURL }) => {
   let records: SyncedMemoryRecord[] = []
   let lostResponse = false
   let finish: (() => Promise<void>) | undefined
-  await page.route('**/*', route => new URL(route.request().url()).port === '5273' ? route.continue() : route.abort())
+  await page.route('**/*', route => new URL(route.request().url()).port === new URL(baseURL ?? 'http://localhost:5273').port ? route.continue() : route.abort())
   await page.route('**/api/memory/sync**', async route => {
     if (route.request().method() === 'GET') return route.fulfill({ json: { ownerId: 'owner-a', records, next: null } })
     const body: unknown = route.request().postDataJSON()

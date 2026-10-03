@@ -4,6 +4,7 @@
 // handlers (Ollama routing, sharded confirm, bundle retry/clear, …) keep
 // working unchanged behind a new surface.
 import { useEffect, useRef, useState } from 'react'
+import { usePopoverPlatz } from '../../hooks/usePopoverPlatz'
 import { isBelowChatMinimum, SMALL_CHAT_MODEL_WARNING } from '../../lib/chat-model-minimum'
 import {
   Download, ExternalLink, Info, Check, ChevronDown, Loader2, RefreshCw,
@@ -346,6 +347,8 @@ export function ModelTile({ variants, vramGb, isInstalled, dlState, onDownload, 
   const [pickerOpen, setPickerOpen] = useState(false)
   const [chosen, setChosen] = useState<string | null>(null)
   const pickerRef = useRef<HTMLDivElement>(null)
+  const variantListRef = useRef<HTMLDivElement>(null)
+  const variantList = usePopoverPlatz(variantListRef, pickerOpen)
 
   const def = pickDefaultVariant(variants, vramGb, isInstalled, dlState)
   const sel = variants.find(v => v.name === chosen) ?? def
@@ -434,7 +437,9 @@ export function ModelTile({ variants, vramGb, isInstalled, dlState, onDownload, 
               <div
                 role="listbox"
                 aria-label={`Size and quality for ${groupTitle}`}
-                className="absolute z-30 left-0 top-full mt-1 w-56 rounded-lg lu-elevated p-1"
+                ref={variantListRef}
+                style={variantList.style}
+                className={`absolute z-30 left-0 w-56 rounded-lg lu-elevated p-1 overflow-y-auto scrollbar-thin ${variantList.nachOben ? 'bottom-full mb-1' : 'top-full mt-1'}`}
               >
                 {variants.map(v => {
                   const vFit = computeFit(v.sizeGB, vramGb)

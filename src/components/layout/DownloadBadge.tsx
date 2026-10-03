@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
+import { usePopoverPlatz } from '../../hooks/usePopoverPlatz'
 import { withInstallerOutput } from '../../lib/error-text'
 import { motion, AnimatePresence } from 'framer-motion'
 import { ArrowDownToLine, Pause, Play, X, CheckCircle, RotateCcw } from 'lucide-react'
@@ -30,6 +31,8 @@ export function DownloadBadge() {
   const [tray, setTray] = useState(TRAY_CLOSED)
   const open = tray.open
   const ref = useRef<HTMLDivElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
+  const panel = usePopoverPlatz(panelRef, open, { abstand: 6 })
 
   // Text model entries
   const textEntries = Object.entries(activePulls)
@@ -132,10 +135,12 @@ export function DownloadBadge() {
       <AnimatePresence>
         {open && (
           <motion.div
-            className="absolute right-0 top-full mt-1.5 w-72 rounded-lg overflow-hidden z-50 bg-white dark:bg-[#363636] border border-gray-200 dark:border-white/[0.08] shadow-2xl shadow-black/50"
-            initial={{ opacity: 0, y: -6, scale: 0.98 }}
+            ref={panelRef}
+            style={panel.style}
+            className={`absolute right-0 w-72 rounded-lg overflow-x-hidden overflow-y-auto scrollbar-thin z-50 bg-white dark:bg-[#363636] border border-gray-200 dark:border-white/[0.08] shadow-2xl shadow-black/50 ${panel.nachOben ? 'bottom-full mb-1.5' : 'top-full mt-1.5'}`}
+            initial={{ opacity: 0, y: panel.nachOben ? 6 : -6, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -6, scale: 0.98 }}
+            exit={{ opacity: 0, y: panel.nachOben ? 6 : -6, scale: 0.98 }}
             transition={{ duration: 0.12, ease: 'easeOut' }}
           >
             {/* Header */}

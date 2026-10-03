@@ -86,9 +86,10 @@ describe('das Aufklappmenue bleibt im Fenster', () => {
 
   it('es misst, wie viel Platz ueber dem Ausloeser wirklich ist', () => {
     // Ein festes max-h in vh weiss nichts davon, wo der Ausloeser sitzt.
-    expect(src).toContain('const frei = openUpward ? r.top : window.innerHeight - r.bottom')
-    expect(src).toContain('setMenuePlatz(')
-    expect(src).toContain('style={menuePlatz === null ? undefined : { maxHeight: menuePlatz }}')
+    // Seit GitHub #149 misst das der gemeinsame Haken, gegen die Flaeche, die
+    // wirklich abschneidet, und ohne Mindesthoehe.
+    expect(src).toContain("usePopoverPlatz(menueRef, open, { bevorzugt: openUpward ? 'oben' : 'unten'")
+    expect(src).toContain('style={menue.style}')
   })
 
   it('und was nicht mehr hineinpasst, laesst sich scrollen', () => {

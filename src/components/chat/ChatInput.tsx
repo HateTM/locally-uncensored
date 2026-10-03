@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useLayoutEffect, useCallback, type ReactNode } from 'react'
+import { usePopoverPlatz } from '../../hooks/usePopoverPlatz'
 import { SamplingControls } from './SamplingControls'
 import { Send, Square, Paperclip, X, Brain, Gauge, Terminal } from 'lucide-react'
 import { matchAgentCommands, type AgentCommand, type CommandScope } from '../../lib/agent-commands'
@@ -97,6 +98,8 @@ export function ChatInput({ onSend, onStop, isGenerating, waitingForLocalLane, p
   // Slash-command autocomplete (v2.5.3). When the input is a lone "/token", show
   // the matching agent commands; ↑/↓ to move, Enter/Tab to pick, Esc to dismiss.
   const [cmdMenu, setCmdMenu] = useState<AgentCommand[]>([])
+  const cmdMenuRef = useRef<HTMLDivElement>(null)
+  const cmdMenuPlatz = usePopoverPlatz(cmdMenuRef, cmdMenu.length > 0, { bevorzugt: 'oben', abstand: 6, deckel: 256 })
   const [cmdIndex, setCmdIndex] = useState(0)
   /**
    * Ein Entwurf gehoert dem Gespraech, in dem er getippt wurde.
@@ -477,7 +480,7 @@ export function ChatInput({ onSend, onStop, isGenerating, waitingForLocalLane, p
       >
         {/* Slash-command autocomplete, floats above the composer */}
         {cmdMenu.length > 0 && (
-          <div className="absolute bottom-full left-0 right-0 mb-1.5 z-50 max-h-64 overflow-y-auto scrollbar-thin rounded-lg lu-elevated py-1">
+          <div ref={cmdMenuRef} style={cmdMenuPlatz.style} className={`absolute left-0 right-0 z-50 overflow-y-auto scrollbar-thin rounded-lg lu-elevated py-1 ${cmdMenuPlatz.nachOben ? 'bottom-full mb-1.5' : 'top-full mt-1.5'}`}>
             <div className="px-2.5 py-1 flex items-center gap-1 text-[0.5rem] uppercase tracking-widest text-gray-400 dark:text-gray-600">
               <Terminal size={9} /> Agent commands
             </div>

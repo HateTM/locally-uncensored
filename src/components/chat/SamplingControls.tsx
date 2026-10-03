@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
+import { usePopoverPlatz } from '../../hooks/usePopoverPlatz'
 import { X, SlidersHorizontal } from 'lucide-react'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useChatStore } from '../../stores/chatStore'
@@ -104,6 +105,7 @@ export function SamplingControls() {
   const [draft, setDraft] = useState<string | null>(null)
   const wrapRef = useRef<HTMLDivElement>(null)
   const panelRef = useRef<HTMLDivElement>(null)
+  const lage = usePopoverPlatz(panelRef, open, { bevorzugt: 'oben', abstand: 6 })
   const panelId = useId()
   const settings = useSettingsStore((s) => s.settings)
   const activeId = useChatStore((s) => s.activeConversationId)
@@ -224,14 +226,17 @@ export function SamplingControls() {
           // Placed with an inline style rather than utility classes, for the
           // same reason the web app does: `position` is then a fact a test can
           // read, instead of a class name a test would have to believe.
+          // Above the trigger while it fits there; in a short window it takes
+          // the side with room and scrolls instead of leaving the window.
           style={{
             position: 'absolute',
             right: 0,
-            bottom: '100%',
-            marginBottom: 6,
+            ...(lage.nachOben ? { bottom: '100%', marginBottom: 6 } : { top: '100%', marginTop: 6 }),
             width: PANEL_WIDTH,
+            overflowY: 'auto',
+            ...lage.style,
           }}
-          className="z-50 space-y-2 rounded-lg p-2.5 lu-elevated"
+          className="z-50 space-y-2 rounded-lg p-2.5 lu-elevated scrollbar-thin"
         >
           <div className="flex justify-end">
             <button
