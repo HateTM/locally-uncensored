@@ -49,6 +49,8 @@ import { MCPServerSettings } from './MCPServerSettings'
 import { WorkflowList } from '../agents/WorkflowList'
 import { WorkflowBuilder } from '../agents/WorkflowBuilder'
 import { useUpdateStore, isNewerVersion } from '../../stores/updateStore'
+import { useReleaseNotesStore } from '../../stores/releaseNotesStore'
+import { releaseNoteFor } from '../../lib/release-notes'
 import { timeAgo } from '../../lib/time-ago'
 import { backendCall, isTauri, isMacOS, isWindows, openExternal } from '../../api/backend'
 import { comfyPathPlaceholder } from '../../lib/comfy-path-placeholder'
@@ -2398,6 +2400,7 @@ export function UpdateSection() {
   const latestIsActuallyNewer = !!(latestVersion && isNewerVersion(latestVersion, currentVersion))
   const displayLatestVersion = latestIsActuallyNewer ? latestVersion : null
   const showUpdate = updateAvailable && latestIsActuallyNewer
+  const reopenReleaseNotes = useReleaseNotesStore((s) => s.reopen)
 
   return (
     <Section title="Updates">
@@ -2405,7 +2408,15 @@ export function UpdateSection() {
         {/* Current version */}
         <div className="flex items-center justify-between">
           <span className="text-[0.65rem] text-gray-500">Current Version</span>
-          <span className="text-[0.65rem] text-gray-300 font-mono">v{currentVersion}</span>
+          <span className="flex items-center gap-2">
+            {/* The sheet shows once after an update; this brings it back. */}
+            {releaseNoteFor(currentVersion) && (
+              <button onClick={reopenReleaseNotes} className="t-micro text-lu-accent hover:text-lu-accent-hover transition-colors">
+                What's new
+              </button>
+            )}
+            <span className="text-[0.65rem] text-gray-300 font-mono">v{currentVersion}</span>
+          </span>
         </div>
 
         {/* Latest version, only show if it's actually newer than current */}

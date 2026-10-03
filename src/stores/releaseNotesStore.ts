@@ -13,18 +13,25 @@ import { releaseNoteFor } from '../lib/release-notes'
 interface ReleaseNotesState {
   /** The version whose notes this user has already seen. */
   lastNotesVersion: string | null
+  /** The user asked for the sheet again (Settings, Updates). Lives only while
+   *  the app runs: a restart never opens a sheet nobody asked for. */
+  reopened: boolean
   markNotesSeen: (version: string) => void
+  reopen: () => void
 }
 
 export const useReleaseNotesStore = create<ReleaseNotesState>()(
   persist(
     (set) => ({
       lastNotesVersion: null,
-      markNotesSeen: (version) => set({ lastNotesVersion: version }),
+      reopened: false,
+      markNotesSeen: (version) => set({ lastNotesVersion: version, reopened: false }),
+      reopen: () => set({ reopened: true }),
     }),
     {
       name: 'lu_release_notes',
       storage: safeJSONStorage(),
+      partialize: (s) => ({ lastNotesVersion: s.lastNotesVersion }),
     },
   ),
 )

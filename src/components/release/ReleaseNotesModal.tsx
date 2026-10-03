@@ -1,4 +1,5 @@
-// "What's new" sheet, shown once after an update (B4, David 2026-08-04).
+// "What's new" sheet, shown once after an update (B4, David 2026-08-04), and
+// again whenever the user asks for it under Settings, Updates.
 //
 // Redesign (Bauer, 19.09.2026): the borrowed pulsing gradient square and the
 // Sparkles icon are gone. The header carries the real house monogram from
@@ -39,12 +40,13 @@ import { releaseNoteFor, itemDetail, itemTitle, type ReleaseNote, type ReleaseNo
 export function ReleaseNotesModal() {
   const lastNotesVersion = useReleaseNotesStore((s) => s.lastNotesVersion)
   const markNotesSeen = useReleaseNotesStore((s) => s.markNotesSeen)
+  const reopened = useReleaseNotesStore((s) => s.reopened)
   const onboardingDone = useSettingsStore((s) => s.settings.onboardingDone)
   const updateSettings = useSettingsStore((s) => s.updateSettings)
   const setCloudGateOpen = useUIStore((s) => s.setCloudGateOpen)
   const cloudAvailable = useCloudAuthStore(deriveCloudAvailable)
 
-  const open = shouldShowReleaseNotes(currentVersion, lastNotesVersion, onboardingDone)
+  const open = reopened || shouldShowReleaseNotes(currentVersion, lastNotesVersion, onboardingDone)
   const note = releaseNoteFor(currentVersion)
   const close = () => markNotesSeen(currentVersion)
 
