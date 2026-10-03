@@ -130,6 +130,111 @@ export interface ReleaseNote {
 }
 
 export const RELEASE_NOTES: ReleaseNote[] = [
+  // 3.0.5, vorbereitet 03.10.2026 auf feat/create-sota: der Create-Umbau
+  // (neue lokale Modelle, Qwen-Image 2.1, mehrere Bilder in einem Zug), Dateien
+  // im Chat, Persona je Gruppenmodell und die Fehler aus GitHub 148 und 149.
+  // package.json, package-lock, Cargo.toml/.lock und tauri.conf.json stehen im
+  // selben Zug auf 3.0.5. 3.0.4 darunter bleibt unveraendert.
+  {
+    version: '3.0.5',
+    headline: 'Create gets LTX 2.5, FastH3 and YuE2 on your own machine, edits several images in one go and has more models on LU Cloud. Chat takes any file. Dropdowns stay inside the window, and the speech install on Linux works again.',
+    lines: [
+      {
+        title: 'LTX 2.5, FastH3 and YuE2 run on your own machine.',
+        detail: 'Models, Video, Get new has four new downloads. LTX 2.5 makes video with its own sound from a prompt or a first frame, as the full version for cards with 24 GB or more and as Small (GGUF Q4) for 16 GB cards. FastH3 is MiniMax H3 in 8 steps, text to video only, for 24 GB or more. YuE2 writes songs from a style and your lyrics on 6 to 8 GB and is licensed for non-commercial use only. LTX 2.5 needs ComfyUI 0.32.0, FastH3 0.35.0 and YuE2 0.36.0. With an older ComfyUI, Create asks once and then updates it.',
+      },
+      {
+        title: 'Edit, Remove Background and Enhance Image take several images at once.',
+        detail: 'Pick or drop up to 50 source images, or a whole folder with "Add a folder". Each image runs on its own, one after the other, and the queue shows which one is running. Cancel stops the rest, and an image that fails does not stop the others and is named at the end. On LU Cloud the price per image and for the whole list is shown before you start. A model that needs a painted mask keeps one image.',
+      },
+      {
+        title: 'Chat takes any file, not only images.',
+        detail: 'The paperclip, drag and drop and paste used to turn everything but images away. They now take any file, up to 3 per message and 64 MB each. The model gets a description of the file: its name, its type, its size and the readable text in it. In Agent and Code mode the file is also copied into the working folder, so the file tools can open it. Documents you want to ask questions about still belong in Document Chat.',
+      },
+      {
+        title: 'Qwen-Image 2.1 gets a transparent background and its prompt enhancer.',
+        detail: 'On your own machine, the image settings have a "Transparent background" switch for new pictures with Qwen-Image 2.1. The picture is saved as a PNG with an alpha channel and shown on a checkerboard. The Model Manager offers the Qwen-Image 2.1 Prompt Enhancer as two downloads, Official and No Refusals, both for 16 GB cards (issue 148). With one installed, "Improve my prompt" lets you choose who writes in the "Rewritten by" row: the enhancer or your chat model. The enhancer needs ComfyUI 0.37.2 or newer.',
+      },
+      {
+        title: 'Dropdowns stay inside the window.',
+        detail: 'On the Linux AppImage and in small windows the model list in Create opened below the bottom edge, so no model could be picked (issue 149). Every dropdown and popover now opens on the side that has room, is never taller than that room and scrolls inside. The right click menu sat a little off the pointer and now opens at it.',
+      },
+    ],
+    details: [
+      {
+        title: 'Create on your own machine',
+        items: [
+          {
+            title: 'LTX 2.5 cuts between up to four shots in one run.',
+            detail: 'For text to video with LTX 2.5, the advanced settings have a Shots slider. Your prompt is shot 1 and every further shot gets a field of its own. Describe the same person the same way in every shot.',
+          },
+          {
+            title: 'LoRA strength takes values from -10 to 10.',
+            detail: 'The slider in the LoRA stack still runs from 0 to 2. Next to it is a number field for the exact value from -10 to 10, for slider LoRAs that are made for a wide range around zero. Each LoRA keeps its own value, also while it is switched off and after a restart.',
+          },
+          {
+            title: 'The MiniMax H3 Turbo LoRA is a one click download.',
+            detail: '3.0.4 said the turbo LoRA runs MiniMax H3 at 8 steps but not where to get it. It is now under Models, Video, Get new and under Models, LoRAs, Get new in a "Ready to install" list. The LoRA stack in Create shows it as soon as the download is done. FastH3 is already an 8 step model and leaves the turbo LoRA out.',
+          },
+          {
+            title: 'Models carry a Best mark, and older ones sit under "Older models".',
+            detail: 'The model picker in Create and the Model Manager put the current models first with a Best mark and collect the ones a newer family has replaced under "Older models". No model was removed.',
+          },
+          {
+            title: '"Save character" on a video keeps frames as a character.',
+            detail: 'In the large view of a video, "Save character" lets you pick frames at the playback position and give the figure a name. It is stored on this device, up to 30 photos. From there, "Use as reference photos" loads it into the reference strip, and "Train in Character Studio" starts a training set with it.',
+          },
+          {
+            title: '"Improve my prompt" lets your chat model rewrite the prompt before a run.',
+            detail: 'The switch is in the advanced settings, off by default and remembered. When it is on, the chat model you picked rewrites your prompt for the image, video or music model before the run. A cloud chat model is billed like chat. The gallery details show what you wrote and what ran. A rewrite that fails or takes too long is dropped and the run uses your own prompt.',
+          },
+        ],
+      },
+      {
+        title: 'Create on LU Cloud',
+        items: [
+          {
+            title: '39 more models from open model families.',
+            detail: 'The cloud pickers know 39 more models, 18 for images, 20 for video and one for music. Among them are Qwen Image 3.0 and 2.1, FLUX 3, Krea 2 Large, Cosmos 3 Super, Ideogram 4.5, HiDream O1, HunyuanImage 3, LTX 2.5, MiniMax H3, Wan 3.0, SkyReels V4, Kandinsky 5 Pro, SeedVR2 and YuE2. A model shows up once the cloud catalogue lists it. "Open weights" next to a name means this exact version has open weights, "Open family" means its family has them and this version does not.',
+          },
+          {
+            title: 'Image and Edit make up to four images per run.',
+            detail: 'The settings have an Images slider from 1 to 4. Each image is its own job at its own price, lands in the gallery when it is done, and is refunded alone if it fails. The credit counter shows the total before you start.',
+          },
+          {
+            title: 'Reference models take several of your photos.',
+            detail: 'Models that work from reference photos, such as MiniMax H3 Reference, Wan 3.0 Reference and SkyReels V4 Reference, and the editors that take more than one image now have a strip under the source image for up to five photos.',
+          },
+          {
+            title: 'Edit starts without a mask on models that need none.',
+            detail: 'With a model that edits from the instruction alone, the Edit stage still showed "Paint mask" and the Create button waited for one. The stage now says the model needs no mask, and Create starts with the source image and your prompt.',
+          },
+        ],
+      },
+      {
+        title: 'Chat',
+        items: [
+          {
+            title: 'Each model in a group chat can have its own persona.',
+            detail: 'In the Plugins menu under Group chat, every model row has a persona picker. Each model then speaks as its persona, knows the names of the others, and a line it writes in another one\'s name is cut. A group without a pick works as before.',
+          },
+        ],
+      },
+      {
+        title: 'Fixes',
+        items: [
+          {
+            title: 'Linux: speech to text and Piper install again.',
+            detail: 'On Ubuntu 24.04 and other distributions that protect the system Python, installing faster-whisper and Piper ended with "Can not perform a \'--user\' install" when ComfyUI ran in its own Python environment. The installer mistook that environment for the protected system Python and added options pip refuses there. It now recognises the environment and installs into it.',
+          },
+          {
+            title: 'A model download checks its checksum on a retry too.',
+            detail: 'After a failed download, Retry and Resume started the file again without its SHA-256 and expected size, so the second attempt was not verified. Both are kept now. A file with the same name but another size no longer counts as installed where the catalogue knows the exact size.',
+          },
+        ],
+      },
+    ],
+  },
   // 3.0.4, vorbereitet 30.09.2026 auf fix/agent-credit-burn: der Kundenfall
   // swift_maple90 (Code-Agent auf LU Cloud). package.json, Cargo.toml/.lock und
   // tauri.conf.json stehen im selben Zug auf 3.0.4. 3.0.3 darunter bleibt

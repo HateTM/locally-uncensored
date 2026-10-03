@@ -368,14 +368,11 @@ describe('the notes table', () => {
     }
   })
 
-  it('the 3.0.4 entry names every fix, now that it is the shipping version', () => {
-    // Kundenfall swift_maple90, 30.09.2026: package.json, Cargo.toml/.lock und
-    // tauri.conf.json stehen in einem Zug auf 3.0.4, also ist DAS jetzt der
-    // Eintrag, den die Existenzpruefung oben verlangt. Ein Anker pro Fix.
-    const shipping = JSON.parse(
-      readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../../../package.json'), 'utf8'),
-    ).version as string
-    expect(shipping).toBe('3.0.4')
+  it('the 3.0.4 entry names every fix', () => {
+    // Kundenfall swift_maple90, 30.09.2026. 3.0.5 kam darauf (package.json),
+    // also pinnt dieser Block den 3.0.4-Eintrag ueber seine eigene Version, wie
+    // die Bloecke darueber. Ein Anker pro Fix.
+    const shipping = '3.0.4'
     const prose = proseOf(shipping)
     for (const anchor of [
       // Der Abbruch mitten im Schreiben und was jetzt zaehlt.
@@ -391,6 +388,38 @@ describe('the notes table', () => {
     ]) {
       expect(prose, `${shipping}: nothing about "${anchor}"`).toContain(anchor)
     }
+  })
+
+  it('the 3.0.5 entry names what shipped, now that it is the shipping version', () => {
+    // Create-Umbau, 03.10.2026: package.json, package-lock, Cargo.toml/.lock
+    // und tauri.conf.json stehen in einem Zug auf 3.0.5, also ist DAS jetzt der
+    // Eintrag, den die Existenzpruefung oben verlangt. Ein Anker pro Punkt.
+    const shipping = JSON.parse(
+      readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../../../package.json'), 'utf8'),
+    ).version as string
+    expect(shipping).toBe('3.0.5')
+    const prose = proseOf(shipping)
+    for (const anchor of [
+      // Die neuen lokalen Modelle und ihre ComfyUI-Mindestversionen.
+      'ltx 2.5 needs comfyui 0.32.0, fasth3 0.35.0 and yue2 0.36.0', 'small (gguf q4)',
+      // Qwen-Image 2.1: Schalter und Prompt Enhancer (GitHub 148).
+      'transparent background', 'rewritten by', 'comfyui 0.37.2', 'issue 148',
+      // Shots, LoRA-Staerke, Turbo-LoRA, Marken.
+      'shots slider', 'from -10 to 10', 'ready to install', 'older models',
+      // Mehrere Bilder in einem Zug, Figur aus einem Video, Prompt umschreiben.
+      'up to 50 source images', 'save character', 'improve my prompt',
+      // Cloud: neue Modelle, Anzahl, Referenzfotos, Edit ohne Maske.
+      '39 more models', 'images slider from 1 to 4', 'up to five photos', 'needs no mask',
+      // Chat: Dateien und Persona je Gruppenmodell.
+      'up to 3 per message and 64 mb each', 'persona picker',
+      // Fixes: Linux-Sprache, Aufklappmenues (GitHub 149), Pruefsumme.
+      'faster-whisper and piper', 'issue 149', 'right click menu', 'sha-256',
+    ]) {
+      expect(prose, `${shipping}: nothing about "${anchor}"`).toContain(anchor)
+    }
+    // Hausregeln fuer den Text: kein Gedankenstrich, kein Anbietername.
+    expect(prose).not.toMatch(/[\u2013\u2014]/)
+    expect(prose).not.toMatch(/wavespeed|deepinfra/)
   })
 
   it('the Flash allowance on the sheet hangs on a RUNNING plan, not on money that once arrived', () => {
