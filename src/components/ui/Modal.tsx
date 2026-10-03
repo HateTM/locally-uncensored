@@ -1,6 +1,6 @@
 import { motion, AnimatePresence } from 'framer-motion'
 import { X } from 'lucide-react'
-import { useCallback, useEffect, useId, useRef, type ReactNode } from 'react'
+import { useCallback, useEffect, useId, useRef, type MouseEvent, type ReactNode } from 'react'
 import {
   FOCUSABLE_SELECTOR,
   backgroundNodesToHide,
@@ -193,6 +193,21 @@ export function Modal({ open, onClose, title, children, hideHeader, maxWidth = '
     </div>
   )
   const panelClass = `relative z-10 w-full outline-none ${panelRadius} ${panelPad} lu-elevated ` + maxWidth
+  // A window lower than the dialog (230 px in a tiling window manager) used to
+  // cut the panel off at both ends: the overlay centred it and did not scroll,
+  // so the buttons at the bottom could not be reached. The overlay scrolls now
+  // and the row inside it is at least as high as the overlay, so a dialog that
+  // fits is still centred and one that does not starts at the top and scrolls.
+  // Percentages only: viewport units do not follow the zoom on the app root
+  // (--ui-scale, see lib/popover-placement.ts). The panel itself does not
+  // clip, so a menu that reaches out of a dialog still shows.
+  const overlayClass = 'fixed inset-0 z-50 overflow-y-auto overscroll-contain'
+  const backdropClass = 'fixed inset-0 bg-black/60 backdrop-blur-sm'
+  const rowClass = 'relative flex min-h-full items-center justify-center p-4'
+  /** A click beside the panel closes, as the backdrop under it always did. */
+  const closeBeside = (e: MouseEvent<HTMLDivElement>) => {
+    if (e.target === e.currentTarget) onClose()
+  }
   const dialogA11y = hasVisibleTitle
     ? { 'aria-labelledby': titleId }
     : { 'aria-label': ariaLabel || title || 'Dialog' }
@@ -206,19 +221,21 @@ export function Modal({ open, onClose, title, children, hideHeader, maxWidth = '
       <div
         ref={overlayRef}
         data-lu-dialog={open ? '' : undefined}
-        className={open ? 'fixed inset-0 z-50 flex items-center justify-center p-4' : 'hidden'}
+        className={open ? overlayClass : 'hidden'}
       >
-        <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-        <div
-          ref={panelRef}
-          role="dialog"
-          aria-modal="true"
-          {...dialogA11y}
-          tabIndex={-1}
-          className={panelClass}
-        >
-          {header}
-          {children}
+        <div className={backdropClass} onClick={onClose} />
+        <div className={rowClass} onClick={closeBeside}>
+          <div
+            ref={panelRef}
+            role="dialog"
+            aria-modal="true"
+            {...dialogA11y}
+            tabIndex={-1}
+            className={panelClass}
+          >
+            {header}
+            {children}
+          </div>
         </div>
       </div>
     )
@@ -230,27 +247,29 @@ export function Modal({ open, onClose, title, children, hideHeader, maxWidth = '
         <motion.div
           ref={overlayRef}
           data-lu-dialog
-          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          className={overlayClass}
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
         >
-          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-          <motion.div
-            ref={panelRef}
-            role="dialog"
-            aria-modal="true"
-            {...dialogA11y}
-            tabIndex={-1}
-            className={panelClass}
-            initial={{ scale: 0.9, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            exit={{ scale: 0.9, opacity: 0 }}
-            transition={SPRING_PANEL}
-          >
-            {header}
-            {children}
-          </motion.div>
+          <div className={backdropClass} onClick={onClose} />
+          <div className={rowClass} onClick={closeBeside}>
+            <motion.div
+              ref={panelRef}
+              role="dialog"
+              aria-modal="true"
+              {...dialogA11y}
+              tabIndex={-1}
+              className={panelClass}
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              transition={SPRING_PANEL}
+            >
+              {header}
+              {children}
+            </motion.div>
+          </div>
         </motion.div>
       )}
     </AnimatePresence>
