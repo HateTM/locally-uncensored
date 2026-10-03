@@ -4,6 +4,8 @@ import { createPortal } from 'react-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { cn } from './cn'
 import { tooltipPosition, type TooltipPlacement } from './tooltip-position'
+import { massstab } from '../../../hooks/usePopoverPlatz'
+import { lokaleMasse } from '../../../lib/popover-placement'
 
 interface Props {
   content: React.ReactNode
@@ -62,13 +64,20 @@ const handleFocus = (
   useLayoutEffect(() => {
     if (!show) return
     const measure = () => {
-      const a = anchor.current?.getBoundingClientRect()
-      const b = bubble.current?.getBoundingClientRect()
-      if (!a || !b) return
+      const el = anchor.current
+      const b = bubble.current
+      if (!el || !b) return
+      // One unit for everything: the bubble's own CSS pixels. The app sits
+      // under a zoom, and depending on the engine a rect comes back in
+      // visible or in zoomed pixels while `top` and `left` always count in
+      // the latter (GitHub #149).
+      const { kasten, fenster } = lokaleMasse(massstab(el))
+      const a = kasten(el.getBoundingClientRect())
       setPlace(tooltipPosition(
-        { top: a.top, left: a.left, width: a.width, height: a.height },
-        { width: b.width, height: b.height },
-        { width: window.innerWidth, height: window.innerHeight },
+        { top: a.top, left: a.left, width: a.right - a.left, height: a.bottom - a.top },
+        // offsetWidth/Height, not the rect: untouched by the fade-in transform.
+        { width: b.offsetWidth, height: b.offsetHeight },
+        { width: fenster.right, height: fenster.bottom },
         side,
       ))
     }

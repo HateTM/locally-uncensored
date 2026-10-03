@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { usePopoverPlatz } from '../../hooks/usePopoverPlatz'
 import { Wifi, WifiOff, Loader2, Eye, EyeOff, ChevronDown, Plus, Power, Play, Trash2, X, AlertTriangle } from 'lucide-react'
 import { useProviderStore, deobfuscate } from '../../stores/providerStore'
 import { providerRowIds, isReturnableRow } from '../../lib/provider-visibility'
@@ -111,6 +112,8 @@ type LmStudioServerInfo = { lms_present: boolean; running: boolean }
 export function ProviderSettings() {
   const { providers, setProviderConfig, setProviderApiKey, getProviderApiKey, engineOptedOut } = useProviderStore()
   const [dropdownOpen, setDropdownOpen] = useState(false)
+  const dropdownRef = useRef<HTMLDivElement>(null)
+  const dropdown = usePopoverPlatz(dropdownRef, dropdownOpen, { deckel: 224 })
   const [testing, setTesting] = useState<ProviderId | null>(null)
   const [statuses, setStatuses] = useState<Record<string, SlotStatus>>({})
   // Der laufende Zustand unserer eigenen Engine, dieselbe Schleife, die der
@@ -859,7 +862,7 @@ export function ProviderSettings() {
             „Active" stand auf Weiss bei 1,74:1 und traegt jetzt green-700
             mit 5,02:1. */}
         {dropdownOpen && (
-          <div className="absolute z-50 top-full mt-1 w-full bg-white dark:bg-lu-overlay border border-gray-200 dark:border-white/10 rounded-lg shadow-xl max-h-56 overflow-y-auto scrollbar-thin">
+          <div ref={dropdownRef} style={dropdown.style} className={`absolute z-50 w-full bg-white dark:bg-lu-overlay border border-gray-200 dark:border-white/10 rounded-lg shadow-xl overflow-y-auto scrollbar-thin ${dropdown.nachOben ? 'bottom-full mb-1' : 'top-full mt-1'}`}>
             {/* Local group */}
             <div className="px-2.5 py-1 text-[0.5rem] uppercase tracking-wider text-gray-600 font-semibold">Local</div>
             {localPresets.map(preset => {

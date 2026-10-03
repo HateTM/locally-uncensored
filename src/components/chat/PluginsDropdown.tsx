@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
+import { usePopoverPlatz } from '../../hooks/usePopoverPlatz'
 import { useDismissOnEscape } from '../../hooks/useDismissOnEscape'
 import { Plug, ChevronDown, Bone, User, Users, Wrench } from 'lucide-react'
 import { useSettingsStore } from '../../stores/settingsStore'
@@ -32,6 +33,8 @@ export function PluginsDropdown({
 }: { openUpward?: boolean; iconOnly?: boolean } = {}) {
   const [open, setOpen] = useState(false)
   useDismissOnEscape(open, () => setOpen(false))
+  const menuRef = useRef<HTMLDivElement>(null)
+  const menu = usePopoverPlatz(menuRef, open, { bevorzugt: openUpward ? 'oben' : 'unten' })
   const [cavemanOpen, setCavemanOpen] = useState(false)
   const [personaOpen, setPersonaOpen] = useState(false)
   const [groupOpen, setGroupOpen] = useState(false)
@@ -127,7 +130,7 @@ export function PluginsDropdown({
       {open && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className={`absolute right-0 z-50 w-56 rounded-lg lu-elevated py-1.5 ${openUpward ? 'bottom-full mb-1' : 'top-full mt-1'}`}>
+          <div ref={menuRef} style={menu.style} className={`absolute right-0 z-50 w-56 rounded-lg lu-elevated py-1.5 overflow-y-auto scrollbar-thin ${menu.nachOben ? 'bottom-full mb-1' : 'top-full mt-1'}`}>
 
             {/* ── Chat Tools toggle (v2.5.3) ──────────────── */}
             <div className="px-2.5">

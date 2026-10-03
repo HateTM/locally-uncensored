@@ -1,4 +1,4 @@
-import { useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { useId, useRef, useState, type ReactNode } from 'react'
 import { useDismissOnEscape } from '../../hooks/useDismissOnEscape'
 import { ChevronDown, Check, Loader2, AlertTriangle } from 'lucide-react'
 import { useModelStore } from '../../stores/modelStore'
@@ -17,34 +17,9 @@ import { formatContextWindow } from '../../lib/formatters'
 import { DEFAULT_SEND_WINDOW_TOKENS } from '../../lib/send-window'
 import { ENGINE_DEFAULT_CTX } from '../../lib/builtin-ctx'
 import { SOURCE_LABEL, withStoredWindow } from '../../lib/context-source'
-import { platzFuerPopover, type PopoverPlatz } from '../../lib/popover-placement'
+import { usePopoverPlatz } from '../../hooks/usePopoverPlatz'
 
 const PRESETS = [4096, 8192, 16384, 32768, 65536, 131072]
-
-/** `mt-1` / `mb-1` in Zahlen, damit die Rechnung dasselbe kennt wie die Klasse. */
-const ABSTAND = 4
-/** Luft zur Kante der abschneidenden Flaeche. */
-const LUFT = 8
-
-/**
- * Die Flaeche, die dieses Popover wirklich abschneidet.
- *
- * Nicht das Fenster: im Chat liegt darueber ein `<main>` mit `overflow-hidden`
- * (die abgerundete Pane), und dessen Unterkante liegt gemessen 9 px hoeher.
- * Wer gegen `window.innerHeight` rechnet, landet in genau diesen 9 px, also im
- * Geschnittenen. Gesucht ist der erste Vorfahr, der nicht `visible` ist; gibt
- * es keinen, ist es das Fenster.
- */
-function abschneidendeFlaeche(el: Element): { oben: number; unten: number } {
-  for (let p = el.parentElement; p; p = p.parentElement) {
-    const cs = getComputedStyle(p)
-    if (cs.overflowY !== 'visible' || cs.overflowX !== 'visible') {
-      const r = p.getBoundingClientRect()
-      return { oben: r.top, unten: r.bottom }
-    }
-  }
-  return { oben: 0, unten: window.innerHeight }
-}
 
 /**
  * Context-window picker for the active LOCAL model. Sets `contextWindowOverride`
@@ -103,52 +78,12 @@ export function ContextDropdown({ children }: { children?: ReactNode }) {
    * Fest nach oben zu kippen waere der falsche Ausgang. Derselbe Knopf steht
    * im Code-Bereich (`CodexView`) in einer Kopfzeile, dort ist oben kein Platz
    * und unten reichlich. Deshalb wird gemessen, und zwar gegen die Flaeche,
-   * die tatsaechlich schneidet. Die Entscheidung selbst steht in
-   * `lib/popover-placement` und hat dort ihre eigenen Tests, denn in der
-   * Testumgebung dieses Hauses (`environment: 'node'`) gibt es kein Layout.
-   *
-   * `useLayoutEffect` und nicht `useEffect`: die Messung braucht die gerenderte
-   * Liste, und die Korrektur muss vor dem Bild sitzen, sonst blitzt die Liste
-   * einmal an der falschen Stelle auf.
+   * die tatsaechlich schneidet. Seit GitHub #149 misst das nicht mehr dieses
+   * Bauteil selbst, sondern `usePopoverPlatz`, derselbe Haken wie fuer jedes
+   * andere Aufklappmenue der App.
    */
-  const ankerRef = useRef<HTMLDivElement>(null)
   const listeRef = useRef<HTMLDivElement>(null)
-  const [platz, setPlatz] = useState<PopoverPlatz | null>(null)
-  useLayoutEffect(() => {
-    if (!open) { setPlatz(null); return }
-    const messen = () => {
-      const anker = ankerRef.current
-      const liste = listeRef.current
-      if (!anker || !liste) return
-      const r = anker.getBoundingClientRect()
-      const grenze = abschneidendeFlaeche(anker)
-      /* Die App liegt unter einem `zoom: var(--ui-scale)` (index.css:518), und
-       * die beiden Messwege zaehlen darunter verschieden:
-       * `getBoundingClientRect` liefert SICHTBARE Pixel, `offsetHeight` und
-       * `scrollHeight` die CSS-Pixel des Elements. Gemessen bei --ui-scale
-       * 1,15: dieselbe Liste 111,5 gegen 97. Wer beides mischt, deckelt 15
-       * Prozent zu grosszuegig, und die Liste ragt wieder heraus, nur weniger.
-       * Also alles in die CSS-Pixel der Liste umrechnen; `maxHoehe` faellt
-       * damit in der Einheit an, in der es gleich als `max-height` steht.
-       */
-      const skala = liste.offsetHeight > 0 ? liste.getBoundingClientRect().height / liste.offsetHeight : 1
-      setPlatz(platzFuerPopover({
-        ankerOben: r.top / skala,
-        ankerUnten: r.bottom / skala,
-        grenzeOben: grenze.oben / skala,
-        grenzeUnten: grenze.unten / skala,
-        // `scrollHeight` und nicht `offsetHeight`: sobald eine Hoehe gesetzt
-        // ist, misst `offsetHeight` die Deckelung und nicht den Inhalt, und
-        // die naechste Messung schriebe den Deckel fest.
-        inhaltHoehe: liste.scrollHeight,
-        abstand: ABSTAND,
-        luft: LUFT,
-      }))
-    }
-    messen()
-    window.addEventListener('resize', messen)
-    return () => window.removeEventListener('resize', messen)
-  }, [open])
+  const platz = usePopoverPlatz(listeRef, open)
   const [busy, setBusy] = useState(false)
   // Reload failure, surfaced instead of swallowed: the engine's start error
   // (out of memory for the new ctx, port held by a stranger) is actionable,
@@ -306,7 +241,7 @@ export function ContextDropdown({ children }: { children?: ReactNode }) {
     }`
 
   return (
-    <div ref={ankerRef} className="relative">
+    <div className="relative">
       <button
         onClick={() => setOpen((o) => !o)}
         disabled={busy}
@@ -378,9 +313,9 @@ export function ContextDropdown({ children }: { children?: ReactNode }) {
               laufen. */}
           <div
             ref={listeRef}
-            style={platz ? { maxHeight: platz.maxHoehe } : undefined}
+            style={platz.style}
             className={`absolute right-0 z-50 min-w-[140px] rounded-lg lu-elevated p-1 flex flex-col gap-0.5 overflow-y-auto scrollbar-thin ${
-              platz?.nachOben ? 'bottom-full mb-1' : 'top-full mt-1'
+              platz.nachOben ? 'bottom-full mb-1' : 'top-full mt-1'
             }`}
           >
             <button onClick={() => apply(0)} className={rowCls(selectedNow === 0)}>

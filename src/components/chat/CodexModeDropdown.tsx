@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
+import { usePopoverPlatz } from '../../hooks/usePopoverPlatz'
 import { useDismissOnEscape } from '../../hooks/useDismissOnEscape'
 import { ChevronDown, ShieldCheck, Zap, ClipboardList } from 'lucide-react'
 import { useChatStore } from '../../stores/chatStore'
@@ -57,6 +58,8 @@ const MODE_ACTIVE_ROW: Record<CodexMode, string> = {
 export function CodexModeDropdown({ openUpward = false }: { openUpward?: boolean } = {}) {
   const [open, setOpen] = useState(false)
   useDismissOnEscape(open, () => setOpen(false))
+  const menuRef = useRef<HTMLDivElement>(null)
+  const menu = usePopoverPlatz(menuRef, open, { bevorzugt: openUpward ? 'oben' : 'unten' })
   const activeConvId = useChatStore((s) => s.activeConversationId)
   const defaultMode = useSettingsStore((s) => s.settings.codexDefaultMode)
   const modeByConversation = useCodexStore((s) => s.modeByConversation)
@@ -124,7 +127,7 @@ export function CodexModeDropdown({ openUpward = false }: { openUpward?: boolean
               menu hung off its right edge ran 240px to the left and the panel
               cut off the first letters ("ypass permissions", Gegenprobe
               01.10.2026). The room is to the right. */}
-          <div className={`absolute left-0 z-50 w-60 rounded-lg lu-elevated py-1.5 ${openUpward ? 'bottom-full mb-1' : 'top-full mt-1'}`}>
+          <div ref={menuRef} style={menu.style} className={`absolute left-0 z-50 w-60 rounded-lg lu-elevated py-1.5 overflow-y-auto scrollbar-thin ${menu.nachOben ? 'bottom-full mb-1' : 'top-full mt-1'}`}>
             {!activeConvId ? (
               <p className="px-3 py-1.5 text-[0.5rem] text-gray-400">
                 Open a coding chat first, the mode lives on the conversation.

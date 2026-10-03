@@ -1,13 +1,8 @@
-import {
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { ChevronDown, Check, Search } from 'lucide-react'
+import { usePopoverPlatz } from '../../../hooks/usePopoverPlatz'
 import { cn } from './cn'
 
 export interface SelectOption {
@@ -30,20 +25,10 @@ interface Props {
   size?: 'sm' | 'md'
   align?: 'left' | 'right'
   className?: string
+  /** Hoeher wird die Liste nie, auch im grossen Fenster nicht. */
   maxHeight?: number
   /** Beschriftung fuer Bedienhilfen, wo kein sichtbarer Text danebensteht. */
   ariaLabel?: string
-}
-
-interface MenuPosition {
-  top?: number
-  bottom?: number
-  left?: number
-  right?: number
-  width: number
-  maxWidth: number
-  maxHeight: number
-  dropUp: boolean
 }
 
 export function Select({
@@ -60,11 +45,19 @@ export function Select({
 }: Props) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
-  const [menuPosition, setMenuPosition] =
-    useState<MenuPosition | null>(null)
 
   const triggerRef = useRef<HTMLDivElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
+  const listRef = useRef<HTMLDivElement>(null)
+  // GitHub #149: the menu used to do its own sums against the window height
+  // and kept a minimum height, so in a short or zoomed window it ended up
+  // under the window edge. Placement is the app-wide rule now: the side with
+  // room, capped to that room, the list scrolls.
+  const menu = usePopoverPlatz(menuRef, open, {
+    anker: triggerRef,
+    rolle: listRef,
+    fest: align === 'right' ? 'rechts' : 'links',
+  })
 
   const current = options.find((option) => option.value === value)
 
@@ -83,7 +76,6 @@ export function Select({
   const closeMenu = () => {
     setOpen(false)
     setQuery('')
-    setMenuPosition(null)
   }
 
   const toggle = () => {
@@ -123,115 +115,10 @@ export function Select({
     }
   }, [open])
 
-  useLayoutEffect(() => {
-    if (!open || !triggerRef.current) return
-
-    const updatePosition = () => {
-      const trigger = triggerRef.current
-      if (!trigger) return
-
-      const rect = trigger.getBoundingClientRect()
-      const viewportPadding = 8
-      const gap = 4
-
-      const spaceBelow =
-        window.innerHeight - rect.bottom - viewportPadding - gap
-      const spaceAbove =
-        rect.top - viewportPadding - gap
-
-      const searchHeight = searchable ? 48 : 0
-      const menuChromeHeight = searchHeight + 8
-      const estimatedRowsHeight =
-        Math.max(filtered.length, 1) * 32
-
-      const desiredHeight = Math.min(
-        maxHeight + menuChromeHeight,
-        estimatedRowsHeight + menuChromeHeight,
-      )
-
-      // Prefer opening downward whenever there is enough usable space.
-      // The menu can scroll internally when all options do not fit.
-      const minimumUsefulHeight = Math.min(desiredHeight, 160)
-      const dropUp =
-        spaceBelow < minimumUsefulHeight &&
-        spaceAbove > spaceBelow
-
-      const availableSpace = Math.max(
-        80,
-        dropUp ? spaceAbove : spaceBelow,
-      )
-
-      // The trigger width is the menu's MINIMUM: options with sublabels
-      // (model prices) may need more room, so the menu grows with its
-      // content. Right-aligned menus anchor their right edge and grow
-      // leftward; both stay clamped inside the viewport via maxWidth.
-      const width = rect.width
-      const maxWidth =
-        window.innerWidth - viewportPadding * 2
-
-      const left =
-        align === 'right'
-          ? undefined
-          : Math.min(
-              Math.max(viewportPadding, rect.left),
-              Math.max(
-                viewportPadding,
-                window.innerWidth - width - viewportPadding,
-              ),
-            )
-      const right =
-        align === 'right'
-          ? Math.max(
-              viewportPadding,
-              window.innerWidth - rect.right,
-            )
-          : undefined
-
-      setMenuPosition({
-        top: dropUp ? undefined : rect.bottom + gap,
-        bottom: dropUp
-          ? window.innerHeight - rect.top + gap
-          : undefined,
-        left,
-        right,
-        width,
-        maxWidth,
-        maxHeight: Math.min(desiredHeight, availableSpace),
-        dropUp,
-      })
-    }
-
-    updatePosition()
-
-    window.addEventListener('resize', updatePosition)
-    window.addEventListener('scroll', updatePosition, true)
-
-    const resizeObserver = new ResizeObserver(updatePosition)
-    resizeObserver.observe(triggerRef.current)
-
-    return () => {
-      window.removeEventListener('resize', updatePosition)
-      window.removeEventListener('scroll', updatePosition, true)
-      resizeObserver.disconnect()
-    }
-  }, [
-    align,
-    filtered.length,
-    maxHeight,
-    open,
-    searchable,
-  ])
-
   const controlHeight =
     size === 'sm'
       ? 'h-[var(--control-h-sm)]'
       : 'h-[var(--control-h-md)]'
-
-  const optionsMaxHeight = Math.max(
-    64,
-    (menuPosition?.maxHeight ?? maxHeight) -
-      (searchable ? 48 : 8),
-  )
 
   return (
     <>
@@ -284,7 +171,7 @@ export function Select({
                 ref={menuRef}
                 initial={{
                   opacity: 0,
-                  y: menuPosition?.dropUp ? 4 : -4,
+                  y: menu.nachOben ? 4 : -4,
                   scale: 0.98,
                 }}
                 animate={{
@@ -294,31 +181,19 @@ export function Select({
                 }}
                 exit={{
                   opacity: 0,
-                  y: menuPosition?.dropUp ? 4 : -4,
+                  y: menu.nachOben ? 4 : -4,
                   scale: 0.98,
                 }}
                 transition={{ duration: 0.12 }}
-                style={{
-                  top: menuPosition?.top,
-                  bottom: menuPosition?.bottom,
-                  left: menuPosition?.left,
-                  right: menuPosition?.right,
-                  minWidth: menuPosition?.width,
-                  maxWidth: menuPosition?.maxWidth,
-                  maxHeight:
-                    menuPosition?.maxHeight ?? maxHeight,
-                  visibility: menuPosition
-                    ? 'visible'
-                    : 'hidden',
-                }}
+                style={menu.style}
                 className={cn(
                   'lu-elevated fixed z-[100] min-w-0',
                   'rounded-[var(--radius-panel)]',
-                  'p-1 overflow-hidden',
+                  'flex flex-col p-1 overflow-hidden',
                 )}
               >
                 {searchable && (
-                  <div className="mb-1 flex items-center gap-1.5 border-b border-white/[0.06] px-2 py-1.5">
+                  <div className="mb-1 flex shrink-0 items-center gap-1.5 border-b border-white/[0.06] px-2 py-1.5">
                     <Search
                       size={13}
                       className="text-gray-500"
@@ -337,9 +212,10 @@ export function Select({
                 )}
 
                 <div
+                  ref={listRef}
                   role="listbox"
-                  className="overflow-y-auto overscroll-contain scrollbar-thin"
-                  style={{ maxHeight: optionsMaxHeight }}
+                  className="min-h-0 overflow-y-auto overscroll-contain scrollbar-thin"
+                  style={{ maxHeight }}
                   onWheel={(event) => event.stopPropagation()}
                 >
                   {filtered.length === 0 && (

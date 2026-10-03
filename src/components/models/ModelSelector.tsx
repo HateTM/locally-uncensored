@@ -1,4 +1,5 @@
-import { useState, useRef, useEffect, useLayoutEffect } from 'react'
+import { useState, useRef, useEffect } from 'react'
+import { usePopoverPlatz } from '../../hooks/usePopoverPlatz'
 import { useDismissOnEscape } from '../../hooks/useDismissOnEscape'
 import { motion, AnimatePresence } from 'framer-motion'
 import { AlertTriangle, Ban, ChevronDown, Loader2, Power, PlayCircle, Settings as SettingsIcon, Wrench, X, Cloud } from 'lucide-react'
@@ -797,12 +798,13 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
    * rohe Maschinenprotokoll, der Satz mit dem Namen des Modells und dem
    * Handlungsvorschlag war unerreichbar.
    *
-   * Ein festes `max-h` in vh reicht dafuer nicht: das Menue haengt mit
-   * `bottom-full` am Ausloeser, und wie viel Platz DARUEBER ist, weiss nur
-   * der Ausloeser selbst. Also gemessen, bei jedem Oeffnen und bei jeder
-   * Groessenaenderung des Fensters.
+   * Ein festes `max-h` in vh reicht dafuer nicht: wie viel Platz ueber oder
+   * unter dem Ausloeser ist, weiss nur der Ausloeser selbst. Also gemessen,
+   * seit GitHub #149 mit `usePopoverPlatz` wie jedes Aufklappmenue der App:
+   * die Seite, die reicht, die Hoehe, die bleibt, keine Mindesthoehe mehr.
    */
-  const [menuePlatz, setMenuePlatz] = useState<number | null>(null)
+  const menueRef = useRef<HTMLDivElement>(null)
+  const menue = usePopoverPlatz(menueRef, open, { bevorzugt: openUpward ? 'oben' : 'unten', abstand: 6, luft: 12 })
 
   // Keep the per-row On/Off LOAD state LIVE while the dropdown is open
   // (David 2026-06-12: "on und offload button sehr delayed und nicht immer
@@ -1266,24 +1268,6 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
   const hasOllamaModels = textModels.some(m => ('provider' in m && m.provider === 'ollama') || !('provider' in m))
   textModelsEmptyRef.current = textModels.length === 0
 
-  // Messen, wie viel Fenster ueber (bzw. unter) dem Ausloeser noch frei ist.
-  // 18 px Abzug: 6 px Abstand des Menues zum Ausloeser plus 12 px Luft zum
-  // Fensterrand. Die Untergrenze von 200 px ist die Notbremse fuer ein sehr
-  // flaches Fenster, in dem sonst ein Menue ohne Inhalt herauskaeme.
-  useLayoutEffect(() => {
-    if (!open) return
-    const messen = () => {
-      const el = ref.current
-      if (!el) return
-      const r = el.getBoundingClientRect()
-      const frei = openUpward ? r.top : window.innerHeight - r.bottom
-      setMenuePlatz(Math.max(200, Math.round(frei - 18)))
-    }
-    messen()
-    window.addEventListener('resize', messen)
-    return () => window.removeEventListener('resize', messen)
-  }, [open, openUpward])
-
   return (
     <div ref={ref} className="relative">
       {/* ── Trigger Button ── */}
@@ -1366,13 +1350,14 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
         {open && (
           <motion.div
             data-testid="model-picker-menu"
-            style={menuePlatz === null ? undefined : { maxHeight: menuePlatz }}
+            ref={menueRef}
+            style={menue.style}
             className={`absolute w-72 rounded-lg overflow-x-hidden overflow-y-auto scrollbar-thin z-50 lu-elevated ${
-              openUpward ? 'bottom-full mb-1.5 right-0' : 'top-full mt-1.5 left-1/2 -translate-x-1/2'
-            }`}
-            initial={{ opacity: 0, y: openUpward ? 6 : -6, scale: 0.98 }}
+              menue.nachOben ? 'bottom-full mb-1.5' : 'top-full mt-1.5'
+            } ${openUpward ? 'right-0' : 'left-1/2 -translate-x-1/2'}`}
+            initial={{ opacity: 0, y: menue.nachOben ? 6 : -6, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: openUpward ? 6 : -6, scale: 0.98 }}
+            exit={{ opacity: 0, y: menue.nachOben ? 6 : -6, scale: 0.98 }}
             transition={{ duration: MOTION_S.fast, ease: 'easeOut' }}
           >
             {/* Noch vor der Engine-Zeile: was sich am Modell selbst geaendert

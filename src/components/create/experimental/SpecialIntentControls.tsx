@@ -7,6 +7,7 @@
 // genuinely differ (extend's source pick, the cloud voice maker).
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { usePopoverPlatz } from '../../../hooks/usePopoverPlatz'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
   AudioLines, Download, Film, ImagePlus, Info, Mic, Music2, Trash2, Upload, Wand2, X,
@@ -736,6 +737,8 @@ function VoiceChip({
   const inputRef = useRef<HTMLInputElement>(null)
   const ref = useRef<HTMLDivElement>(null)
   useClickAway(ref, () => { setOpen(false); setMakerOpen(false) }, open || makerOpen)
+  const panelRef = useRef<HTMLDivElement>(null)
+  const panel = usePopoverPlatz(panelRef, open, { bevorzugt: 'oben', abstand: 6 })
   const { makeVoice } = useCreateExp()
   const isGenerating = useCreateStore((s) => s.isGenerating)
   // The AI voice maker + "your generated audio" picks are cloud runs (hosted
@@ -778,11 +781,13 @@ function VoiceChip({
       <AnimatePresence>
         {open && (
           <motion.div
-            initial={{ opacity: 0, y: 4 }}
+            ref={panelRef}
+            style={panel.style}
+            initial={{ opacity: 0, y: panel.nachOben ? 4 : -4 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 4 }}
+            exit={{ opacity: 0, y: panel.nachOben ? 4 : -4 }}
             transition={{ duration: 0.12 }}
-            className="lu-elevated absolute bottom-full mb-1.5 left-0 z-50 w-72 rounded-lg p-1.5 space-y-1"
+            className={cn('lu-elevated absolute left-0 z-50 w-72 rounded-lg p-1.5 space-y-1 overflow-y-auto scrollbar-thin', panel.nachOben ? 'bottom-full mb-1.5' : 'top-full mt-1.5')}
           >
             {!makerOpen ? (
               <>
@@ -1049,6 +1054,8 @@ function LocalExtendControls() {
   const inputRef = useRef<HTMLInputElement>(null)
   const ref = useRef<HTMLDivElement>(null)
   useClickAway(ref, () => setOpen(false), open)
+  const panelRef = useRef<HTMLDivElement>(null)
+  const panel = usePopoverPlatz(panelRef, open, { bevorzugt: 'oben', abstand: 6, deckel: 256 })
 
   const adopt = async (getUrl: () => Promise<{ url: string; revoke?: () => void }>, label: string) => {
     setBusy(true)
@@ -1124,11 +1131,13 @@ function LocalExtendControls() {
         <AnimatePresence>
           {open && (
             <motion.div
-              initial={{ opacity: 0, y: 4 }}
+              ref={panelRef}
+              style={panel.style}
+              initial={{ opacity: 0, y: panel.nachOben ? 4 : -4 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 4 }}
+              exit={{ opacity: 0, y: panel.nachOben ? 4 : -4 }}
               transition={{ duration: 0.12 }}
-              className="lu-elevated absolute bottom-full mb-1.5 left-1/2 -translate-x-1/2 z-50 w-72 rounded-lg p-1 max-h-64 overflow-y-auto scrollbar-thin"
+              className={cn('lu-elevated absolute left-1/2 -translate-x-1/2 z-50 w-72 rounded-lg p-1 overflow-y-auto scrollbar-thin', panel.nachOben ? 'bottom-full mb-1.5' : 'top-full mt-1.5')}
             >
               <button
                 onClick={() => inputRef.current?.click()}
@@ -1162,6 +1171,8 @@ function CloudExtendControls() {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   useClickAway(ref, () => setOpen(false), open)
+  const panelRef = useRef<HTMLDivElement>(null)
+  const panel = usePopoverPlatz(panelRef, open, { bevorzugt: 'oben', abstand: 6, deckel: 256 })
 
   return (
     <div className="flex items-center justify-center">
@@ -1188,11 +1199,13 @@ function CloudExtendControls() {
         <AnimatePresence>
           {open && (
             <motion.div
-              initial={{ opacity: 0, y: 4 }}
+              ref={panelRef}
+              style={panel.style}
+              initial={{ opacity: 0, y: panel.nachOben ? 4 : -4 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 4 }}
+              exit={{ opacity: 0, y: panel.nachOben ? 4 : -4 }}
               transition={{ duration: 0.12 }}
-              className="lu-elevated absolute bottom-full mb-1.5 left-1/2 -translate-x-1/2 z-50 w-72 rounded-lg p-1 max-h-64 overflow-y-auto scrollbar-thin"
+              className={cn('lu-elevated absolute left-1/2 -translate-x-1/2 z-50 w-72 rounded-lg p-1 overflow-y-auto scrollbar-thin', panel.nachOben ? 'bottom-full mb-1.5' : 'top-full mt-1.5')}
             >
               {clips.length === 0 && (
                 <div className="t-control text-gray-500 px-2.5 py-2">

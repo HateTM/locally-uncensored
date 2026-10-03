@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import { usePopoverPlatz } from '../../hooks/usePopoverPlatz'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useChat } from '../../hooks/useChat'
 import { useChatStore } from '../../stores/chatStore'
@@ -108,6 +109,10 @@ export function ChatView() {
   const [exportOpen, setExportOpen] = useState(false)
   const [exportToast, setExportToast] = useState<string>('')
   const [toolsDropdownOpen, setToolsDropdownOpen] = useState(false)
+  const exportMenuRef = useRef<HTMLDivElement>(null)
+  const exportMenu = usePopoverPlatz(exportMenuRef, exportOpen)
+  const toolsMenuRef = useRef<HTMLDivElement>(null)
+  const toolsMenu = usePopoverPlatz(toolsMenuRef, toolsDropdownOpen, { bevorzugt: 'oben', abstand: 2 })
   // Beide Aufklapplisten dieser Datei legen eine volle `fixed inset-0`-Flaeche
   // ueber die App, und beide hatten Escape nie bekommen. Der Datei-Waechter
   // hat es uebersehen, weil weiter unten der Genehmigungsdialog auf 'Escape'
@@ -653,7 +658,7 @@ export function ChatView() {
                         {exportOpen && (
                           <>
                             <div className="fixed inset-0 z-40" onClick={() => setExportOpen(false)} />
-                            <div className="absolute right-0 top-full mt-1 z-50 w-32 rounded-lg bg-white dark:bg-[#1a1a1a] border border-gray-200 dark:border-white/10 shadow-xl py-1">
+                            <div ref={exportMenuRef} style={exportMenu.style} className={`absolute right-0 z-50 w-32 rounded-lg bg-white dark:bg-[#1a1a1a] border border-gray-200 dark:border-white/10 shadow-xl py-1 overflow-y-auto scrollbar-thin ${exportMenu.nachOben ? 'bottom-full mb-1' : 'top-full mt-1'}`}>
                               {(['markdown', 'json'] as const).map(fmt => (
                                 <button
                                   key={fmt}
@@ -843,7 +848,7 @@ export function ChatView() {
                     {toolsDropdownOpen && (
                       <>
                         <div className="fixed inset-0 z-40" onClick={() => setToolsDropdownOpen(false)} />
-                        <div className="absolute left-0 bottom-full mb-0.5 z-50 w-28 rounded-md bg-white dark:bg-[#1a1a1a] border border-gray-200 dark:border-white/10 shadow-xl py-0.5 px-0.5">
+                        <div ref={toolsMenuRef} style={toolsMenu.style} className={`absolute left-0 z-50 w-28 rounded-md bg-white dark:bg-[#1a1a1a] border border-gray-200 dark:border-white/10 shadow-xl py-0.5 px-0.5 overflow-y-auto scrollbar-thin ${toolsMenu.nachOben ? 'bottom-full mb-0.5' : 'top-full mt-0.5'}`}>
                           <PermissionOverrideBar />
                         </div>
                       </>
