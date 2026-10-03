@@ -250,6 +250,8 @@ export interface GalleryItem {
   /** "Improve my prompt": what the user typed, when the run was sent with a
    *  rewritten prompt. `prompt` then holds the rewrite, the text that ran. */
   promptOriginal?: string
+  /** Who wrote that rewrite: the enhancer edition or the chat model's name. */
+  rewrittenBy?: string
   /** "Improve my prompt" was on but the rewrite failed, the run used the
    *  user's own prompt. Said in the details, nowhere else. */
   improveFailed?: boolean

@@ -107,6 +107,7 @@ vi.mock('../../lib/render/improve-prompt-run', () => ({
 import { useCloudCreate } from '../useCloudCreate'
 import { useCreateStore } from '../../stores/createStore'
 import { useCloudCatalogStore } from '../../stores/cloudCatalogStore'
+import { useModelStore } from '../../stores/modelStore'
 import { neuerServer } from '../../lib/render/__tests__/fixtures/test-catalogs'
 
 beforeEach(() => {
@@ -121,6 +122,7 @@ beforeEach(() => {
     isGenerating: false, error: null, backend: 'cloud', source: null, mask: null, references: [],
     gallery: [], cloudStudioOptions: {}, cloudStudioCredits: null, cloudImageCount: 1, improvePrompt: false,
   })
+  useModelStore.setState({ activeModel: 'lu-cloud::glm-5.3' } as never)
   useCreateStore.getState().setPrompt('my own words')
   useCreateStore.getState().setIntent('image')
   useCreateStore.getState().setCloudImageModel('flux-schnell')
@@ -143,6 +145,7 @@ describe('Improve my prompt: Cloud (Desktop)', () => {
     const item = useCreateStore.getState().gallery[0]
     expect(item.prompt).toBe('A rewritten prompt.')
     expect(item.promptOriginal).toBe('my own words')
+    expect(item.rewrittenBy).toBe('glm-5.3')
     expect(item.improveFailed).toBeUndefined()
     expect(useCreateStore.getState().prompt).toBe('my own words')
     expect(useCreateStore.getState().error).toBeNull()

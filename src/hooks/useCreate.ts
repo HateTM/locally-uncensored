@@ -64,7 +64,8 @@ import { scenePromptFor } from '../lib/ltx-multishot'
 import { improveKindForIntent, IMPROVING_PROMPT, type ImproveOutcome } from '../lib/render/improve-prompt'
 import { elapsedLine } from '../lib/elapsed-line'
 import { improvePrompt } from '../lib/render/improve-prompt-run'
-import { pickQwenEnhancer } from '../lib/render/qwen-enhancer'
+import { useModelStore } from '../stores/modelStore'
+import { pickQwenEnhancer, rewrittenByName, type ImproveWriter } from '../lib/render/qwen-enhancer'
 import { buildQwenEnhancerWorkflow, runQwenEnhancer } from '../api/qwen-enhancer'
 import { extraReferenceSlots } from '../lib/edit-references'
 import { resolveRunSeed } from '../lib/run-seed'
@@ -600,13 +601,13 @@ export function useCreate() {
     // the run uses `prompt`, the gallery keeps both. A rewrite that fails never
     // stops the run, it goes on with the user's own prompt.
     let prompt = scenePrompt
-    let improveFields: { promptOriginal?: string; improveFailed?: true } = {}
+    let improveFields: { promptOriginal?: string; rewrittenBy?: string; improveFailed?: true } = {}
     // The safety check covers the rewrite too: the user wrote an allowed
     // prompt, the model must not turn it into a refusal.
-    const takeRewrite = (out: ImproveOutcome) => {
+    const takeRewrite = (out: ImproveOutcome, writer: ImproveWriter['id']) => {
       if (out.status === 'improved' && !checkPromptSafety(out.prompt).blocked) {
         prompt = out.prompt
-        improveFields = { promptOriginal: scenePrompt }
+        improveFields = { promptOriginal: scenePrompt, rewrittenBy: rewrittenByName(writer, useModelStore.getState().activeModel) }
       } else if (out.status !== 'unchanged') {
         improveFields = { improveFailed: true }
       }
@@ -645,7 +646,7 @@ export function useCreate() {
       }
       // Cancel pressed while the chat model was writing: the run does not start.
       if (own.signal.aborted) return
-      takeRewrite(out)
+      takeRewrite(out, 'chat')
     }
 
     // ── MLX image pipeline (Apple Silicon) — hard rule: Mac local image is the
@@ -988,7 +989,7 @@ export function useCreate() {
         const improving = elapsedLine((text) => setProgress(3, text), IMPROVING_PROMPT)
         const out = await runQwenEnhancer(enhancerGraph, scenePrompt, { clientId: CLIENT_ID, signal }).finally(improving.stop)
         if (signal?.aborted) throw new Error('Cancelled')
-        takeRewrite(out)
+        takeRewrite(out, qwenEnhancer.variant)
       }
       // GH #146: the stack is checked against what ComfyUI lists right now.
       // A deleted file or a Z-Image character on another model is left out

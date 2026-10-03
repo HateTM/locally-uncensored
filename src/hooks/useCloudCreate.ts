@@ -43,6 +43,8 @@ import { bumpSeed, runImageCount } from '../lib/render/image-count'
 import { STUDIO_MODELS, studioFields } from '../lib/render/studio-contract'
 import { modelLabel } from '../lib/render/preset-models'
 import { improveKindForIntent, IMPROVING_PROMPT } from '../lib/render/improve-prompt'
+import { rewrittenByName } from '../lib/render/qwen-enhancer'
+import { useModelStore } from '../stores/modelStore'
 import { elapsedLine } from '../lib/elapsed-line'
 import { improvePrompt } from '../lib/render/improve-prompt-run'
 import { bookedVideoSeconds } from '../lib/render/video-duration'
@@ -575,6 +577,7 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
       // A rewrite that fails never stops the run.
       let runPrompt = s.prompt
       let promptOriginal: string | undefined
+      let rewrittenBy: string | undefined
       let improveFailed = false
       const improveKind = s.improvePrompt && !characterUse ? improveKindForIntent(intent) : null
       if (improveKind && s.prompt.trim() && !ac.signal.aborted) {
@@ -585,6 +588,7 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
         if (out.status === 'improved' && !clientSafety(out.prompt).blocked) {
           runPrompt = out.prompt
           promptOriginal = s.prompt
+          rewrittenBy = rewrittenByName('chat', useModelStore.getState().activeModel)
         } else if (out.status !== 'unchanged' && !ac.signal.aborted) {
           improveFailed = true
         }
@@ -704,6 +708,7 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
         model: galleryModel,
         prompt: OP_GALLERY_LABEL[op] ?? runPrompt,
         promptOriginal,
+        rewrittenBy,
         improveFailed: improveFailed || undefined,
         label,
         negativePrompt: s.negativePrompt,

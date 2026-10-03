@@ -116,6 +116,17 @@ describe('Details am Ergebnis (Desktop)', () => {
     expect(screen.getByText('Sent to the model').nextElementSibling?.textContent).toBe('A rewritten prompt.')
   })
 
+  // Box-Probe 03.10.2026: die Details sagten nicht, wer umgeschrieben hat.
+  it('nennt, wer umgeschrieben hat', () => {
+    render(<PromptDetails item={ITEM({ promptOriginal: 'my own words', rewrittenBy: 'Qwen enhancer, no refusals' })} />)
+    expect(screen.getByText('Rewritten by').nextElementSibling?.textContent).toBe('Qwen enhancer, no refusals')
+  })
+
+  it('ein alter Eintrag ohne den Namen zeigt die Zeile nicht', () => {
+    render(<PromptDetails item={ITEM({ promptOriginal: 'my own words' })} />)
+    expect(screen.queryByText('Rewritten by')).toBeNull()
+  })
+
   it('vermerkt ein gescheitertes Umschreiben ohne Fehlerton', () => {
     render(<PromptDetails item={ITEM({ improveFailed: true, prompt: 'my own words' })} />)
     expect(screen.getByText(/rewrite did not work/i)).toBeTruthy()

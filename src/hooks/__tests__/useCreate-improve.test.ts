@@ -58,6 +58,7 @@ vi.mock('../../lib/render/improve-prompt-run', () => ({
 
 import { useCreate } from '../useCreate'
 import { useCreateStore } from '../../stores/createStore'
+import { useModelStore } from '../../stores/modelStore'
 
 beforeEach(() => {
   mlx.runs.length = 0
@@ -65,6 +66,7 @@ beforeEach(() => {
   improve.calls.length = 0
   improve.outcome = { status: 'improved', prompt: 'A rewritten prompt.' }
   improve.gate = null
+  useModelStore.setState({ activeModel: 'lu-cloud::glm-5.3' } as never)
   useCreateStore.setState({
     backend: 'local', isGenerating: false, error: null, gallery: [], promptHistory: [], improvePrompt: false,
     cloudOp: null, utilityOp: null, removebg: false, source: null, mask: null, references: [],
@@ -93,6 +95,8 @@ describe('Improve my prompt: lokal (MLX-Weg)', () => {
     const item = useCreateStore.getState().gallery[0]
     expect(item.prompt).toBe('A rewritten prompt.')
     expect(item.promptOriginal).toBe('my own words')
+    // The details name the chat model that wrote, without its provider prefix.
+    expect(item.rewrittenBy).toBe('glm-5.3')
     expect(useCreateStore.getState().prompt).toBe('my own words')
     expect(useCreateStore.getState().promptHistory[0]).toBe('my own words')
     expect(useCreateStore.getState().isGenerating).toBe(false)
@@ -107,6 +111,7 @@ describe('Improve my prompt: lokal (MLX-Weg)', () => {
     const item = useCreateStore.getState().gallery[0]
     expect(item.improveFailed).toBe(true)
     expect(item.promptOriginal).toBeUndefined()
+    expect(item.rewrittenBy).toBeUndefined()
     expect(useCreateStore.getState().error).toBeNull()
   })
 

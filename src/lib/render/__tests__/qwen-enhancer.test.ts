@@ -7,6 +7,7 @@
  */
 import { describe, it, expect } from 'vitest'
 import {
+  rewrittenByName,
   activeWriter, cleanEnhanced, enhancedOutcome, improveWriters, installedQwenEnhancers,
   isQwenEnhancerFile, pickQwenEnhancer, qwenEnhancerFile, qwenEnhancerMode,
   type EnhancerSituation,
@@ -177,5 +178,18 @@ describe('the answer becomes a prompt', () => {
     expect(enhancedOutcome(' a fox ', 'a fox')).toEqual({ status: 'unchanged' })
     expect(enhancedOutcome(null, 'a fox')).toEqual({ status: 'failed' })
     expect(enhancedOutcome("I'm sorry, I can't do that.", 'a fox')).toEqual({ status: 'failed' })
+  })
+})
+
+// Box run, 03.10.2026: "Prompt details" did not say who had rewritten.
+describe('the name the details give the writer', () => {
+  it('an enhancer is named by its edition', () => {
+    expect(rewrittenByName('official', 'lu-cloud::glm-5.3')).toBe('Qwen enhancer')
+    expect(rewrittenByName('unfiltered', null)).toBe('Qwen enhancer, no refusals')
+  })
+
+  it('the chat model is named by its own name, without the provider prefix', () => {
+    expect(rewrittenByName('chat', 'lu-cloud::glm-5.3')).toBe('glm-5.3')
+    expect(rewrittenByName('chat', 'llama3.1:8b')).toBe('llama3.1:8b')
   })
 })

@@ -21,6 +21,12 @@ export function PromptDetails({ item, className }: { item: GalleryItem; classNam
             <div className="t-label text-gray-500">Sent to the model</div>
             <p className="t-body whitespace-pre-wrap break-words text-gray-300">{item.prompt}</p>
           </div>
+          {item.rewrittenBy && (
+            <div>
+              <div className="t-label text-gray-500">Rewritten by</div>
+              <p className="t-body break-words text-gray-300">{item.rewrittenBy}</p>
+            </div>
+          )}
         </div>
       ) : (
         <p className="t-body mt-2 text-gray-400">

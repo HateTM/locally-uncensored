@@ -15,6 +15,7 @@
 // trained for its own task and its own system prompt.
 
 import type { ImproveOutcome } from './improve-prompt'
+import { displayModelName } from '../../api/providers/model-name'
 
 /** What the enhancer rewrites: a prompt for a new picture, or an edit instruction. */
 export type QwenEnhancerMode = 't2i' | 'i2i'
@@ -72,6 +73,13 @@ const WRITER_LABEL: Record<ImproveWriter['id'], string> = {
   official: 'Qwen enhancer',
   unfiltered: 'Qwen enhancer, no refusals',
   chat: 'Chat model',
+}
+
+/** The name "Prompt details" gives the writer of a rewrite: the enhancer
+ *  edition, or the chat model by its own name. */
+export function rewrittenByName(writer: ImproveWriter['id'], chatModel: string | null): string {
+  if (writer !== 'chat') return WRITER_LABEL[writer]
+  return chatModel ? displayModelName(chatModel) : WRITER_LABEL.chat
 }
 
 export interface EnhancerSituation {
