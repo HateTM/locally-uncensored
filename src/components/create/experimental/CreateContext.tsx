@@ -12,6 +12,7 @@ import { installMlxStack } from '../../../api/mlx-install'
 import { useDownloadStore } from '../../../stores/downloadStore'
 import { downloadBundleFiles, waitOrAbort, waitForModelsVisible, InstallCancelled } from '../../../lib/bundle-install'
 import { ensureLocalFilename } from './loadImage'
+import { batchReady, requestBatchStop, runBatchEdit } from './batchRun'
 import { comfyStartupError, COMFY_INSTALLED_BUT_DEAD } from './comfyError'
 import { restartComfyForNewNodes } from '../../../api/comfy-restart'
 import type { CloudQuota } from '../../../lib/render/cloud-jobs'
@@ -567,13 +568,21 @@ export function CreateExpProvider({ children }: { children: ReactNode }) {
     }
   }, [ensureComfyRunning, fetchModels])
 
+  // Several source images (lib/batch-edit): Create runs the same single run
+  // once per image, on the backend the batch started on.
+  const runOne = backend === 'cloud' ? cloud.generate : generate
   const value: CreateExpValue = {
-    generate: backend === 'cloud' ? cloud.generate : generate,
+    generate: () => (batchReady() ? runBatchEdit(runOne) : runOne()),
     // Cancel routes by the backend that STARTED the run, not the current axis:
     // the header switch (or the license probe) can flip local/cloud mid-render,
     // and routing by the live value would abort a null handle while the real
     // run keeps going (a cloud job keeps billing; a local job keeps rendering).
-    cancel: () => (hasActiveCloudRun() ? cloud.cancel() : cancel()),
+    // A batch stops first, so nothing further starts while the run in flight
+    // is cancelled.
+    cancel: () => {
+      requestBatchStop()
+      return hasActiveCloudRun() ? cloud.cancel() : cancel()
+    },
     enhanceVideo: cloud.enhanceVideo,
     makeVoice: cloud.makeVoice,
     samplerList, schedulerList, loraList, vaeList, refreshModelLists,

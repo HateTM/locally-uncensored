@@ -14,6 +14,7 @@ import { Stage } from './Stage'
 import { Composer } from './Composer'
 import { CreatePanel } from './CreatePanel'
 import { Lightbox } from './Lightbox'
+import { SaveCharacterModal } from './SaveCharacterModal'
 import { AdvancedDrawer } from './AdvancedDrawer'
 import { WorkflowsModal } from '../WorkflowsModal'
 import { Hinweis } from '../../ui/Hinweis'
@@ -101,6 +102,8 @@ function CreateExperimentalInner() {
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [maskOpen, setMaskOpen] = useState(false)
   const [lightbox, setLightbox] = useState<GalleryItem | null>(null)
+  // The video whose frames are being saved as a character (SaveCharacterModal).
+  const [characterFrom, setCharacterFrom] = useState<GalleryItem | null>(null)
   const [panelOpen, setPanelOpen] = useState(false)
   const [workflowsOpen, setWorkflowsOpen] = useState(false)
 
@@ -431,6 +434,7 @@ function CreateExperimentalInner() {
           onEditResult={editAvailable ? (it) => { void editResultWithMask(it) } : undefined}
           onAnimateResult={animateAvailable ? (it) => { void animateResult(it) } : undefined}
           onFullscreen={(it) => setLightbox(it)}
+          onSaveCharacter={setCharacterFrom}
           comfyStarting={comfyStarting}
         />
         <CreatePanel open={panelOpen} onOpenChange={setPanelOpen} activeId={shownId} onSelect={openGalleryItem} />
@@ -497,7 +501,8 @@ function CreateExperimentalInner() {
         </Modal>
       )}
 
-      <Lightbox item={lightbox} onClose={() => setLightbox(null)} />
+      <Lightbox item={lightbox} onClose={() => setLightbox(null)} onSaveCharacter={setCharacterFrom} />
+      <SaveCharacterModal item={characterFrom} onClose={() => setCharacterFrom(null)} />
       <VhsInstallModal />
       <RenderFixupModal />
     </div>

@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { maxTrainImages } from '../lib/train-image-cap'
 import { MAX_STORED_REFERENCES } from '../lib/edit-references'
 import { clampImageCount } from '../lib/render/image-count'
+import { BATCH_INTENTS, type BatchRunState } from '../lib/batch-edit'
 import type { FixupPrompt } from '../lib/render-fixups'
 import { persist } from 'zustand/middleware'
 import { safeJSONStorage } from '../lib/storage-quota'
@@ -15,6 +16,8 @@ import { isRecord } from '../types/json-guards'
  */
 const RUNTIME_ONLY_KEYS: readonly string[] = [
   'backend', 'source', 'mask', 'references', 'caps', 'isGenerating', 'comfyCorsBlocked',
+  // A queue of source images from yesterday must never start a run today.
+  'batchSources', 'batchRun',
   // Ein gespeicherter Preis von gestern ist eine Luege (siehe partialize
   // unten): auch wenn ein fremder/aelterer Blob ihn doch mitbringt, darf er
   // nie zurueckkommen.
@@ -238,6 +241,8 @@ export interface GalleryItem {
   jobId?: string
   /** Which redesign intent produced this item (gallery tagging). */
   intent?: CreateIntent
+  /** Several source images, one edit: the file this result was made from. */
+  sourceName?: string
   /** Kurze Ueberschrift, wenn der Prompt nicht sagt, was dabei herauskam: der
    *  Titel des Presets, die Beschreibung des Schrittes. Siehe gallery-label.ts. */
   label?: string
@@ -363,6 +368,12 @@ interface CreateState {
   /** Edit: further reference images after the source, for a model that takes
    *  them (lib/edit-references). Runtime-only like `source`; cleared with it. */
   references: ImageRef[]
+  /** Several source images, one edit (lib/batch-edit): the files that get the
+   *  same run, one after the other. Empty for a single image, else two or more,
+   *  and `source` shows the first. Runtime-only like `source`. */
+  batchSources: MediaRef[]
+  /** The queue of a running batch, null when none runs. */
+  batchRun: BatchRunState | null
   sourceSetAt: number
   mask: ImageRef | null
   /** Runtime-only: local (Bridge) vs cloud (/api/jobs), derived from session. */
@@ -524,6 +535,8 @@ interface CreateState {
   addReference: (img: ImageRef) => void
   removeReference: (index: number) => void
   setReferences: (refs: ImageRef[]) => void
+  setBatchSources: (list: MediaRef[]) => void
+  setBatchRun: (run: BatchRunState | null) => void
   setMask: (img: ImageRef | null) => void
   setBackend: (backend: CreateBackend) => void
   setCloudImageModel: (id: string) => void
@@ -717,6 +730,8 @@ export const useCreateStore = create<CreateState>()(
       growMaskBy: 6,
       source: null as ImageRef | null,
       references: [] as ImageRef[],
+      batchSources: [] as MediaRef[],
+      batchRun: null as BatchRunState | null,
       sourceSetAt: 0,
       mask: null as ImageRef | null,
       backend: 'local' as CreateBackend,
@@ -916,6 +931,8 @@ export const useCreateStore = create<CreateState>()(
         }
       })
         if (changed) set({ cloudStudioOptions: {} })
+        // The list of further source images stays only where it can run.
+        if (get().batchSources.length && (!get().source || !BATCH_INTENTS.has(intent))) get().setBatchSources([])
       },
       toggleNegative: () => set((s) => ({ showNegative: !s.showNegative })),
       toggleLora: (name) => set((s) => ({ selectedLoras: s.selectedLoras.some((l) => l.name === name) ? s.selectedLoras.filter((l) => l.name !== name) : [...s.selectedLoras, { name, strength: s.loraStrengths[name] ?? defaultLoraStrength(name) }] })),
@@ -1030,12 +1047,21 @@ export const useCreateStore = create<CreateState>()(
       setMusicDuration: (s2) => set({ musicDuration: Math.max(5, Math.min(240, Math.floor(s2))) }),
       setMusicLyrics: (musicLyrics) => set({ musicLyrics: musicLyrics.slice(0, 2000) }),
       setMusicHowtoSeen: (musicHowtoSeen) => set({ musicHowtoSeen }),
-      setSource: (source) => set({ source, sourceSetAt: source ? Date.now() : 0, ...(source ? {} : { mask: null, references: [] }) }),
+      setSource: (source) => {
+        // The list of further source images goes with the image it belongs to.
+        if (!source) get().setBatchSources([])
+        set({ source, sourceSetAt: source ? Date.now() : 0, ...(source ? {} : { mask: null, references: [] }) })
+      },
       // Capped at the most any model takes, local or cloud (lib/edit-references);
       // the UI offers fewer for a model with fewer slots and the builder slices.
       addReference: (img) => set((s) => ({ references: [...s.references, img].slice(0, MAX_STORED_REFERENCES) })),
       removeReference: (index) => set((s) => ({ references: s.references.filter((_, i) => i !== index) })),
       setReferences: (references) => set({ references }),
+      setBatchSources: (batchSources) => {
+        releaseDroppedMediaRefs(get().batchSources, batchSources)
+        set({ batchSources })
+      },
+      setBatchRun: (batchRun) => set({ batchRun }),
       setMask: (mask) => set({ mask }),
       // Flipping to local clears the intents that have no local lane
       // (upscale/eraser plus character training — all hosted-only) so the

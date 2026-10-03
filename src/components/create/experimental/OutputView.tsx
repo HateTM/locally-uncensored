@@ -1,7 +1,7 @@
 import { itemHasAlpha } from '../../../lib/transparent-image'
 import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
-import { Cpu, Sparkles, ImageDown, Maximize2, Download, Wand2, MonitorOff, AudioLines, Film, Trash2 } from 'lucide-react'
+import { Cpu, Sparkles, ImageDown, Maximize2, Download, Wand2, MonitorOff, AudioLines, Film, Trash2, UserRoundPlus } from 'lucide-react'
 import { coldLoadHint } from '../../../lib/cold-load-notice'
 import { useCreateStore, type GalleryItem, type ProgressPhase } from '../../../stores/createStore'
 import { isMlxImageHost } from '../../../api/mlx-image'
@@ -11,6 +11,7 @@ import { markGalleryItemAvailable } from './galleryUrl'
 import { downloadGalleryItem } from './galleryDownload'
 import { galleryLabel } from '../../../lib/render/gallery-label'
 import { useComfyMedia } from './useComfyMedia'
+import { BatchQueue } from './BatchStrip'
 import { cn } from '../ui/cn'
 
 // The icon in the waiting circle says which PHASE the render is in, never
@@ -101,6 +102,7 @@ export function GeneratingView() {
             ) : phaseIcon(progressPhase)}
           </div>
         </div>
+        <BatchQueue />
         <p className="t-body text-gray-300 tracking-wide">{progressText || 'Generating…'}</p>
         {isLoading && !isMlxImageHost() && <ColdLoadLine />}
         {progress > 0 && (
@@ -123,6 +125,8 @@ interface ResultProps {
    *  run (see isIntentAvailable('animate', ...) in Stage's caller), same gating
    *  pattern as onSendToEditor above it. */
   onAnimate?: () => void
+  /** Pick frames of this finished video and save them as a character. */
+  onSaveCharacter?: () => void
 }
 
 
@@ -139,7 +143,7 @@ function reconcileDims(item: GalleryItem, w: number, h: number) {
   }
 }
 
-export function ResultView({ item, onFullscreen, onSendToEditor, onAnimate }: ResultProps) {
+export function ResultView({ item, onFullscreen, onSendToEditor, onAnimate, onSaveCharacter }: ResultProps) {
   const { src: url, onError } = useComfyMedia(item)
   const download = () => void downloadGalleryItem(item)
   const isVideo = item.type === 'video'
@@ -191,6 +195,9 @@ export function ResultView({ item, onFullscreen, onSendToEditor, onAnimate }: Re
           {onAnimate && item.type === 'image' && !item.unavailable && (
             <IconBtn title="Animate this image" onClick={onAnimate}><Film size={14} /></IconBtn>
           )}
+          {onSaveCharacter && isVideo && !item.unavailable && (
+            <IconBtn title="Save character from this video" onClick={onSaveCharacter}><UserRoundPlus size={14} /></IconBtn>
+          )}
           <IconBtn
             title={item.unavailable ? 'Download needs the local engine' : 'Download'}
             disabled={item.unavailable}
@@ -220,6 +227,9 @@ export function ResultView({ item, onFullscreen, onSendToEditor, onAnimate }: Re
         )}
         <span className="truncate max-w-[280px]">{prettyModel(item.model)}</span>
       </div>
+      {item.sourceName && (
+        <div className="mt-1 t-mono text-gray-500 truncate max-w-[420px]" data-testid="source-name">from {item.sourceName}</div>
+      )}
       {item.runNote && (
         <div className="mt-1 t-mono text-gray-500" data-testid="run-note">{item.runNote}</div>
       )}
