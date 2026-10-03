@@ -24,7 +24,7 @@ const BILD = { filename: 'a.png', url: 'data:image/png;base64,AA', width: 8, hei
 function stage(model: string) {
   useCreateStore.setState({ backend: 'cloud', cloudImageModel: model, source: BILD, mask: null, isGenerating: false, gallery: [] })
   useCreateStore.getState().setIntent('edit')
-  render(<Stage displayed={null} onOpenMaskEditor={vi.fn()} onEditResult={vi.fn()} onAnimateResult={vi.fn()} onFullscreen={vi.fn()} />)
+  render(<Stage displayed={undefined} onOpenMaskEditor={vi.fn()} onEditResult={vi.fn()} onAnimateResult={vi.fn()} onFullscreen={vi.fn()} />)
 }
 
 beforeEach(() => { useCloudCatalogStore.setState({ models: neuerServer() }) })
