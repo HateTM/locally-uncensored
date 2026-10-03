@@ -33,6 +33,10 @@ export const IMPROVE_MAX_CHARS = 3000
  *  reasoning off spends part of it before the first word. */
 export const IMPROVE_MAX_TOKENS = 1500
 
+/** How long the rewrite may take. A chat call that hangs must not hold the run:
+ *  after this the call is dropped and the run goes on with the user's own prompt. */
+export const IMPROVE_TIMEOUT_MS = 90_000
+
 export interface ImproveTarget {
   kind: ImproveKind
   /** The model the prompt is for, as the user sees it. Named to the chat model

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 const calls = vi.hoisted(() => ({
   list: [] as { model: string; messages: { role: string; content: string }[]; opts: Record<string, unknown> }[],
@@ -7,6 +7,7 @@ const calls = vi.hoisted(() => ({
 const plan = vi.hoisted(() => ({
   chunks: [] as string[],
   throws: null as Error | null,
+  hangs: false,
   provider: 'lu-cloud' as string,
   lane: 'cloud' as 'cloud' | 'local',
   queued: false,
@@ -21,6 +22,7 @@ vi.mock('../../../api/providers', () => ({
       async *chatStream(model: string, messages: { role: string; content: string }[], opts: Record<string, unknown>) {
         calls.list.push({ model, messages, opts })
         if (plan.throws) throw plan.throws
+        if (plan.hangs) await new Promise(() => {})
         for (const c of plan.chunks) yield { content: c, done: false }
         yield { content: '', done: true }
       },
@@ -41,12 +43,16 @@ vi.mock('../../run-slot', () => ({
 
 import { useModelStore } from '../../../stores/modelStore'
 import { improveAvailabilityFor, improvePrompt } from '../improve-prompt-run'
+import { IMPROVE_TIMEOUT_MS } from '../improve-prompt'
+
+afterEach(() => { vi.useRealTimers() })
 
 beforeEach(() => {
   calls.list.length = 0
   calls.lanes.length = 0
   plan.chunks = ['A red fox ', 'in deep snow.']
   plan.throws = null
+  plan.hangs = false
   plan.provider = 'lu-cloud'
   plan.lane = 'cloud'
   plan.queued = false
@@ -55,6 +61,34 @@ beforeEach(() => {
 })
 
 describe('Improve my prompt: Lauf (Desktop)', () => {
+  it('ein haengender Aufruf endet nach der Frist als failed, lokal nach der doppelten', async () => {
+    for (const [lane, limit] of [['cloud', IMPROVE_TIMEOUT_MS], ['local', IMPROVE_TIMEOUT_MS * 2]] as const) {
+      vi.useFakeTimers()
+      calls.list.length = 0
+      plan.hangs = true
+      plan.lane = lane
+      const run = improvePrompt('x', { kind: 'image' })
+      let settled = false
+      void run.then(() => { settled = true })
+      await vi.advanceTimersByTimeAsync(limit - 1)
+      expect(settled, lane).toBe(false)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(await run).toEqual({ status: 'failed' })
+      expect((calls.list[0].opts.signal as AbortSignal).aborted).toBe(true)
+      vi.useRealTimers()
+    }
+  })
+
+  it('Cancel beendet auch einen Aufruf, der auf den Abbruch nicht hoert', async () => {
+    plan.hangs = true
+    const ac = new AbortController()
+    const run = improvePrompt('x', { kind: 'image' }, ac.signal)
+    await new Promise((r) => setTimeout(r, 0))
+    ac.abort()
+    expect(await run).toEqual({ status: 'failed' })
+    expect((calls.list[0].opts.signal as AbortSignal).aborted).toBe(true)
+  })
+
   it('schreibt mit dem gewaehlten Chatmodell um und liefert die neue Fassung', async () => {
     const out = await improvePrompt('fox in snow', { kind: 'image' })
     expect(out).toEqual({ status: 'improved', prompt: 'A red fox in deep snow.' })

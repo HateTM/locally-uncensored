@@ -16,7 +16,7 @@ import { resolveAgentNumCtx } from '../agent-num-ctx'
 import { runInLane } from '../run-slot'
 import { laneOf, currentLaneFacts } from '../run-lane-of-model'
 import {
-  IMPROVE_MAX_TOKENS, buildImproveMessages, cleanImproved,
+  IMPROVE_MAX_TOKENS, IMPROVE_TIMEOUT_MS, buildImproveMessages, cleanImproved,
   type ImproveOutcome, type ImproveTarget,
 } from './improve-prompt'
 
@@ -61,21 +61,31 @@ export async function improvePrompt(
     const canThink = thinkMode ? thinkMode === 'toggle' : isThinkingCompatible(activeModel)
     const effortLevels = meta && 'effortLevels' in meta ? meta.effortLevels : undefined
     const effortDefault = meta && 'effortDefault' in meta ? meta.effortDefault : undefined
+    const lane = laneOf(activeModel, currentLaneFacts())
+    // A local model may have to load first, so it gets twice the time.
+    const limit = lane === 'local' ? IMPROVE_TIMEOUT_MS * 2 : IMPROVE_TIMEOUT_MS
+    // The call ends on its own, on the user's Cancel, or after the time limit.
+    // The last two also drop a stream that does not answer the abort.
     const own = new AbortController()
-    const onAbort = () => own.abort()
-    signal?.addEventListener('abort', onAbort)
+    let stop: () => void = () => {}
+    const stopped = new Promise<false>((resolve) => { stop = () => { own.abort(); resolve(false) } })
+    signal?.addEventListener('abort', stop)
+    let timer: ReturnType<typeof setTimeout> | undefined
     let text = ''
     let ran = false
-    try {
-      const outcome = await runInLane(
-        { conversationId: IMPROVE_TURN, lane: laneOf(activeModel, currentLaneFacts()), abort: () => own.abort() },
-        async () => {
-          if (own.signal.aborted) return
-          // The num_ctx the chat runs with, so a local model is not reloaded
-          // for this call.
-          const numCtx = await resolveAgentNumCtx(
-            modelId, providerId, useSettingsStore.getState().settings.contextWindowOverride, activeModel,
-          )
+    const run = runInLane(
+      { conversationId: IMPROVE_TURN, lane, abort: () => stop() },
+      async () => {
+        if (own.signal.aborted) return
+        // The clock starts when the call does, not while it waits behind a
+        // chat turn on the local card.
+        timer = setTimeout(stop, limit)
+        // The num_ctx the chat runs with, so a local model is not reloaded
+        // for this call.
+        const numCtx = await resolveAgentNumCtx(
+          modelId, providerId, useSettingsStore.getState().settings.contextWindowOverride, activeModel,
+        )
+        const read = (async () => {
           const stream = provider.chatStream(modelId, buildImproveMessages(target, prompt), {
             temperature: 0.4,
             maxTokens: IMPROVE_MAX_TOKENS,
@@ -92,13 +102,22 @@ export async function improvePrompt(
             if (chunk.content) text += chunk.content
             if (chunk.done) break
           }
-          ran = true
-        },
-      )
-      if (outcome !== 'ran' || !ran) return { status: 'failed' }
+          return true as const
+        })()
+        read.catch(() => {})
+        // A stopped call gives the lane back at once, answered or not.
+        ran = await Promise.race([read, stopped])
+      },
+    ).then((outcome) => outcome === 'ran' && ran)
+    run.catch(() => {})
+    let finished = false
+    try {
+      finished = await Promise.race([run, stopped])
     } finally {
-      signal?.removeEventListener('abort', onAbort)
+      clearTimeout(timer)
+      signal?.removeEventListener('abort', stop)
     }
+    if (!finished) return { status: 'failed' }
     const cleaned = cleanImproved(text)
     if (!cleaned) return { status: 'failed' }
     if (cleaned === prompt.trim()) return { status: 'unchanged' }
