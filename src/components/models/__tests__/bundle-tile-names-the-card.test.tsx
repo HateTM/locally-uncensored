@@ -1,0 +1,78 @@
+import { describe, it, expect } from 'vitest'
+import { renderToStaticMarkup } from 'react-dom/server'
+import { BundleTile } from '../ModelTiles'
+import { getImageBundles } from '../../../api/model-bundles'
+
+// October 2026, the owner's 12 GB box: the catalogue said "10-16 GB" about
+// Z-Image and the card stood five minutes in the load. The tile now compares
+// the bundle with the detected card, in the place the fit hint always had.
+
+const bundle = (name: string) => getImageBundles().find((b) => b.name === name)!
+
+function tile(name: string, vramGb: number | null, sharedMemory = false): string {
+  return renderToStaticMarkup(
+    <BundleTile
+      bundle={bundle(name)} vramGb={vramGb} sharedMemory={sharedMemory}
+      complete={false} downloading={false} hasErrors={false}
+      onInstall={() => {}} onRetry={() => {}} onClear={() => {}} onOpenUrl={() => {}}
+    />,
+  )
+}
+
+describe('a bundle tile compares itself with the detected card', () => {
+  it('fits: says so and names the card', () => {
+    const html = tile('Juggernaut XL V9 (Photorealistic)', 12)
+    expect(html).toContain('data-bundle-fit="fits"')
+    expect(html).toContain('Fits your 12 GB card')
+    expect(html).toContain('bg-emerald-500/80')
+  })
+
+  it('tight: says it runs and what it costs', () => {
+    const html = tile('Z-Image Turbo (Unfiltered, Fast)', 12)
+    expect(html).toContain('data-bundle-fit="tight"')
+    expect(html).toContain('Tight on your 12 GB card: runs, but loading takes minutes')
+    expect(html).toContain('title="Runs from 10 GB. Loads fully into graphics memory from 16 GB."')
+    expect(html).toContain('bg-sky-500/80')
+    // Never red: a tight model is slow, not broken.
+    expect(html).not.toMatch(/bg-red|text-red/)
+  })
+
+  it('needs more: says so, in the tone of slower and not of broken', () => {
+    const html = tile('ERNIE-Image Turbo', 12)
+    expect(html).toContain('data-bundle-fit="big"')
+    expect(html).toContain('Needs more than your 12 GB card')
+    expect(html).toContain('bg-orange-500/80')
+    expect(html).not.toMatch(/bg-red|text-red/)
+  })
+
+  it('the same bundle reads differently on another card', () => {
+    expect(tile('Z-Image Turbo (Unfiltered, Fast)', 8)).toContain('Needs more than your 8 GB card')
+    expect(tile('Z-Image Turbo (Unfiltered, Fast)', 16)).toContain('Fits your 16 GB card')
+  })
+
+  it('exactly one hint per tile: the card line replaces the general one', () => {
+    const html = tile('Z-Image Turbo (Unfiltered, Fast)', 12)
+    expect(html).not.toContain('Tight fit')
+    expect(html.match(/rounded-full bg-sky-500\/80/g)).toHaveLength(1)
+  })
+
+  it('without a detected card the tile stays as it was: no word about a card', () => {
+    const html = tile('Z-Image Turbo (Unfiltered, Fast)', null)
+    expect(html).not.toContain('data-bundle-fit')
+    expect(html).not.toMatch(/card/)
+    expect(html).toContain('Get · 19.3 GB')
+  })
+
+  it('shared memory (a Mac) has no card to name and keeps the general hint', () => {
+    const html = tile('Z-Image Turbo (Unfiltered, Fast)', 32, true)
+    expect(html).not.toContain('data-bundle-fit')
+    expect(html).not.toMatch(/your 32 GB card/)
+    expect(html).toContain('Runs on your PC')
+  })
+
+  it('a bundle whose text names no number claims nothing', () => {
+    const html = tile('Krea 2 Companion Files (Text Encoder + VAE)', 12)
+    expect(html).not.toContain('data-bundle-fit')
+    expect(html).not.toMatch(/your 12 GB card/)
+  })
+})

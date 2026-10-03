@@ -13,10 +13,11 @@ import {
   installBundleComplete, remoteBundleNotice, checkBundlesInstalled, resolveHfGgufFiles, planModelDownload,
   type DiscoverModel, type DownloadProgress, type ModelBundle, type HfGgufFile,
 } from '../../api/discover'
-import { getSystemVRAM } from '../../api/comfyui'
 import { sortByTier, tierGroup } from '../../lib/render/model-tier'
-import { getMaxVramGb, getTotalRamGb, bundleVramNeedGb } from '../../lib/hardware'
-import { openExternal } from '../../api/backend'
+import { getTotalRamGb } from '../../lib/hardware'
+import { vramFit } from '../../lib/vram-fit'
+import { useGraphicsMemoryGb } from '../../hooks/useGraphicsMemory'
+import { openExternal, isMacOS } from '../../api/backend'
 import { useModels } from '../../hooks/useModels'
 import { useDownloadStore } from '../../stores/downloadStore'
 import { ModelGridSkeleton } from '../layout/ViewSkeletons'
@@ -219,7 +220,7 @@ export function awaitDownloadedFile(
 
 export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }: Props) {
   const [loading, setLoading] = useState(false)
-  const [systemVRAM, setSystemVRAM] = useState<number | null>(null)
+  const systemVRAM = useGraphicsMemoryGb()
   const [ramGb, setRamGb] = useState<number | null>(null)
   // Mainstream is the default + first tab (David 2026-07-17) — Unfiltered is
   // one click away but new users land on the neutral list.
@@ -260,16 +261,10 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
     detectProviderModelPath(providerName).then(path => setHfModelPath(path))
   }, [category, hfOverride, providers.openai?.name])
 
-  // Detect hardware for the "runs on your PC" hints. Two probes, best wins:
-  // detect_gpus (nvidia-smi/rocm-smi/wmic — works WITHOUT ComfyUI running)
-  // and ComfyUI's /system_stats (the pre-redesign source, kept as fallback).
+  // The graphics memory behind the "runs on your PC" hints comes from
+  // useGraphicsMemoryGb above (detect_gpus and ComfyUI's /system_stats, best
+  // wins), the same reading Create uses. RAM is asked here.
   useEffect(() => {
-    getMaxVramGb().then(v => {
-      if (v > 0) setSystemVRAM(prev => Math.max(prev ?? 0, Math.round(v)))
-    }).catch(() => {})
-    getSystemVRAM().then(v => {
-      if (v) setSystemVRAM(prev => Math.max(prev ?? 0, v))
-    })
     getTotalRamGb().then(r => { if (r > 0) setRamGb(r) }).catch(() => {})
   }, [])
 
@@ -317,12 +312,14 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
     ? getImageBundles()
     : isVideo ? [...getVideoBundles(), ...getAudioBundles(), ...getLipsyncBundles(), ...getMotionBundles()] : []
 
-  // How much VRAM a bundle wants, read by the ONE shared parser in
-  // lib/hardware. The local copy that used to live here answered 99 GB to the
-  // add-on bundles, whose requirement reads "any", so the sort buried them,
-  // the tier filter hid them and the tile called a 0.17 GB LoRA too big for a
-  // 12 GB card.
-  const parseVRAM = (b: ModelBundle): number => bundleVramNeedGb(b)
+  // How much graphics memory a bundle wants to run without offloading, from the
+  // ONE rule in lib/vram-fit. The companion files name no number, their
+  // download size stands in so they keep a place in the sort and the buckets.
+  const parseVRAM = (b: ModelBundle): number => b.vramComfortGB ?? b.totalSizeGB
+  const fitsCard = (b: ModelBundle): boolean => {
+    const fit = vramFit(b, systemVRAM)
+    return fit === 'fits' || fit === 'unknown'
+  }
 
   // Sort bundles: verified first, then HOT, then fits VRAM, then by size
   // Then the tier, stable: Best on top, Older gathered at the bottom under its
@@ -335,8 +332,8 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
     if (a.hot && !b.hot) return -1
     if (!a.hot && b.hot) return 1
     if (systemVRAM) {
-      const aFits = parseVRAM(a) <= systemVRAM
-      const bFits = parseVRAM(b) <= systemVRAM
+      const aFits = fitsCard(a)
+      const bFits = fitsCard(b)
       if (aFits && !bFits) return -1
       if (!aFits && bFits) return 1
     }
@@ -349,7 +346,7 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
   const vramFilteredBundles = tabFilteredBundles.filter(b => {
     if (vramTier === 'all') return true
     const vram = parseVRAM(b)
-    if (vramTier === 'fit') return systemVRAM ? vram <= systemVRAM + 2 : true
+    if (vramTier === 'fit') return vramFit(b, systemVRAM) !== 'big'
     if (vramTier === 'ultra') return vram <= 4
     if (vramTier === 'light') return vram > 4 && vram <= 10
     if (vramTier === 'middle') return vram > 10 && vram <= 20
@@ -983,6 +980,7 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
                 bundle={bundle}
                 lane={laneOf.get(bundle.name)}
                 vramGb={systemVRAM}
+                sharedMemory={isMacOS()}
                 complete={isBundleComplete(bundle)}
                 downloading={isBundleDownloading(bundle) || installingBundle === bundle.name}
                 hasErrors={hasBundleErrors(bundle)}

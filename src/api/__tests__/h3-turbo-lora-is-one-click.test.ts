@@ -23,7 +23,6 @@ import { lookupFileMeta, checkBundlesInstalled, onDiskMatchesCatalog } from '../
 import { bundleForVideoIntent, classifyModel, subfolderForSource } from '../comfyui'
 import { backendCall } from '../backend'
 import { defaultLoraStrength } from '../../lib/lora-strength'
-import { bundleVramNeedGb } from '../../lib/hardware'
 
 const FILE = 'minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors'
 const SHA = '2339acdf19bfe123f46b971ea35d367a84adb85de43627e1eceafa5a5b2b111e'
@@ -80,7 +79,8 @@ describe('where it shows', () => {
     // The first minimaxh3 entry stays the model itself.
     expect(all.find((x) => x.workflow === 'minimaxh3')!.name).toBe('MiniMax H3 · Video with Sound')
     // It needs the model next to it, so it is sized like the model.
-    expect(bundleVramNeedGb(b)).toBe(bundleVramNeedGb(all.find((x) => x.workflow === 'minimaxh3')!))
+    const model = all.find((x) => x.workflow === 'minimaxh3')!
+    expect([b.vramMinGB, b.vramComfortGB]).toEqual([model.vramMinGB, model.vramComfortGB])
   })
 
   it('on Models, LoRAs, Get new, next to the other catalog LoRA', () => {

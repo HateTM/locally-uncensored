@@ -13,14 +13,14 @@ import {
 import type { LucideIcon } from 'lucide-react'
 import type { DiscoverModel, DownloadProgress, ModelBundle } from '../../api/discover'
 import { formatBytes, countLabel } from '../../lib/formatters'
-import { bundleVramNeedGb } from '../../lib/hardware'
+import { vramFit, vramFitLine, vramNeedTitle, type VramFit } from '../../lib/vram-fit'
 import { tierMarks } from '../../lib/render/model-tier'
 import { modelTileAction } from '../../lib/model-tile-action'
 import { ICON_SM } from '../ui/icon-size'
 
 // ─── Hardware fit ───────────────────────────────────────────────────
 
-export type Fit = 'fits' | 'tight' | 'big' | 'unknown'
+export type Fit = VramFit
 
 // GGUF weights ≈ VRAM need; leave headroom for KV-cache/context. Never used
 // to BLOCK a download — purely an honest hint.
@@ -542,6 +542,9 @@ export interface BundleTileProps {
   /** Which Create lane a non-video bundle belongs to (Music, Lip sync, Motion). */
   lane?: string
   vramGb: number | null
+  /** True where graphics unit and processor share one memory pool (a Mac).
+   *  There is no card to name there, so the tile keeps the general hint. */
+  sharedMemory?: boolean
   complete: boolean
   downloading: boolean
   hasErrors: boolean
@@ -551,7 +554,7 @@ export interface BundleTileProps {
   onOpenUrl: (url: string) => void
 }
 
-export function BundleTile({ bundle, lane, vramGb, complete, downloading, hasErrors, onInstall, onRetry, onClear, onOpenUrl }: BundleTileProps) {
+export function BundleTile({ bundle, lane, vramGb, sharedMemory = false, complete, downloading, hasErrors, onInstall, onRetry, onClear, onOpenUrl }: BundleTileProps) {
   // No COMING SOON overlay any more (2026-07-24). It was driven by
   // `!bundle.verified && !complete`, a hand-set boolean, and it dimmed the tile
   // behind a full-cover "COMING SOON" pill while that tile's own working
@@ -564,10 +567,15 @@ export function BundleTile({ bundle, lane, vramGb, complete, downloading, hasErr
   // wrapper-node-names pins every node name the builder emits against real
   // wrapper registries. A lane that cannot run gets pulled (see the CogVideoX
   // and Pyramid Flow removals) rather than shipped behind a badge.
-  // bundleVramNeedGb, not a local parser: the add-on bundles say "any" and the
-  // old local one answered 99 GB to that, which painted a 0.17 GB LoRA red.
-  const need = bundleVramNeedGb(bundle)
-  const fit: Fit = !vramGb ? 'unknown' : need <= vramGb ? 'fits' : need <= vramGb + 2 ? 'tight' : 'big'
+  // One rule for every bundle (lib/vram-fit): below the catalogue's minimum the
+  // card needs more, from the comfortable value up it fits, between the two it
+  // is tight. The add-ons say "any" and fit every card, the companion files
+  // name no number and get no verdict.
+  const fit: Fit = vramFit(bundle, vramGb)
+  // With a detected card the tile names it and says what tight costs: the
+  // owner's 12 GB box sat five minutes in a load the old "10-16 GB" never
+  // announced. Shared memory has no card to name and keeps the general hint.
+  const cardLine = sharedMemory ? '' : vramFitLine(fit, vramGb)
 
   return (
     <div
@@ -589,6 +597,16 @@ export function BundleTile({ bundle, lane, vramGb, complete, downloading, hasErr
           {bundle.description && (
             <p className="t-micro text-gray-500 dark:text-gray-400 leading-snug mt-0.5 line-clamp-2">{bundle.description}</p>
           )}
+          {cardLine && (
+            <p
+              className="flex items-center gap-1.5 mt-1.5 t-micro text-gray-500 dark:text-gray-400"
+              data-bundle-fit={fit}
+              title={vramNeedTitle(bundle)}
+            >
+              <span className={`w-1.5 h-1.5 shrink-0 rounded-full ${FIT_META[fit].dot}`} />
+              <span>{cardLine}</span>
+            </p>
+          )}
         </div>
         {bundle.url && (
           <button
@@ -605,7 +623,7 @@ export function BundleTile({ bundle, lane, vramGb, complete, downloading, hasErr
       <div className="flex items-center gap-2 mt-2.5 min-h-[var(--control-h-sm)]">
         <SizePill sizeGB={bundle.totalSizeGB} />
         <span className="text-[0.55rem] text-gray-400 dark:text-gray-500">{countLabel(bundle.files.length, 'file')}</span>
-        <FitHint fit={fit} />
+        {!cardLine && <FitHint fit={fit} />}
 
         <div className="flex items-center gap-1 shrink-0 ml-auto">
           {complete ? (
