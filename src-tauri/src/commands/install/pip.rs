@@ -123,8 +123,39 @@ pub(super) fn diagnose_pip_error_for(stderr: &str, python_bin: Option<&str>) -> 
     }
 }
 
+/// How much of pip's own error text a message carries at most.
+const PIP_EXCERPT_MAX: usize = 1200;
+/// How much of an output without an `ERROR:` line is kept, from its end.
+const PIP_TAIL_MAX: usize = 400;
+
+/// The part of a pip output a person needs: pip's own `ERROR:` lines and what
+/// it says after them, whole.
+///
+/// The box, 03.10.2026: this used to be the first 400 characters. For a node
+/// pack that is the head of the log, "Requirement already satisfied ...",
+/// cut in the middle of a URL, while the one line that named the file pip
+/// could not write stood two hundred lines further down and was never shown.
+/// Without an `ERROR:` line (a traceback, a crash) the end of the output is
+/// kept, because that is where a traceback names its exception. pip's
+/// `[notice]` lines about a newer pip are no part of any failure.
+pub(super) fn pip_error_excerpt(output: &str) -> String {
+    let lines: Vec<&str> = output
+        .lines()
+        .map(str::trim_end)
+        .filter(|l| !l.trim().is_empty() && !l.trim_start().starts_with("[notice]"))
+        .collect();
+    match lines.iter().position(|l| l.trim_start().starts_with("ERROR:")) {
+        Some(first) => lines[first..].join("\n").chars().take(PIP_EXCERPT_MAX).collect(),
+        None => {
+            let all = lines.join("\n");
+            let count = all.chars().count();
+            all.chars().skip(count.saturating_sub(PIP_TAIL_MAX)).collect()
+        }
+    }
+}
+
 fn diagnose_pip_error_inner(stderr: &str, python_bin: Option<&str>) -> String {
-    let snippet: String = stderr.chars().take(400).collect();
+    let snippet = pip_error_excerpt(stderr);
     let kind = pip_failure_kind(stderr);
     // K14: this is the one PipFailureKind whose hint text changes depending
     // on something OTHER than the pip output already in hand, see
@@ -1511,6 +1542,41 @@ mod tests {
         let raw = "some_completely_random_error_we_haven_t_categorized";
         let msg = diagnose_pip_error(raw);
         assert!(msg.contains(raw));
+    }
+
+    /// The box, 03.10.2026, ComfyUI-RMBG on a running ComfyUI: four attempts,
+    /// and each time the message ended in the middle of the second log line.
+    /// The output below is pip's own, from the box, shortened in the middle.
+    #[test]
+    fn the_excerpt_is_pips_own_error_line_whole_not_the_head_of_the_log() {
+        let filler = "Requirement already satisfied: idna in c:\\users\\ddrob\\comfyui\\venv\\lib\\site-packages (3.19)\n".repeat(40);
+        let raw = format!(
+            "Requirement already satisfied: huggingface-hub>=0.19.0 in c:\\users\\ddrob\\comfyui\\venv\\lib\\site-packages (1.31.0)\n\
+             Collecting transparent-background>=1.1.2\n{filler}\
+             Installing collected packages: opencv-python-headless\n\
+             ERROR: Could not install packages due to an OSError: [WinError 5] access is denied: 'C:\\\\Users\\\\ddrob\\\\ComfyUI\\\\venv\\\\Lib\\\\site-packages\\\\cv2\\\\cv2.pyd'\n\
+             Check the permissions.\n\n\n\
+             [notice] A new release of pip is available: 23.2.1 -> 26.2.1\n\
+             [notice] To update, run: python.exe -m pip install --upgrade pip\n"
+        );
+        assert!(raw.len() > 2000, "the fixture must be longer than the old 400 character cut");
+        let excerpt = pip_error_excerpt(&raw);
+        assert_eq!(
+            excerpt,
+            "ERROR: Could not install packages due to an OSError: [WinError 5] access is denied: 'C:\\\\Users\\\\ddrob\\\\ComfyUI\\\\venv\\\\Lib\\\\site-packages\\\\cv2\\\\cv2.pyd'\nCheck the permissions."
+        );
+        let msg = diagnose_pip_error(&raw);
+        assert!(msg.contains("cv2.pyd"), "the file pip could not write is not named: {msg}");
+        assert!(!msg.contains("Requirement already satisfied"), "the head of the log is back: {msg}");
+        assert!(!msg.contains("[notice]"), "pip's own update notice is no part of the failure: {msg}");
+    }
+
+    #[test]
+    fn an_output_without_an_error_line_keeps_its_end() {
+        let raw = format!("{}\nRuntimeError: the wheel is corrupt", "Traceback line\n".repeat(100));
+        let excerpt = pip_error_excerpt(&raw);
+        assert!(excerpt.ends_with("RuntimeError: the wheel is corrupt"), "got: {excerpt}");
+        assert!(excerpt.chars().count() <= 400);
     }
 
     #[test]

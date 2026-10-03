@@ -32,7 +32,7 @@ use std::process::Stdio;
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
 
-use tauri::State;
+use tauri::{Manager, State};
 use tracing::{error, info};
 
 use crate::os_error;
@@ -50,6 +50,7 @@ use super::CREATE_NO_WINDOW;
 #[tauri::command]
 pub async fn install_custom_node(
     state: State<'_, AppState>,
+    app: tauri::AppHandle,
     repoUrl: String,
     nodeName: String,
 ) -> Result<serde_json::Value, String> {
@@ -74,7 +75,18 @@ pub async fn install_custom_node(
     // stays responsive and the staged status messages actually paint — the JS
     // caller still awaits this command's result exactly as before.
     tauri::async_runtime::spawn_blocking(move || {
-        install_custom_node_blocking(repoUrl, nodeName, comfy_path, &fallback_python)
+        // Re-resolved here: a `State` borrow cannot cross into the blocking
+        // pool, and the pause below stops and starts ComfyUI through it.
+        let state = app.state::<AppState>();
+        let pause = ComfyPause {
+            stop: &|| super::comfy_repair::stop_own_idle_comfyui(&state),
+            start: &|| {
+                if let Err(e) = crate::commands::process::start_comfyui_blocking(&state) {
+                    error!(error = %e, "comfyui did not start again after a node pack install");
+                }
+            },
+        };
+        install_custom_node_blocking(repoUrl, nodeName, comfy_path, &fallback_python, &pause)
     })
     .await
     .map_err(|e| format!("Custom node install task failed to run: {e}"))?
@@ -89,6 +101,7 @@ fn install_custom_node_blocking(
     nodeName: String,
     comfy_path: Option<String>,
     fallback_python: &str,
+    pause: &ComfyPause<'_>,
 ) -> Result<serde_json::Value, String> {
     let repo_url = repoUrl;
     let node_name = nodeName;
@@ -225,16 +238,96 @@ fn install_custom_node_blocking(
         }
     }
 
-    // No constraints file here: this is a fresh clone (or update) of ONE
-    // node against whatever the venv already has, not the post-repair
-    // restore path where a downgrade of a just-verified core package is the
-    // specific risk (Runde 6, Folgeposten a).
-    install_node_requirements(&comfy_dir, &target_dir, &node_name, fallback_python, None)?;
+    // A node pack never replaces torch: its requirements go in against a pin
+    // of the torch family this ComfyUI runs on, so a pack that asks for
+    // another torch fails by name instead of trading the CUDA build for a
+    // CPU wheel. numpy stays free here (unlike the post-repair restore),
+    // packs legitimately move it.
+    let constraints = node_python(&comfy_dir, fallback_python)
+        .and_then(|python| write_package_constraints(&python, &TORCH_PACKAGES));
+    let installed = install_requirements_freeing_locked_files(
+        &|| install_node_requirements(&comfy_dir, &target_dir, &node_name, fallback_python, constraints.as_deref()),
+        pause,
+    );
+    if let Some(c) = &constraints {
+        let _ = fs::remove_file(c);
+    }
+    installed?;
 
     Ok(serde_json::json!({
         "status": if fresh_clone { "installed" } else { "updated" },
         "path": target_dir.to_string_lossy(),
     }))
+}
+
+/// How the installer takes this app's own ComfyUI out of the way and brings
+/// it back. Closures, so the rule below is provable without a process.
+pub(crate) struct ComfyPause<'a> {
+    pub(crate) stop: &'a dyn Fn() -> super::comfy_repair::OwnComfyStop,
+    pub(crate) start: &'a dyn Fn(),
+}
+
+/// Install a node pack's requirements, and when pip cannot write a file
+/// because a running ComfyUI holds it open, stop that ComfyUI, install again
+/// and start it again.
+///
+/// The box, 03.10.2026, ComfyUI-RMBG: its requirements bring
+/// opencv-python-headless, which writes `cv2\cv2.pyd`. The running ComfyUI
+/// had that file loaded (VideoHelperSuite imports cv2), Windows refused the
+/// write with WinError 5, and four attempts ended on "close any open Python
+/// REPLs" while the only Python on the machine was the ComfyUI this app had
+/// started itself. The same command went through with ComfyUI stopped.
+///
+/// Only this app's own, idle ComfyUI is stopped. A render in progress and a
+/// ComfyUI started outside the app are left alone, and the message then
+/// names them instead of sending the customer after a Python that is not
+/// there.
+fn install_requirements_freeing_locked_files(
+    install: &dyn Fn() -> Result<(), String>,
+    pause: &ComfyPause<'_>,
+) -> Result<(), String> {
+    use super::comfy_repair::OwnComfyStop;
+    let reason = match install() {
+        Ok(()) => return Ok(()),
+        Err(reason) => reason,
+    };
+    if !is_permission_denied_pip_error(&reason) {
+        return Err(reason);
+    }
+    match (pause.stop)() {
+        OwnComfyStop::Stopped => {
+            println!("[Install] A running ComfyUI held a file the requirements replace. Stopped it, installing again.");
+            let second = install();
+            // Back up whether the second try worked or not: it was running
+            // before this install touched it.
+            (pause.start)();
+            second
+        }
+        OwnComfyStop::Busy => Err(format!(
+            "ComfyUI is generating something right now and has a file open that this node pack \
+             replaces. Wait for the render to finish, then install again.\n\n{reason}"
+        )),
+        OwnComfyStop::Foreign => Err(format!(
+            "A ComfyUI this app did not start is running and has a file open that this node pack \
+             replaces. Close that ComfyUI, then install again.\n\n{reason}"
+        )),
+        OwnComfyStop::NotRunning
+        | OwnComfyStop::QueueUnknown(_)
+        | OwnComfyStop::StopFailed(_)
+        | OwnComfyStop::StillRunning => Err(reason),
+    }
+}
+
+/// The Python a node pack's requirements go into: ComfyUI's venv when it has
+/// a usable one, the fallback otherwise. None for a broken venv, which
+/// `install_node_requirements` reports in its own words.
+fn node_python(comfy_dir: &std::path::Path, fallback_python: &str) -> Option<String> {
+    match crate::python::comfy_venv_state(comfy_dir) {
+        crate::python::ComfyVenv::Usable(p) => Some(p),
+        crate::python::ComfyVenv::Broken { .. } => None,
+        crate::python::ComfyVenv::Absent if fallback_python.is_empty() => None,
+        crate::python::ComfyVenv::Absent => Some(fallback_python.to_string()),
+    }
 }
 
 /// Move a non-repo custom-node leftover out of the way so a fresh clone can
@@ -326,7 +419,14 @@ pub(crate) fn install_node_requirements(
     if !pip_out.status.success() {
         let stderr = String::from_utf8_lossy(&pip_out.stderr);
         let stdout = String::from_utf8_lossy(&pip_out.stdout);
-        let combined = format!("{}{}", stdout, stderr);
+        // The words of the operating system are ours to answer for: a German
+        // Windows hands pip "Zugriff verweigert", and the line is shown in an
+        // English app. What pip wrote itself stays as it is.
+        let combined: String = format!("{}{}", stdout, stderr)
+            .lines()
+            .map(|line| os_error::english_child_text(line).into_owned())
+            .collect::<Vec<_>>()
+            .join("\n");
         // python.org installs under Program Files have an admin-only
         // site-packages: the first node pack whose requirements pull a NEW
         // wheel dies with a permission error, while packs whose deps are
@@ -369,9 +469,13 @@ pub(crate) fn install_node_requirements(
 /// snapshot a caller can hand to [`install_node_requirements`] as a
 /// constraints file so pip REFUSES to let a node's own requirements.txt
 /// quietly change any of them.
-const CORE_PACKAGES: [&str; 4] = ["torch", "torchvision", "torchaudio", "numpy"];
+pub(crate) const CORE_PACKAGES: [&str; 4] = ["torch", "torchvision", "torchaudio", "numpy"];
 
-/// Write [`CORE_PACKAGES`]'s current, exact versions (from `pip freeze`
+/// What a single node pack install must never replace (see
+/// `install_custom_node_blocking`).
+const TORCH_PACKAGES: [&str; 3] = ["torch", "torchvision", "torchaudio"];
+
+/// Write the current, exact versions of `packages` (from `pip freeze`
 /// against `python_bin`) to a fresh temp file in pip's constraints format
 /// (one `name==version` per line) and return its path. `None` when `pip
 /// freeze` itself fails to run, or when none of the core packages turn out
@@ -380,7 +484,7 @@ const CORE_PACKAGES: [&str; 4] = ["torch", "torchvision", "torchaudio", "numpy"]
 ///
 /// The caller owns the returned file and is responsible for deleting it once
 /// the node loop that uses it is done; this function only ever creates one.
-pub(crate) fn write_core_package_constraints(python_bin: &str) -> Option<PathBuf> {
+pub(crate) fn write_package_constraints(python_bin: &str, packages: &[&str]) -> Option<PathBuf> {
     let mut cmd = python_command(python_bin);
     cmd.args(["-m", "pip", "freeze"]).stdout(Stdio::piped()).stderr(Stdio::piped());
     let out = cmd.output().ok()?;
@@ -388,7 +492,7 @@ pub(crate) fn write_core_package_constraints(python_bin: &str) -> Option<PathBuf
         return None;
     }
     let freeze = String::from_utf8_lossy(&out.stdout);
-    let core_lines = core_constraint_lines(&freeze);
+    let core_lines = constraint_lines(&freeze, packages);
     if core_lines.is_empty() {
         return None;
     }
@@ -405,7 +509,7 @@ pub(crate) fn write_core_package_constraints(python_bin: &str) -> Option<PathBuf
 }
 
 /// Pure: the subset of a `pip freeze` listing that names one of
-/// [`CORE_PACKAGES`], for exactly the reason every other network- or
+/// `packages`, for exactly the reason every other network- or
 /// process-touching function in this codebase splits its parsing out:
 /// testable against a canned string, no pip and no venv required.
 ///
@@ -420,11 +524,11 @@ pub(crate) fn write_core_package_constraints(python_bin: &str) -> Option<PathBuf
 /// `-c <file>` argument, so EVERY custom node's own install would start
 /// failing, not just the one node that happens to touch a core package. A
 /// venv built the normal way, from the index, never produces this shape (see
-/// `write_core_package_constraints`'s own doc: it only ever reads THIS
+/// `write_package_constraints`'s own doc: it only ever reads THIS
 /// venv's `pip freeze` after this repair's own build), so this is a defensive
 /// skip for a shape that should not occur today, not a shape this file
 /// exercises against a real freeze.
-fn core_constraint_lines(freeze: &str) -> Vec<&str> {
+fn constraint_lines<'a>(freeze: &'a str, packages: &[&str]) -> Vec<&'a str> {
     freeze
         .lines()
         .filter(|line| {
@@ -433,7 +537,7 @@ fn core_constraint_lines(freeze: &str) -> Vec<&str> {
                 .next()
                 .unwrap_or("")
                 .to_lowercase();
-            CORE_PACKAGES.contains(&name.as_str()) && !line.contains('@')
+            packages.contains(&name.as_str()) && !line.contains('@')
         })
         .collect()
 }
@@ -485,7 +589,7 @@ impl NodeReinstallOutcome {
 /// claiming success.
 ///
 /// Runde 6, Folgeposten (a) and (b) (review Runde 5, F2/F3): `constraints`
-/// (from [`write_core_package_constraints`]) is passed straight through to
+/// (from [`write_package_constraints`]) is passed straight through to
 /// every node's own install so none of them can quietly downgrade torch or
 /// numpy; `cancel` is read BETWEEN nodes so a customer with twenty of them
 /// can actually stop the run instead of the Cancel button doing nothing
@@ -543,6 +647,126 @@ pub(crate) fn reinstall_all_node_requirements(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── A file the running ComfyUI holds open (the box, 03.10.2026) ─────
+
+    use super::super::comfy_repair::OwnComfyStop;
+    use std::cell::{Cell, RefCell};
+
+    /// What the app said on the box, with pip's real last line in it.
+    const LOCKED: &str = "Custom node ComfyUI-RMBG is cloned, but its requirements install failed.\n\n\
+        Permission denied. Make sure no other process is using Python, then retry.\n\n--- pip output ---\n\
+        ERROR: Could not install packages due to an OSError: [WinError 5] access is denied: \
+        'C:\\\\Users\\\\ddrob\\\\ComfyUI\\\\venv\\\\Lib\\\\site-packages\\\\cv2\\\\cv2.pyd'\nCheck the permissions.";
+
+    /// Runs the rule with a pip that fails `failures` times on the locked
+    /// file, and records the order of everything that happened.
+    fn run_locked(failures: usize, found: fn() -> OwnComfyStop) -> (Result<(), String>, Vec<&'static str>) {
+        let events = RefCell::new(Vec::new());
+        let left = Cell::new(failures);
+        let install = || {
+            events.borrow_mut().push("pip");
+            if left.get() > 0 {
+                left.set(left.get() - 1);
+                Err(LOCKED.to_string())
+            } else {
+                Ok(())
+            }
+        };
+        let stop = || {
+            events.borrow_mut().push("stop");
+            found()
+        };
+        let start = || events.borrow_mut().push("start");
+        let result = install_requirements_freeing_locked_files(&install, &ComfyPause { stop: &stop, start: &start });
+        (result, events.into_inner())
+    }
+
+    #[test]
+    fn a_file_held_by_the_apps_own_comfyui_is_freed_and_the_install_goes_through() {
+        let (result, events) = run_locked(1, || OwnComfyStop::Stopped);
+        assert_eq!(result, Ok(()));
+        assert_eq!(events, ["pip", "stop", "pip", "start"]);
+    }
+
+    #[test]
+    fn comfyui_comes_back_up_even_when_the_second_try_fails_too() {
+        let (result, events) = run_locked(2, || OwnComfyStop::Stopped);
+        assert_eq!(result, Err(LOCKED.to_string()));
+        assert_eq!(events, ["pip", "stop", "pip", "start"], "a ComfyUI this install stopped must be started again");
+    }
+
+    #[test]
+    fn an_install_that_works_never_touches_comfyui() {
+        let (result, events) = run_locked(0, || OwnComfyStop::Stopped);
+        assert_eq!(result, Ok(()));
+        assert_eq!(events, ["pip"]);
+    }
+
+    #[test]
+    fn a_failure_that_is_no_locked_file_never_stops_comfyui() {
+        let events = RefCell::new(Vec::new());
+        let install = || -> Result<(), String> {
+            events.borrow_mut().push("pip");
+            Err("ERROR: No matching distribution found for decord".to_string())
+        };
+        let stop = || {
+            events.borrow_mut().push("stop");
+            OwnComfyStop::Stopped
+        };
+        let start = || events.borrow_mut().push("start");
+        let result = install_requirements_freeing_locked_files(&install, &ComfyPause { stop: &stop, start: &start });
+        assert_eq!(result, Err("ERROR: No matching distribution found for decord".to_string()));
+        assert_eq!(events.into_inner(), ["pip"]);
+    }
+
+    #[test]
+    fn a_render_in_progress_is_not_interrupted_and_the_message_says_so() {
+        let (result, events) = run_locked(1, || OwnComfyStop::Busy);
+        let msg = result.unwrap_err();
+        assert!(msg.starts_with("ComfyUI is generating something right now"), "got: {msg}");
+        assert!(msg.contains("cv2.pyd"), "pip's own line with the file is gone: {msg}");
+        assert_eq!(events, ["pip", "stop"], "no second pip and no start for a ComfyUI nobody stopped");
+    }
+
+    #[test]
+    fn a_comfyui_started_outside_the_app_is_named_instead_of_a_python_repl() {
+        let (result, events) = run_locked(1, || OwnComfyStop::Foreign);
+        let msg = result.unwrap_err();
+        assert!(msg.starts_with("A ComfyUI this app did not start is running"), "got: {msg}");
+        assert!(msg.contains("Close that ComfyUI, then install again."), "got: {msg}");
+        assert_eq!(events, ["pip", "stop"]);
+    }
+
+    #[test]
+    fn with_no_comfyui_on_the_port_the_plain_reason_stands() {
+        let (result, events) = run_locked(1, || OwnComfyStop::NotRunning);
+        assert_eq!(result, Err(LOCKED.to_string()));
+        assert_eq!(events, ["pip", "stop"]);
+    }
+
+    /// The pin a single node pack install runs against is the torch family
+    /// only: a pack may move numpy, it never replaces torch.
+    #[test]
+    fn a_node_pack_is_held_to_the_installed_torch_and_free_on_numpy() {
+        let freeze = "numpy==2.4.6\ntorch==2.14.0+cu130\ntorchaudio==2.14.0+cu130\ntorchvision==0.29.0+cu130\nopencv-python==5.0.0.93\n";
+        assert_eq!(
+            constraint_lines(freeze, &TORCH_PACKAGES),
+            ["torch==2.14.0+cu130", "torchaudio==2.14.0+cu130", "torchvision==0.29.0+cu130"]
+        );
+    }
+
+    /// Source guard: the rule above is worth nothing if the command does not
+    /// run its pip through it, with the pin.
+    #[test]
+    fn install_custom_node_runs_its_requirements_through_the_rule_with_the_torch_pin() {
+        let src = include_str!("custom_nodes.rs");
+        let start = src.find("fn install_custom_node_blocking(").expect("install_custom_node_blocking is gone");
+        let body = &src[start..];
+        let body = &body[..body.find("\n}\n").expect("install_custom_node_blocking has no end")];
+        assert!(body.contains("install_requirements_freeing_locked_files("), "the install no longer frees a locked file");
+        assert!(body.contains("&TORCH_PACKAGES"), "the install no longer pins torch");
+    }
 
     // ── install_custom_node helpers (#72 bob: VHS install loop) ─────────
 
@@ -608,14 +832,14 @@ mod tests {
     // F2) ─────────────────────────────────────────────────────────────────
 
     #[test]
-    fn core_constraint_lines_keeps_only_the_core_packages() {
+    fn constraint_lines_keeps_only_the_core_packages() {
         let freeze = "torch==2.7.0\n\
                       torchvision==0.22.0\n\
                       numpy==1.26.4\n\
                       Pillow==11.0.0\n\
                       comfyui-frontend-package==1.2.3\n\
                       torchaudio==2.7.0\n";
-        let lines = core_constraint_lines(freeze);
+        let lines = constraint_lines(freeze, &CORE_PACKAGES);
         assert_eq!(lines, vec!["torch==2.7.0", "torchvision==0.22.0", "numpy==1.26.4", "torchaudio==2.7.0"]);
         // Negative control: neither Pillow nor comfyui-frontend-package,
         // both real ComfyUI-venv packages, may leak into the constraints.
@@ -624,21 +848,21 @@ mod tests {
     }
 
     #[test]
-    fn core_constraint_lines_is_empty_for_a_freeze_with_no_core_packages() {
+    fn constraint_lines_is_empty_for_a_freeze_with_no_core_packages() {
         // Negativkontrolle: a venv that somehow has no torch at all must not
         // invent a pin; an empty result is what tells the caller not to
         // write a constraints file.
-        assert!(core_constraint_lines("Pillow==11.0.0\nrequests==2.32.0\n").is_empty());
-        assert!(core_constraint_lines("").is_empty());
+        assert!(constraint_lines("Pillow==11.0.0\nrequests==2.32.0\n", &CORE_PACKAGES).is_empty());
+        assert!(constraint_lines("", &CORE_PACKAGES).is_empty());
     }
 
     #[test]
-    fn core_constraint_lines_is_not_fooled_by_a_name_prefix() {
+    fn constraint_lines_is_not_fooled_by_a_name_prefix() {
         // "torch" must not match "torchsde" or "torchdiffeq", real
         // dependencies in a ComfyUI venv that are not the core packages this
         // constraints file exists to protect.
         let freeze = "torchsde==0.2.6\ntorchdiffeq==0.2.4\ntorch==2.7.0\n";
-        let lines = core_constraint_lines(freeze);
+        let lines = constraint_lines(freeze, &CORE_PACKAGES);
         assert_eq!(lines, vec!["torch==2.7.0"]);
     }
 
@@ -653,7 +877,7 @@ mod tests {
     fn a_direct_url_reference_line_is_skipped_even_though_its_name_matches() {
         let freeze = "torch @ file:///tmp/torch-2.7.0-cp312-cp312-linux_x86_64.whl\n\
                       numpy==1.26.4\n";
-        let lines = core_constraint_lines(freeze);
+        let lines = constraint_lines(freeze, &CORE_PACKAGES);
         assert_eq!(lines, vec!["numpy==1.26.4"], "the @ line must not appear in the constraints at all: {lines:?}");
     }
 

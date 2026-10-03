@@ -531,7 +531,7 @@ pub fn repair_comfyui_env(state: State<'_, AppState>) -> Result<serde_json::Valu
         // like a hang with a Cancel button that does nothing.
         let mut broken_nodes: Vec<(String, String)> = Vec::new();
         if comfy_dir.join("custom_nodes").is_dir() {
-            let constraints = super::custom_nodes::write_core_package_constraints(&venv_py);
+            let constraints = super::custom_nodes::write_package_constraints(&venv_py, &super::custom_nodes::CORE_PACKAGES);
             let outcome = super::custom_nodes::reinstall_all_node_requirements(
                 &comfy_dir,
                 &venv_py,
@@ -761,9 +761,60 @@ fn wait_for_port_free(
 /// offers the Update button once `isLocal` is false, and this app manages no
 /// process there either way.
 fn ensure_comfyui_stopped_for_update(state: &State<'_, AppState>) -> Result<(), String> {
+    let port = *state.comfy_port.lock().unwrap();
+    match stop_own_idle_comfyui(state) {
+        OwnComfyStop::NotRunning | OwnComfyStop::Stopped => Ok(()),
+        OwnComfyStop::Foreign => {
+            println!("[Update] Refusing: port {port} is served by a ComfyUI this app did not start");
+            Err(foreign_comfyui_blocks_update(port))
+        }
+        OwnComfyStop::Busy => {
+            println!("[Update] Refusing: ComfyUI on port {port} is generating something");
+            Err(COMFYUI_BUSY_REFUSAL.to_string())
+        }
+        OwnComfyStop::QueueUnknown(e) => {
+            println!("[Update] Refusing: could not check ComfyUI's queue on port {port}: {e}");
+            Err(format!(
+                "Could not check whether ComfyUI is generating something right now, so the \
+                 update was refused rather than risk interrupting a render ({e}). Nothing \
+                 was changed."
+            ))
+        }
+        OwnComfyStop::StopFailed(e) => Err(e),
+        OwnComfyStop::StillRunning => Err(format!(
+            "ComfyUI on port {port} did not stop, so the update was not started. Try \
+             Stop in Settings, then run Update ComfyUI again. Nothing was changed."
+        )),
+    }
+}
+
+/// What became of the ComfyUI on the configured port when a job asked for it
+/// to be out of the way.
+pub(crate) enum OwnComfyStop {
+    /// Nothing was serving the port (or the host is another machine).
+    NotRunning,
+    /// It was this app's own, it was idle, and it is down now.
+    Stopped,
+    /// A ComfyUI this app never started. Left alone.
+    Foreign,
+    /// This app's own, but it is rendering. Left alone.
+    Busy,
+    /// This app's own, but its queue could not be read. Left alone.
+    QueueUnknown(String),
+    /// The stop itself failed, with the reason.
+    StopFailed(String),
+    /// The stop went through and the port still answers.
+    StillRunning,
+}
+
+/// Stop this app's own ComfyUI when it is idle, and say what was found. Never
+/// touches a ComfyUI this app did not start and never interrupts a render.
+/// Shared by Update ComfyUI and by a node pack whose requirements replace a
+/// file the running ComfyUI holds open (custom_nodes.rs).
+pub(crate) fn stop_own_idle_comfyui(state: &AppState) -> OwnComfyStop {
     let host = state.comfy_host.lock().unwrap().clone();
     if !crate::commands::process::is_local_host(&host) {
-        return Ok(());
+        return OwnComfyStop::NotRunning;
     }
     let port = *state.comfy_port.lock().unwrap();
     let port_occupied = crate::commands::process::is_comfyui_running_on_port(port);
@@ -799,36 +850,26 @@ fn ensure_comfyui_stopped_for_update(state: &State<'_, AppState>) -> Result<(), 
     // return that used to sit above this block, made the `NotRunning` arm
     // below dead code that only LOOKED like a check.
     match crate::commands::process::classify_comfyui_ownership(port_occupied, own_child_alive, orphan_pid) {
-        crate::commands::process::ComfyOwnership::NotRunning => Ok(()),
-        crate::commands::process::ComfyOwnership::Foreign => {
-            println!("[Update] Refusing: port {port} is served by a ComfyUI this app did not start");
-            Err(foreign_comfyui_blocks_update(port))
-        }
+        crate::commands::process::ComfyOwnership::NotRunning => OwnComfyStop::NotRunning,
+        crate::commands::process::ComfyOwnership::Foreign => OwnComfyStop::Foreign,
         crate::commands::process::ComfyOwnership::Own => {
             match comfyui_queue_busy(port) {
-                Ok(true) => {
-                    println!("[Update] Refusing: ComfyUI on port {port} is generating something");
-                    Err(COMFYUI_BUSY_REFUSAL.to_string())
-                }
-                Err(e) => {
-                    println!("[Update] Refusing: could not check ComfyUI's queue on port {port}: {e}");
-                    Err(format!(
-                        "Could not check whether ComfyUI is generating something right now, so the \
-                         update was refused rather than risk interrupting a render ({e}). Nothing \
-                         was changed."
-                    ))
-                }
+                Ok(true) => OwnComfyStop::Busy,
+                Err(e) => OwnComfyStop::QueueUnknown(e),
                 Ok(false) => {
-                    let result = crate::commands::process::stop_comfyui_blocking(state)?;
+                    let result = match crate::commands::process::stop_comfyui_blocking(state) {
+                        Ok(r) => r,
+                        Err(e) => return OwnComfyStop::StopFailed(e),
+                    };
                     let status = result.get("status").and_then(|s| s.as_str()).unwrap_or("");
                     if status == "not_ours" {
                         // A race between the classify above and the stop: the
                         // handle exited and something else grabbed the port
-                        // in between. Rare, and refused exactly like a plain
+                        // in between. Rare, and treated exactly like a plain
                         // foreign ComfyUI would be.
-                        return Err(foreign_comfyui_blocks_update(port));
+                        return OwnComfyStop::Foreign;
                     }
-                    info!(port = port, status = status, "update_comfyui stopped its own ComfyUI before updating");
+                    info!(port = port, status = status, "stopped the app's own idle ComfyUI");
                     // final review Runde 2, R2-1: a single check right here
                     // used to fire before the kill had actually landed.
                     // `stop_comfyui_blocking`'s own-child path reaps with
@@ -848,12 +889,9 @@ fn ensure_comfyui_stopped_for_update(state: &State<'_, AppState>) -> Result<(), 
                         std::time::Duration::from_secs(10),
                         || crate::commands::process::is_comfyui_running_on_port(port),
                     ) {
-                        return Err(format!(
-                            "ComfyUI on port {port} did not stop, so the update was not started. Try \
-                             Stop in Settings, then run Update ComfyUI again. Nothing was changed."
-                        ));
+                        return OwnComfyStop::StillRunning;
                     }
-                    Ok(())
+                    OwnComfyStop::Stopped
                 }
             }
         }
@@ -2070,9 +2108,9 @@ mod tests {
         let src = include_str!("comfy_repair.rs");
         let needle = |head: &str, tail: &str| format!("{head}{tail}");
 
-        let guard_fn_start = src.find("fn ensure_comfyui_stopped_for_update(").expect("the running-instance guard is gone");
+        let guard_fn_start = src.find("fn stop_own_idle_comfyui(").expect("the running-instance guard is gone");
         let queue_check = needle("comfyui_queue_bus", "y(port)");
-        let stop_call = needle("process::stop_comfyui_bloc", "king(state)?;");
+        let stop_call = needle("process::stop_comfyui_bloc", "king(state)");
 
         let at_queue_check = src[guard_fn_start..].find(&queue_check).map(|i| i + guard_fn_start)
             .expect("the guard no longer checks whether ComfyUI is busy");

@@ -549,31 +549,24 @@ const BUSY_DESCRIPTION = {
 
 function CapabilityCard({ cap }: { cap: 'rmbg' | 'inpaint-nodes' | 'dwpose' }) {
   const { installCapability } = useCreateExp()
-  const [installing, setInstalling] = useState(false)
-  const [status, setStatus] = useState('')
-  const [err, setErr] = useState<string | null>(null)
-  const abortRef = useRef<AbortController | null>(null)
+  // The run lives outside the card, like a bundle install: a failure must
+  // still be readable after a trip to another mode (the box, 03.10.2026: the
+  // reason for a failed node pack install was gone on the first mode switch).
+  // It stays until the user closes it or tries again.
+  const runKey = `capability:${cap}`
+  const { status, err, running: installing } = useSyncExternalStore(subscribeInstallRuns, () => getInstallRun(runKey))
   const copy = CAP_COPY[cap]
 
-  const run = async () => {
-    const ac = new AbortController()
-    abortRef.current = ac
-    setInstalling(true); setErr(null); setStatus('Starting…')
-    try {
-      // On success the capability flips true and Stage swaps this card for the input slot.
-      await installCapability(cap, setStatus, ac.signal)
-    } catch (e) {
+  // On success the capability flips true and Stage swaps this card for the input slot.
+  const run = () => startInstallRun(runKey, (onStatus, signal) =>
+    installCapability(cap, onStatus, signal).catch((e: unknown) => {
       // A cancel is a decision, not a failure: say so plainly and add the one
       // thing that is not obvious, that the node install itself finishes in the
       // background because there is nothing to roll back.
-      setErr(e instanceof InstallCancelled
-        ? 'Cancelled. Any node install already running finishes on its own in the background.'
-        : e instanceof Error ? e.message : String(e))
-    } finally {
-      setInstalling(false)
-      abortRef.current = null
-    }
-  }
+      throw e instanceof InstallCancelled
+        ? new Error('Cancelled. Any node install already running finishes on its own in the background.')
+        : e
+    }))
 
   return (
     <EmptyState
@@ -584,8 +577,8 @@ function CapabilityCard({ cap }: { cap: 'rmbg' | 'inpaint-nodes' | 'dwpose' }) {
     >
       <InstallCardBody
         run={run} installing={installing} status={status} err={err}
-        onDismiss={() => setErr(null)}
-        onCancel={() => abortRef.current?.abort()}
+        onDismiss={() => clearInstallRun(runKey)}
+        onCancel={() => cancelInstallRun(runKey)}
       />
     </EmptyState>
   )
