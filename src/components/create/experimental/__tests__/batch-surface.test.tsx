@@ -33,6 +33,13 @@ vi.mock('../../../../api/backend', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../../api/backend')>()),
   openExternal: vi.fn(),
 }))
+const juggle = vi.hoisted(() => ({ log: [] as string[] }))
+vi.mock('../../../../api/vram-handoff', () => ({
+  holdRenderRestore: () => {
+    juggle.log.push('hold')
+    return () => { juggle.log.push('release') }
+  },
+}))
 vi.mock('../../../../hooks/useCloudCreate', () => ({
   resolveCharacterModel: () => undefined,
   takeCloudRunStop: () => null,
@@ -252,6 +259,29 @@ describe('a local run over the list', () => {
     expect(s.batchSources).toEqual([])
     expect(s.batchRun).toBeNull()
     expect(s.error).toBeNull()
+  })
+
+  // Box run, 03.10.2026: the image model was loaded anew before each picture
+  // of a batch. The chat models come back once, after the last picture.
+  it('holds the restore of the chat models from before the first image until after the last', async () => {
+    start('local', 'edit')
+    await addBatchFiles([png('a.png'), png('b.png'), png('c.png')])
+    juggle.log.length = 0
+    const run = vi.fn(async () => {
+      juggle.log.push('run')
+      const s = useCreateStore.getState()
+      s.addToGallery(item(`h-${atob(s.source!.url.split(',')[1])}`))
+    })
+    await runBatchEdit(run)
+    expect(juggle.log).toEqual(['hold', 'run', 'run', 'run', 'release'])
+  })
+
+  it('a cloud batch renders nothing on this machine and holds nothing', async () => {
+    start('cloud', 'removebg')
+    await addBatchFiles([png('a.png'), png('b.png')])
+    juggle.log.length = 0
+    await runBatchEdit(vi.fn(async () => {}), { sleep: async () => {} })
+    expect(juggle.log).toEqual([])
   })
 
   it('a failing image does not stop the others and stays in the list with an image that would not load', async () => {

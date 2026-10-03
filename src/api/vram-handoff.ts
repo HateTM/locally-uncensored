@@ -2206,6 +2206,7 @@ function evictionEmpty(e: RenderEviction): boolean {
 let _renderJuggle: Promise<unknown> = Promise.resolve()
 let _renderEpoch = 0
 let _pendingRestore: RenderEviction | null = null
+let _restoreHolds = 0
 export const RENDER_RESTORE_GRACE_MS = 2_000
 
 /** Test-only: reset the render-juggle chain state between unit tests. */
@@ -2213,6 +2214,7 @@ export function __resetRenderJuggleForTests(): void {
   _renderJuggle = Promise.resolve()
   _renderEpoch = 0
   _pendingRestore = null
+  _restoreHolds = 0
 }
 
 function mergeEvictions(base: RenderEviction | null, add: RenderEviction): RenderEviction {
@@ -2318,9 +2320,29 @@ export function restoreChatBackendsAfterRender(
   return run.catch(() => {})
 }
 
+/**
+ * A run of several renders in a row (batch edit) holds the restore: each
+ * render still parks its haul, but nothing is freed or reloaded until the
+ * returned release is called. Then the chat backends come back once, after
+ * the usual grace window. Without the hold a picture that took longer than
+ * that window to start paid `/free` plus a chat model reload, and ComfyUI
+ * read the image model back in before every picture.
+ */
+export function holdRenderRestore(): () => void {
+  _restoreHolds++
+  let released = false
+  return () => {
+    if (released) return
+    released = true
+    _restoreHolds--
+    void restoreChatBackendsAfterRender({ ...EMPTY_EVICTION })
+  }
+}
+
 async function restoreBody(evicted: RenderEviction, graceMs: number, myEpoch: number): Promise<void> {
-  if (evictionEmpty(evicted)) return
-  _pendingRestore = mergeEvictions(_pendingRestore, evicted)
+  if (!evictionEmpty(evicted)) _pendingRestore = mergeEvictions(_pendingRestore, evicted)
+  if (!_pendingRestore) return
+  if (_restoreHolds > 0) return // the run restores once, at its end
   if (_renderEpoch !== myEpoch) return // a newer render inherits the haul
   if (graceMs > 0) await sleep(graceMs)
   if (_renderEpoch !== myEpoch) return // a newer render inherits the haul

@@ -10,6 +10,7 @@ import { defaultCloudModel, editNeedsMask, modelForOp, useCloudCatalogStore } fr
 import { isStudioModel } from '../../../lib/render/create-studio'
 import { runImageCount } from '../../../lib/render/image-count'
 import { dataUrlToBlob, takeCloudRunStop } from '../../../hooks/useCloudCreate'
+import { holdRenderRestore } from '../../../api/vram-handoff'
 import {
   MAX_BATCH_IMAGES, batchOffered, batchPickNote, batchSummary, cloudRunsPerMinute, createPacer,
   pickBatchFiles, runBatch, type RunOutcome,
@@ -189,6 +190,9 @@ export async function runBatchEdit(
     return { made: made.length, error: after.error, stop: stop?.reason, retryAfterMs: stop?.retryAfterMs }
   }
 
+  // On this machine the chat models leave the card before the first image
+  // and come back after the last one, not around every image of the list.
+  const releaseRestore = backend === 'local' ? holdRenderRestore() : null
   let report: Awaited<ReturnType<typeof runBatch>> | null = null
   try {
     report = await runBatch(entries, {
@@ -208,6 +212,7 @@ export async function runBatchEdit(
       onProgress: (statuses, index) => useCreateStore.getState().setBatchRun({ index, statuses, names, thumbs }),
     })
   } finally {
+    releaseRestore?.()
     const st = useCreateStore.getState()
     st.setBatchRun(null)
     // What has no result stays in the list, so Create runs exactly the rest.

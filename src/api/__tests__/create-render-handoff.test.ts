@@ -57,6 +57,7 @@ vi.mock('../comfyui-ws', () => ({
 import {
   evictChatBackendsForRender,
   restoreChatBackendsAfterRender,
+  holdRenderRestore,
   __resetRenderJuggleForTests,
   type RenderEviction,
 } from '../vram-handoff'
@@ -215,6 +216,72 @@ describe('restoreChatBackendsAfterRender', () => {
     await pRestore
     expect(callsTo('start_bundled_engine')).toHaveLength(1)
     expect(loadModel).toHaveBeenCalledWith('qwen:14b')
+  })
+})
+
+// Box run, 03.10.2026: a batch edit of three pictures loaded the image model
+// anew before each one. Every picture of a batch ended with its own restore,
+// and a picture that took longer than the grace window to start paid for it:
+// /free dropped the image model and the chat model was loaded just to be
+// evicted again. A batch holds the restore until its last picture is done.
+describe('holdRenderRestore: a run of several renders restores once, at its end', () => {
+  const haulOf = (ollamaModel: string): RenderEviction => ({ ollamaModel, lms: null, bundled: null })
+
+  it('no /free and no reload between the pictures, however long the next one takes to start', async () => {
+    vi.useFakeTimers()
+    mockBackends({ engineRunning: false })
+    const release = holdRenderRestore()
+    for (let i = 0; i < 3; i++) {
+      const haul = await evictChatBackendsForRender()
+      const restored = restoreChatBackendsAfterRender(i === 0 ? haulOf('qwen:14b') : haul)
+      // Far past the grace window before the next picture starts.
+      await vi.advanceTimersByTimeAsync(30_000)
+      await restored
+    }
+    expect(freeMemory).not.toHaveBeenCalled()
+    expect(loadModel).not.toHaveBeenCalled()
+
+    release()
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(freeMemory).toHaveBeenCalledTimes(1)
+    expect(loadModel).toHaveBeenCalledTimes(1)
+    expect(loadModel).toHaveBeenCalledWith('qwen:14b')
+  })
+
+  it('a hold released with nothing evicted touches nothing', async () => {
+    vi.useFakeTimers()
+    const release = holdRenderRestore()
+    release()
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(freeMemory).not.toHaveBeenCalled()
+    expect(backendCall).not.toHaveBeenCalled()
+  })
+
+  it('releasing twice restores once', async () => {
+    vi.useFakeTimers()
+    const release = holdRenderRestore()
+    const restored = restoreChatBackendsAfterRender(haulOf('qwen:14b'))
+    await vi.advanceTimersByTimeAsync(5_000)
+    await restored
+    release()
+    release()
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(loadModel).toHaveBeenCalledTimes(1)
+  })
+
+  it('a render that starts right after the release still inherits the haul', async () => {
+    vi.useFakeTimers()
+    mockBackends({ engineRunning: false })
+    localFetch.mockResolvedValue({ ok: true, json: async () => ({ models: [] }) })
+    const release = holdRenderRestore()
+    const restored = restoreChatBackendsAfterRender(haulOf('qwen:14b'))
+    await vi.advanceTimersByTimeAsync(5_000)
+    await restored
+    release()
+    const next = evictChatBackendsForRender()
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect((await next).ollamaModel).toBe('qwen:14b')
+    expect(loadModel).not.toHaveBeenCalled()
   })
 })
 
