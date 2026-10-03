@@ -77,7 +77,7 @@ test('Models: each bundle card compares itself with the detected 12 GB card', as
 
   await page.getByRole('button', { name: 'Unfiltered', exact: true }).click()
   const tight = tile(page, 'Z-Image Turbo (Unfiltered, Fast)')
-  await expect(tight.locator('[data-bundle-fit="tight"]')).toHaveText('Tight on your 12 GB card: runs, but loading takes minutes')
+  await expect(tight.locator('[data-bundle-fit="tight"]')).toHaveText('Tight on your 12 GB card: runs, loading can be slow')
   await expect(tight.locator('[data-bundle-fit]')).toHaveAttribute('title', 'Runs from 10 GB. Loads fully into graphics memory from 16 GB.')
   // The promise that did not hold on this card is gone from the card.
   await expect(tight).not.toContainText(/seconds per image/)
