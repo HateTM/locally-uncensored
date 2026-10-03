@@ -1,4 +1,6 @@
 import { ChatAttachment } from './ChatAttachment'
+import { ChatFileChip } from './ChatFileChip'
+import { FILE_ONLY_TEXT } from '../../lib/chat-files'
 import { motion } from 'framer-motion'
 import { User, Copy, Check, Pencil, RefreshCw, X, Wrench, Trash2, Scissors, Unlink } from 'lucide-react'
 import { useState, useRef, useEffect, useMemo, memo } from 'react'
@@ -49,9 +51,12 @@ interface Props {
   isLast?: boolean
   /** This bubble is the one currently streaming — hides its action bar. */
   isStreaming?: boolean
+  /** Group chat: the persona this participant speaks as, when it has one of
+   *  its own. Shown in front of the model name. */
+  speakerName?: string
 }
 
-function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, onApprove, onReject, isLast, isStreaming }: Props) {
+function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, onApprove, onReject, isLast, isStreaming, speakerName }: Props) {
   const [copied, setCopied] = useState(false)
   const [isEditing, setIsEditing] = useState(false)
   const [editContent, setEditContent] = useState('')
@@ -156,7 +161,9 @@ function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, o
   }, [isEditing])
 
   const handleCopy = () => {
-    navigator.clipboard.writeText(message.content)
+    // A message with files copies what was typed, not the file summaries the
+    // model received along with it.
+    navigator.clipboard.writeText(isUser && message.files?.length ? (message.displayContent ?? message.content) : message.content)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }
@@ -312,8 +319,8 @@ function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, o
           // der Fehler in einem Wort: der volle Name ist der Modellname, die
           // Kennung davor ist unsere Adresse. Wer den Zeiger auf der Zeile
           // ruhen liess, bekam sie zu sehen, obwohl sie ihm nichts sagt.
-          <div title={displayModelName(message.modelId)} className="t-mono text-gray-500 dark:text-gray-400 pl-1">
-            {answeredByName}
+          <div title={displayModelName(message.modelId)} data-testid="answered-by" className="t-mono text-gray-500 dark:text-gray-400 pl-1">
+            {speakerName ? `${speakerName} · ${answeredByName}` : answeredByName}
           </div>
         )}
         {/* Thinking block — auto-expands while this (last) turn is still
@@ -407,6 +414,15 @@ function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, o
             message so a swap shows only in the active turn. */}
         {!isUser && isLast && <VramSwitchCard />}
 
+        {/* Attached files: a chip each, the bytes are not in the chat. */}
+        {message.files && message.files.length > 0 && (
+          <div className="flex gap-1 flex-wrap">
+            {message.files.map((file, i) => (
+              <ChatFileChip key={`${file.sha256}-${i}`} file={file} />
+            ))}
+          </div>
+        )}
+
         {/* Image attachments */}
         {message.images && message.images.length > 0 && (
           <div className="flex gap-1 flex-wrap">
@@ -451,9 +467,14 @@ function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, o
                 <button onClick={cancelEdit} className="p-0.5 rounded hover:bg-red-500/20 text-red-400 transition-colors"><X size={11} /></button>
               </div>
             </div>
+          ) : isUser && message.files?.length && message.displayContent === FILE_ONLY_TEXT ? (
+            // Nothing was typed: the chips below are the whole message.
+            null
           ) : isUser ? (
             // Slash command: show the short "/commit" (displayContent), not the
             // long expanded instruction held in content (which drives the model).
+            // The same holds for a message with files: content carries their
+            // summaries for the model, the bubble shows what was typed.
             <p className="text-[0.78rem] leading-relaxed text-gray-800 dark:text-gray-200 whitespace-pre-wrap">{message.displayContent || message.content}</p>
           ) : (
             // Answer-blocks (when present) already rendered the per-iteration

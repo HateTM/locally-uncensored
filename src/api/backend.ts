@@ -591,6 +591,9 @@ export async function backendCall<T = unknown>(
     // command" and every preview fell over.
     fs_read_bytes: { path: "/local-api/fs-read-bytes", method: "POST" },
     fs_write: { path: "/local-api/fs-write", method: "POST" },
+    // One base64 chunk of a file attached in the chat, on its way into the
+    // working folder (3.0.5, lib/chat-files.ts).
+    fs_write_bytes: { path: "/local-api/fs-write-bytes", method: "POST" },
     fs_list: { path: "/local-api/fs-list", method: "POST" },
     fs_search: { path: "/local-api/fs-search", method: "POST" },
     fs_info: { path: "/local-api/fs-info", method: "POST" },

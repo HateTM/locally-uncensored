@@ -437,8 +437,8 @@ export function ChatView() {
                       sind (David, 21.09.2026: „NICHTS im prompt fenster!").
                       Oben im Verlauf, ruhig, mit x, und ausdruecklich NICHT am
                       Eingabefeld. `ChatNotices` traegt die beiden Zeilen, die
-                      im Composer entstehen (Anhang ist kein Bild, Modell sieht
-                      keine Bilder), `RetrievalErrorBar` den Fehler, dass die
+                      im Composer entstehen (ein Dokument gehoert in die Ablage,
+                      Modell sieht keine Bilder), `RetrievalErrorBar` den Fehler, dass die
                       Dokumente zu einer Antwort nicht durchsucht wurden. */}
                   <ChatNotices onAttachDocs={() => setRagPanelOpen(true)} />
                   <RetrievalErrorBar />

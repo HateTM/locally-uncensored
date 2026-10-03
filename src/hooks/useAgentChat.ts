@@ -98,7 +98,8 @@ import { useToolAuditStore } from '../stores/toolAuditStore'
 import { makeInTurnCacheLookup } from '../api/agents/in-turn-cache'
 import { explainError as explainToolError } from '../api/agents/error-hints'
 import { hasUnrecoveredOutsideRefusal, OUTSIDE_WORKSPACE_NOTICE } from '../lib/workspace-refusal'
-import { useChatNoticeStore } from '../stores/chatNoticeStore'
+import { useChatNoticeStore, CHAT_NOTICE_MS } from '../stores/chatNoticeStore'
+import { copyFailedMessage, fileMessageFields, filesWithoutWorkspace, placeChatFiles, type ChatFileInput } from '../lib/chat-files'
 import { settleThinking } from '../lib/thinking-stripper'
 import { openPlanGap, planReconcileSteer, PLAN_RECONCILE_BUDGET } from '../lib/plan-reconcile'
 import { planResumeAnchor } from '../lib/plan-resume'
@@ -304,6 +305,13 @@ export function useAgentChat() {
        * einem Lauf zurueckschreibt.
        */
       hiddenUser?: boolean
+      /**
+       * Files attached to this message (3.0.5). In Agent mode they are copied
+       * into the chat's working folder before the turn starts, so the file
+       * tools can work on the real bytes; in Chat Tools mode (plain chat) the
+       * model gets their summaries only. See lib/chat-files.ts.
+       */
+      files?: ChatFileInput[]
     },
   ) => {
     const { activeModel } = useModelStore.getState()
@@ -848,11 +856,38 @@ export function useAgentChat() {
       remote: providerId === 'ollama' ? !isOllamaLocal() : false,
     })
 
+    // Attached files. Full Agent mode works in a real folder, so the file goes
+    // there first and the message names its path; Chat Tools writes nothing to
+    // disk (artifact mode), so there the summary is all the model gets. A copy
+    // that fails never stops the turn: the block then says that only the
+    // summary is available, and the line above the transcript tells the user.
+    let attachedFiles = filesWithoutWorkspace(opts?.files)
+    if (opts?.files?.length && opts.chatToolsMode !== true) {
+      const placed = await placeChatFiles(opts.files, {
+        chatId: slug,
+        ...(resolvedWorkspace?.kind === 'folder' && resolvedWorkspace.path
+          ? { workingDirectory: resolvedWorkspace.path }
+          : {}),
+      })
+      attachedFiles = placed.files
+      if (placed.failed.length) {
+        useChatNoticeStore.getState().show('file-attach', copyFailedMessage(placed.failed), 'ruhig', CHAT_NOTICE_MS)
+      }
+    }
+    const fileFields = fileMessageFields(
+      userContent,
+      attachedFiles,
+      opts?.chatToolsMode === true ? 'chat' : 'workspace',
+    )
+
     // Add user message
     const userMessage = {
       id: uuid(),
       role: 'user' as const,
-      content: userContent,
+      // With files: the typed text plus one summary block per file, and the
+      // typed text alone as what the bubble shows. `userContent` itself stays
+      // the typed text for retrieval, memory and tool selection below.
+      ...fileFields,
       // Slash command: show "/commit" to the user, keep the expansion in content.
       ...(opts?.displayContent ? { displayContent: opts.displayContent } : {}),
       ...(opts?.hiddenUser ? { hidden: true } : {}),

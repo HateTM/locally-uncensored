@@ -39,6 +39,9 @@ import { resolveChatWorkspaceSlug } from '../api/workspace-slug'
 import { codexModeKnobs, type CodexMode } from '../lib/codex-mode'
 import { CODEX_PLAN_SYSTEM_PROMPT } from '../lib/codex-plan-prompt'
 import { resolveWorkspace } from '../api/agents/workspace-resolve'
+import { useChatNoticeStore, CHAT_NOTICE_MS } from '../stores/chatNoticeStore'
+import { copyFailedMessage, fileMessageFields, placeChatFiles, type ChatFileInput } from '../lib/chat-files'
+import type { FileAttachment } from '../types/chat'
 import { useAgentModeStore } from '../stores/agentModeStore'
 import { loadLurules, renderRulesSection } from '../lib/lurules'
 import {
@@ -343,6 +346,12 @@ export function useCodex() {
        * Verlauf stuende sonst ein Satz, den der Mensch nie geschrieben hat.
        */
       hiddenUser?: boolean
+      /**
+       * Files attached to this instruction (3.0.5). They are copied into the
+       * working folder of the run before the first step, so the file and
+       * shell tools can open the real bytes. See lib/chat-files.ts.
+       */
+      files?: ChatFileInput[]
     },
   ) => {
     const { activeModel } = useModelStore.getState()
@@ -601,10 +610,29 @@ export function useCodex() {
       id: uuid(), type: 'instruction', content: instruction, timestamp: Date.now(),
     })
 
+    // Attached files go into the folder this run works in, the same one the
+    // lock above names, and the message tells the model their paths. A copy
+    // that fails never stops the run: the model then gets the summary alone
+    // and the line above the transcript says so.
+    let attachedFiles: FileAttachment[] | undefined
+    if (opts?.files?.length) {
+      const placed = await placeChatFiles(opts.files, {
+        chatId: workspaceSlug,
+        ...(runWorkspace?.kind === 'folder' && runWorkspace.path ? { workingDirectory: runWorkspace.path } : {}),
+      })
+      attachedFiles = placed.files
+      if (placed.failed.length) {
+        useChatNoticeStore.getState().show('file-attach', copyFailedMessage(placed.failed), 'ruhig', CHAT_NOTICE_MS)
+      }
+    }
+
     // Add user message to chat store. For a slash command the UI shows the raw
     // "/cmd args" (displayContent) while the model receives the expansion.
     useChatStore.getState().addMessage(convId, {
-      id: uuid(), role: 'user', content: instruction, timestamp: Date.now(),
+      id: uuid(), role: 'user', timestamp: Date.now(),
+      // With files: the instruction plus one summary block per file, and the
+      // typed text as what the transcript shows.
+      ...fileMessageFields(instruction, attachedFiles, 'workspace'),
       ...(displayInstruction ? { displayContent: displayInstruction } : {}),
       ...(opts?.hiddenUser ? { hidden: true } : {}),
     })

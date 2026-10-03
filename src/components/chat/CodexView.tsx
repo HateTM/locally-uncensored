@@ -5,6 +5,8 @@ import { useChatStore } from '../../stores/chatStore'
 import { useBackgroundAgentWake } from '../../hooks/useBackgroundAgentWake'
 import { useGenerationStore } from '../../stores/generationStore'
 import { ChatInput } from './ChatInput'
+import { ChatFileChip } from './ChatFileChip'
+import { FILE_ONLY_TEXT } from '../../lib/chat-files'
 import { ToolCallBlock } from './ToolCallBlock'
 import { ToolCallBand } from './ToolCallBand'
 import { groupAgentBlocks } from '../../lib/tool-call-groups'
@@ -578,7 +580,17 @@ export function CodexView() {
                         // there are no per-iteration answer blocks (interleave
                         // already rendered those). Assistant drops the bubble to
                         // match the regular Chat view; user keeps the right anchor.
-                        const textContent = cleanContent && (msg.role === 'user' || !hasAnswerBlock) ? (
+                        // Files attached to this instruction: a chip each. The
+                        // bytes are in the working folder, not in the chat.
+                        const fileChips = msg.role === 'user' && msg.files?.length ? (
+                          <div className="flex gap-1 flex-wrap justify-end">
+                            {msg.files.map((file, i) => (
+                              <ChatFileChip key={`${file.sha256}-${i}`} file={file} />
+                            ))}
+                          </div>
+                        ) : null
+                        const onlyFiles = !!fileChips && msg.displayContent === FILE_ONLY_TEXT
+                        const textContent = cleanContent && !onlyFiles && (msg.role === 'user' || !hasAnswerBlock) ? (
                           <div className={
                             msg.role === 'user'
                               ? 'rounded-lg px-2.5 py-1.5 bg-gray-100 dark:bg-white/[0.06] border border-gray-200 dark:border-white/[0.08]'
@@ -665,6 +677,7 @@ export function CodexView() {
                           <>
                             {reflection}
                             {transcript}
+                            {fileChips}
                             {textContent}
                           </>
                         )
@@ -718,7 +731,9 @@ export function CodexView() {
 
         {/* Input */}
         <ChatInput
-          onSend={(content) => sendInstruction(content)}
+          // Images have no path into a coding run; attached files do, they
+          // are copied into the working folder (lib/chat-files.ts).
+          onSend={(content, _images, files) => sendInstruction(content, files ? { files } : undefined)}
           onStop={stopCodex}
           // Store flag, not the hook's local isRunning (audit A2): the view
           // remounts on every tab switch and a fresh hook says "idle" while

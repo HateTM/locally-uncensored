@@ -45,7 +45,8 @@ import { stripNonCanonicalTags, finalStripThinkingTags, settleThinking } from ".
 import { isLocalModelByName } from "../api/agents/model-locality"
 import { isMultimodalUnsupportedError, MULTIMODAL_UNSUPPORTED_MESSAGE } from "../lib/ollama-errors"
 import type { ImageAttachment, Message } from "../types/chat"
-import { isGroupChat, groupSystemPrompt, groupHistory, stripImpersonatedSpeakers } from "../lib/group-chat"
+import { fileMessageFields, filesWithoutWorkspace, type ChatFileInput } from "../lib/chat-files"
+import { isGroupChat, groupSystemPrompt, groupHistory, groupSpeakers, stripImpersonatedSpeakers } from "../lib/group-chat"
 import { explainSendRefusal } from "../lib/template-refusal"
 import { builtinReloadNeeded, ensureBuiltinEngineAlive } from "../api/builtin-ensure"
 import { emptyAnswerExplanation } from "../lib/answer-notes"
@@ -98,7 +99,22 @@ async function runGroupTurn(convId: string, model: string, allModels: string[], 
   // Der Grundtext gilt unabhaengig vom Personenschalter: der Schalter
   // entscheidet ueber die PERSON, nicht darueber, ob ueberhaupt ein Systemtext
   // rausgeht. Siehe lib/system-prompt.ts.
-  const personaPrompt = buildChatSystemPrompt(conv)
+  //
+  // 3.0.5 (samvenice, Discord): a participant can have a persona of its own.
+  // Then ITS prompt is that persona and the others are named to it, so two
+  // models no longer answer as the same character. A participant without one
+  // gets the chat's persona setting, exactly as before.
+  //
+  // Not gated on the Personas switch in Settings, for the same reason the
+  // line for the chat's own persona below never was in a group: that switch
+  // is off by default, and a persona picked for one participant in this
+  // chat's group menu is as explicit as a choice gets. Picking "Chat persona"
+  // there takes it back.
+  const speakers = groupSpeakers(allModels, conv.groupPersonas, useSettingsStore.getState().personas)
+  const ownPersona = speakers[model]?.personaPrompt
+  const personaPrompt = ownPersona !== undefined
+    ? buildChatSystemPrompt({ systemPrompt: ownPersona, personaEnabled: true })
+    : buildChatSystemPrompt(conv)
   const providerId = getProviderIdFromModel(model)
   // Same count cap as the plain path: a long group chat must not outgrow the
   // proxy's message gate either.
@@ -115,8 +131,8 @@ async function runGroupTurn(convId: string, model: string, allModels: string[], 
   // the 262k model beside it.
   const messages = applyChatSendBudget(
     capMessageCount([
-      { role: 'system' as const, content: groupSystemPrompt(model, allModels, personaPrompt) },
-      ...groupHistory(conv.messages, model),
+      { role: 'system' as const, content: groupSystemPrompt(model, allModels, personaPrompt, speakers) },
+      ...groupHistory(conv.messages, model, speakers),
     ]),
     {
       providerId,
@@ -145,7 +161,11 @@ async function runGroupTurn(convId: string, model: string, allModels: string[], 
   let groupFinish: string | undefined
   // A model's own lines are untagged; a "[other-model]" tag in its OWN reply is
   // it speaking for someone else, which v1 must not show.
-  const others = allModels.filter((m) => m !== model)
+  // The others can show up under their model name or under their persona
+  // name, so both spellings of the tag are cut.
+  const others = allModels
+    .filter((m) => m !== model)
+    .flatMap((m) => (speakers[m].name === m ? [m] : [m, speakers[m].name]))
 
   try {
     // Local speakers share ONE engine process. llama-server holds a single
@@ -386,7 +406,7 @@ export function useChat() {
    * a second local conversation could stream from the built-in engine at the
    * same time, silently, because `localLaneHolder()` never heard about the
    * group round at all. */
-  const runGroupRound = useCallback(async (convId: string, content: string, images: ImageAttachment[] | undefined, models: string[]) => {
+  const runGroupRound = useCallback(async (convId: string, content: string, images: ImageAttachment[] | undefined, models: string[], files?: ChatFileInput[]) => {
     // Auflage 3 (Review composer, 19.09.2026): derselbe Wiedereintritts-Riegel
     // wie sendMessage oben ("Re-entry guard"). Ohne ihn ueberschrieb ein
     // doppeltes Enter auf einem Gruppenchat den Token der ersten Runde weiter
@@ -418,7 +438,9 @@ export function useChat() {
       useChatStore.getState().addMessage(convId, {
         id: uuid(),
         role: 'user',
-        content,
+        // An attached file reaches every speaker as its summary, inside the
+        // one user line they all share (lib/chat-files.ts).
+        ...fileMessageFields(content, filesWithoutWorkspace(files)),
         images,
         timestamp: Date.now(),
       })
@@ -506,7 +528,7 @@ export function useChat() {
     }
   }, [])
 
-  const sendMessage = useCallback(async (content: string, images?: ImageAttachment[]) => {
+  const sendMessage = useCallback(async (content: string, images?: ImageAttachment[], files?: ChatFileInput[]) => {
     const { activeModel } = useModelStore.getState()
     const { settings } = useSettingsStore.getState()
     const store = useChatStore.getState()
@@ -673,9 +695,12 @@ export function useChat() {
           displayContent: content,
           readOnly: slash.command.readOnly === true,
           ...(loop ? { loop } : {}),
+          files,
         })
       }
-      return sendAgentMessage(content, images)
+      // Agent mode: an attached file is also copied into this chat's working
+      // folder, where the file tools can open it (useAgentChat).
+      return sendAgentMessage(content, images, { files })
     }
 
     // Discord 28.09.2026 (xambran): im normalen Chat liest kein Werkzeug die
@@ -694,7 +719,7 @@ export function useChat() {
     {
       const groupConv = store.conversations.find((c) => c.id === store.activeConversationId)
       if (groupConv && isGroupChat(groupConv.groupModels)) {
-        return runGroupRound(groupConv.id, content, images, groupConv.groupModels)
+        return runGroupRound(groupConv.id, content, images, groupConv.groupModels, files)
       }
     }
 
@@ -730,6 +755,7 @@ export function useChat() {
             : CHAT_TOOLS,
           chatToolsMode: true,
           mediaHint: route.mediaHint,
+          files,
         })
       }
     }
@@ -772,7 +798,11 @@ export function useChat() {
     const userMessage = {
       id: uuid(),
       role: "user" as const,
-      content,
+      // Plain chat has no file tools, so an attached file is its summary and
+      // nothing else: name, type, hash, a hex dump of the start and the
+      // readable strings (lib/chat-files.ts). `content` below stays the typed
+      // text, which is what retrieval and memory search with.
+      ...fileMessageFields(content, filesWithoutWorkspace(files)),
       images,
       timestamp: Date.now(),
     }
@@ -1611,7 +1641,7 @@ export function useChat() {
     const plan = planResend(conv.messages, targetId, override)
     if (!plan) return
     useChatStore.getState().deleteMessagesAfter(conversationId, plan.deleteFromId)
-    sendMessage(plan.content, plan.images)
+    sendMessage(plan.content, plan.images, plan.files?.map((attachment) => ({ attachment })))
   }, [sendMessage])
 
   const regenerateMessage = useCallback((conversationId: string, assistantMessageId: string) => {

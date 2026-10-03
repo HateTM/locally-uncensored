@@ -10,6 +10,31 @@ export interface ImageAttachment {
 }
 
 /**
+ * A file of any kind attached to a user message (3.0.5).
+ *
+ * A language model cannot read bytes, so the file itself is NOT in the chat:
+ * no base64, no reference to a stored copy. What is kept is what the model was
+ * given in its place (`summary`, a few kilobytes at most) and, in Agent and
+ * Code, where the file was put in the chat's working folder so the file tools
+ * can work on it. See lib/chat-files.ts.
+ */
+export interface FileAttachment {
+  name: string
+  /** Size of the file in bytes. */
+  size: number
+  /** The type read from the first bytes, e.g. "Game Boy Advance ROM". */
+  kind: string
+  /** Lowercase hex SHA-256 of the whole file. */
+  sha256: string
+  /** What the model reads instead of the bytes: a hex dump of the start and
+   *  the readable strings, or the start of the text for a text file. */
+  summary: string
+  /** Path inside the chat's working folder, set once the file was put there
+   *  (Agent and Code only). */
+  workspacePath?: string
+}
+
+/**
  * A chat-tools "artifact": a file the model produced in PLAIN chat. In chat
  * mode `file_write` does NOT touch disk (ChatGPT-style) — the content lands in
  * the message and renders inline with a preview + Download button. (The Coding
@@ -46,6 +71,10 @@ export interface Message {
   modelId?: string
   timestamp: number
   images?: ImageAttachment[]
+  /** Files attached to this user message. `content` already carries their
+   *  summaries for the model, `displayContent` holds what the user typed, and
+   *  this list draws the chips and lets a resend rebuild the message. */
+  files?: FileAttachment[]
   sources?: { documentName: string; chunkIndex: number; preview: string }[]
   // Agent Mode fields
   agentBlocks?: AgentBlock[]
@@ -142,6 +171,11 @@ export interface Conversation {
   /** Group chat v1: two to four models that answer in turn on every user
    *  message. Fewer than two entries means a normal single-model chat. */
   groupModels?: string[]
+  /** Group chat: the persona each participant speaks as, model name to
+   *  persona id (3.0.5, samvenice on Discord). A model without an entry
+   *  follows the chat's own persona setting, which is how every group worked
+   *  before this field existed. */
+  groupPersonas?: Record<string, string>
   /**
    * Compactions that have happened in this chat, oldest first. Only the NEWEST
    * one shapes the payload — each summary already covers everything before its
