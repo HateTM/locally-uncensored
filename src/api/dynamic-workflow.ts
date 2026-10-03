@@ -114,6 +114,8 @@ interface StrategyResult {
  *  0.35.0, YuE2 in 0.36.0. "Update ComfyUI" in the text is what Create keys the
  *  one click update on (needsComfyUpdate). */
 export const LTX25_NEEDS_UPDATE = 'LTX 2.5 needs ComfyUI 0.32.0 or newer. Update ComfyUI in Settings.'
+/** A step distillation LoRA names its step count (minimax_h3_fl2v_turbo_8step_...). */
+const H3_STEP_LORA = /turbo\D*?(\d+)\s*_?steps?/i
 export const FASTH3_NEEDS_UPDATE = 'FastH3 needs ComfyUI 0.35.0 or newer. Update ComfyUI in Settings.'
 export const YUE2_NEEDS_UPDATE = 'YuE2 needs ComfyUI 0.36.0 or newer. Update ComfyUI in Settings.'
 
@@ -1888,8 +1890,14 @@ async function buildMiniMaxH3Workflow(params: VideoParams, seed: number, allNode
 
   // Video LoRAs (the turbo ones included) patch the model only.
   let modelSrc = unetId
-  const loras = normalizeLoraList(params.lora)
-  const strengths = normalizeLoraStrengths(params.loraStrength, loras.length)
+  const stack = normalizeLoraList(params.lora)
+  const stackStrengths = normalizeLoraStrengths(params.loraStrength, stack.length)
+  // FastH3 is already the 8 step distillation. A step LoRA (the H3 turbo one)
+  // on top of it distils twice, so on FastH3 it is left out; every other LoRA
+  // in the stack still patches the model.
+  const keep = stack.map((l) => !(fast && H3_STEP_LORA.test(l)))
+  const loras = stack.filter((_, i) => keep[i])
+  const strengths = stackStrengths.filter((_, i) => keep[i])
   loras.forEach((loraName, i) => {
     const loraId = String(n++)
     workflow[loraId] = {
@@ -1948,7 +1956,7 @@ async function buildMiniMaxH3Workflow(params: VideoParams, seed: number, allNode
   // 8step_...), and the official template runs it at exactly that (Discord
   // 2026-10-02, checkedlemon788's ComfyUI screenshot: turbo_steps 8). The
   // slider's 20 or more would only cost time on a 24 GB model.
-  const turbo = loras.map((l) => /turbo\D*?(\d+)\s*_?steps?/i.exec(l)).find((m) => m)
+  const turbo = loras.map((l) => H3_STEP_LORA.exec(l)).find((m) => m)
   // FastH3 is the 8 step checkpoint: the template runs exactly 8.
   const steps = fast ? 8 : turbo ? Number(turbo[1]) : params.steps
   workflow[schedulerId] = { class_type: 'BasicScheduler', inputs: { model: [modelSrc, 0], scheduler: params.scheduler || 'simple', steps, denoise: 1 } }

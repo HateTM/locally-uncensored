@@ -456,7 +456,7 @@ const BUILTIN_TOOLS: MCPToolDefinition[] = [
         settings: mediaSettingsSchema({
           denoise: { type: 'number', description: 'Image-to-image strength 0.05 to 1.0 (only with inputImage).' },
           lora: { type: ['string', 'array'], items: { type: 'string' }, description: 'LoRA filename, or an ARRAY of filenames to stack several (chained in order). Matched against the installed LoRAs, extension optional; an unknown name is rejected with the installed list.' },
-          loraStrength: { type: ['number', 'array'], items: { type: 'number' }, description: 'LoRA strength (~0 to 2). One number applies to every LoRA; an array gives one strength per LoRA in the same order.' },
+          loraStrength: { type: ['number', 'array'], items: { type: 'number' }, description: 'LoRA strength, usually 0 to 2, accepted from -10 to 10. One number applies to every LoRA; an array gives one strength per LoRA in the same order.' },
           vae: { type: 'string', description: 'Override VAE filename.' },
         }),
       },

@@ -146,6 +146,17 @@ describe('the graph follows the official template', () => {
     expect(nodeOf(wf, 'KSamplerSelect')![1].inputs.sampler_name).toBe('res_multistep')
   })
 
+  it('leaves the H3 turbo LoRA out (FastH3 is already distilled) and keeps every other LoRA with its own strength', async () => {
+    const TURBO = 'minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors'
+    const wf = await buildDynamicWorkflow(run(FAST, { lora: [TURBO, 'style.safetensors'], loraStrength: [1, 0.6] }), 'minimaxh3')
+    const loras = Object.values(wf as Record<string, { class_type: string; inputs: Record<string, unknown> }>)
+      .filter((nd) => nd.class_type === 'LoraLoaderModelOnly')
+    expect(loras.map((nd) => [nd.inputs.lora_name, nd.inputs.strength_model])).toEqual([['style.safetensors', 0.6]])
+    // On the base H3 the same stack keeps both.
+    const base = await buildDynamicWorkflow(run(BASE, { lora: [TURBO, 'style.safetensors'], loraStrength: [1, 0.6] }), 'minimaxh3')
+    expect(Object.values(base as Record<string, { class_type: string }>).filter((nd) => nd.class_type === 'LoraLoaderModelOnly').length).toBe(2)
+  })
+
   it('keeps the H3 wiring: encode node, joint latent, both decoders, sound muxed', async () => {
     const wf = await buildDynamicWorkflow(run(FAST), 'minimaxh3')
     const [encId, enc] = nodeOf(wf, 'MiniMaxH3ImageToVideo')!
