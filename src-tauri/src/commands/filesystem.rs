@@ -808,6 +808,129 @@ pub fn fs_write(path: String, content: String, chatId: Option<String>, workingDi
     }))
 }
 
+/// The largest file a chat attachment may be. The WebView enforces the same
+/// number before it reads the file (src/lib/chat-files.ts); this is the side
+/// that cannot be talked out of it.
+const WRITE_BYTES_CAP: u64 = 64 * 1024 * 1024;
+
+/// The hidden sibling a binary upload grows in until its last chunk arrived.
+fn upload_part_path(target: &Path) -> Result<PathBuf, String> {
+    let parent = target.parent().ok_or_else(|| "No parent directory".to_string())?;
+    let name = target
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .ok_or_else(|| "No file name".to_string())?;
+    Ok(parent.join(format!(".{name}.lu-part")))
+}
+
+/// Put a BINARY file into the workspace, in base64 chunks, through the same
+/// jail as every other fs command (`resolve_path` -> `contain_within`).
+///
+/// This is how a file attached in the chat reaches the agent's working folder
+/// (3.0.5, applejames on Discord: a ROM file for the model to look at).
+/// `fs_write` cannot carry it: it takes text and rewrites line endings.
+///
+/// CHUNKED, because the alternative is one IPC message with the whole file in
+/// base64: 4/3 of the file as a string in the WebView, again as JSON, again in
+/// Rust. The chat has been taken down by exactly that shape of memory use
+/// before (see chat_attachments.rs). `offset` is where this chunk starts and
+/// must be the number of bytes already received, so a lost or repeated chunk
+/// is an error and never a silently damaged file.
+///
+/// NEVER OVER AN EXISTING FILE. With a folder workspace the root is the
+/// user's real project, and an attachment that happens to share a name with a
+/// file there must not replace it. The caller picks another name and tries
+/// again. For the same reason the bytes grow in a hidden `.name.lu-part` file
+/// and only the last chunk renames it into place: the visible file is either
+/// absent or complete, also for an agent tool that looks at the folder in the
+/// middle of the upload.
+#[tauri::command]
+#[allow(non_snake_case)]
+pub async fn fs_write_bytes(
+    path: String,
+    base64: String,
+    offset: u64,
+    last: bool,
+    chatId: Option<String>,
+    workingDirectory: Option<String>,
+) -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        fs_write_bytes_sync(path, base64, offset, last, chatId, workingDirectory)
+    })
+    .await
+    .map_err(|e| format!("fs_write_bytes task failed to run: {e}"))?
+}
+
+#[allow(non_snake_case)]
+pub(crate) fn fs_write_bytes_sync(
+    path: String,
+    base64: String,
+    offset: u64,
+    last: bool,
+    chatId: Option<String>,
+    workingDirectory: Option<String>,
+) -> Result<serde_json::Value, String> {
+    use std::io::Write;
+
+    let full = resolve_path(&path, chatId.as_deref(), workingDirectory.as_deref())?;
+    reject_root_as_write_target(
+        &workspace_root(chatId.as_deref(), workingDirectory.as_deref()),
+        &full,
+    )?;
+    if full.exists() {
+        return Err(format!("File already exists: {}", full.display()));
+    }
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(base64.as_bytes())
+        .map_err(|_| "Invalid base64 data".to_string())?;
+    let total = offset.saturating_add(bytes.len() as u64);
+    if total > WRITE_BYTES_CAP {
+        return Err(format!(
+            "File is too large to attach: more than {} bytes",
+            WRITE_BYTES_CAP
+        ));
+    }
+
+    let part = upload_part_path(&full)?;
+    if let Some(parent) = full.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("Create dir: {}", os_error::english(&e)))?;
+    }
+    let mut file = if offset == 0 {
+        // A first chunk starts over, also over the leftover of an upload that
+        // was abandoned half way.
+        fs::File::create(&part)
+    } else {
+        let have = fs::metadata(&part).map(|m| m.len()).unwrap_or(0);
+        if have != offset {
+            return Err(format!(
+                "Upload out of order: expected the chunk at byte {}, got the one at byte {}",
+                have, offset
+            ));
+        }
+        fs::OpenOptions::new().append(true).open(&part)
+    }
+    .map_err(|e| format!("Write error: {}", os_error::english(&e)))?;
+    if let Err(e) = file.write_all(&bytes) {
+        drop(file);
+        let _ = fs::remove_file(&part);
+        return Err(format!("Write error: {}", os_error::english(&e)));
+    }
+    drop(file);
+
+    if !last {
+        return Ok(serde_json::json!({ "status": "partial", "bytes": total }));
+    }
+    if let Err(e) = fs::rename(&part, &full) {
+        let _ = fs::remove_file(&part);
+        return Err(format!("Write error (rename): {}", os_error::english(&e)));
+    }
+    Ok(serde_json::json!({
+        "status": "saved",
+        "path": full.to_string_lossy(),
+        "bytes": total,
+    }))
+}
+
 #[tauri::command]
 #[allow(non_snake_case)]
 pub fn fs_list(
@@ -2087,6 +2210,151 @@ mod explorer_byte_read_tests {
         )
         .expect_err("missing");
         assert!(err.contains("File not found"), "got: {err}");
+    }
+}
+
+/// A file attached in the chat reaches the agent's folder through
+/// `fs_write_bytes` (3.0.5). Same jail, never over an existing file, and the
+/// visible file is complete or absent.
+#[cfg(test)]
+mod attachment_byte_write_tests {
+    use super::*;
+    use std::fs;
+
+    fn ws(tag: &str) -> crate::os_paths::TestDir {
+        let d = crate::os_paths::test_dir(&format!("fswritebytes-{tag}"));
+        allow_root_for_test(&d);
+        d
+    }
+
+    fn b64(bytes: &[u8]) -> String {
+        base64::engine::general_purpose::STANDARD.encode(bytes)
+    }
+
+    fn put(dir: &Path, name: &str, bytes: &[u8], offset: u64, last: bool) -> Result<serde_json::Value, String> {
+        fs_write_bytes_sync(
+            name.into(),
+            b64(bytes),
+            offset,
+            last,
+            None,
+            Some(dir.to_string_lossy().to_string()),
+        )
+    }
+
+    #[test]
+    fn one_chunk_lands_byte_for_byte() {
+        let dir = ws("one");
+        // Bytes no text write would survive: NUL, a lone CR, invalid UTF-8.
+        let raw: Vec<u8> = vec![0x00, 0x0d, 0xff, 0xfe, 0x0a, 0x80, 0x4e, 0x45, 0x53, 0x1a];
+        let v = put(&dir, "game.nes", &raw, 0, true).expect("write");
+        assert_eq!(v["status"], "saved");
+        assert_eq!(v["bytes"], raw.len());
+        assert_eq!(fs::read(dir.join("game.nes")).unwrap(), raw);
+        assert!(!dir.join(".game.nes.lu-part").exists(), "the part file must be gone");
+    }
+
+    #[test]
+    fn chunks_are_joined_and_the_file_only_appears_with_the_last_one() {
+        let dir = ws("chunks");
+        let a = vec![1u8; 1000];
+        let b = vec![2u8; 500];
+        let first = put(&dir, "rom.bin", &a, 0, false).expect("first");
+        assert_eq!(first["status"], "partial");
+        assert!(!dir.join("rom.bin").exists(), "half a file must not be visible under its name");
+        let second = put(&dir, "rom.bin", &b, 1000, true).expect("second");
+        assert_eq!(second["status"], "saved");
+        assert_eq!(second["bytes"], 1500);
+        let mut whole = a.clone();
+        whole.extend_from_slice(&b);
+        assert_eq!(fs::read(dir.join("rom.bin")).unwrap(), whole);
+    }
+
+    #[test]
+    fn a_chunk_at_the_wrong_offset_is_refused() {
+        let dir = ws("order");
+        put(&dir, "rom.bin", &[1u8; 100], 0, false).expect("first");
+        let err = put(&dir, "rom.bin", &[2u8; 100], 50, true).expect_err("wrong offset");
+        assert!(err.contains("out of order"), "got: {err}");
+        assert!(!dir.join("rom.bin").exists());
+        // And a chunk for an upload that never started.
+        let err = put(&dir, "other.bin", &[2u8; 100], 100, true).expect_err("no first chunk");
+        assert!(err.contains("out of order"), "got: {err}");
+    }
+
+    #[test]
+    fn a_first_chunk_starts_over_after_an_abandoned_upload() {
+        let dir = ws("restart");
+        put(&dir, "rom.bin", &[9u8; 300], 0, false).expect("abandoned");
+        put(&dir, "rom.bin", &[7u8; 10], 0, true).expect("fresh");
+        assert_eq!(fs::read(dir.join("rom.bin")).unwrap(), vec![7u8; 10]);
+    }
+
+    #[test]
+    fn an_existing_file_is_never_replaced() {
+        let dir = ws("exists");
+        fs::write(dir.join("notes.txt"), b"the user's own file").unwrap();
+        let err = put(&dir, "notes.txt", b"attachment", 0, true).expect_err("exists");
+        assert!(err.contains("already exists"), "got: {err}");
+        assert_eq!(fs::read(dir.join("notes.txt")).unwrap(), b"the user's own file");
+    }
+
+    #[test]
+    fn a_path_outside_the_workspace_is_refused() {
+        let dir = ws("outside");
+        let root = dir.join("repo");
+        fs::create_dir_all(&root).unwrap();
+        let climb = fs_write_bytes_sync(
+            "../escaped.bin".into(),
+            b64(b"x"),
+            0,
+            true,
+            None,
+            Some(root.to_string_lossy().to_string()),
+        );
+        assert!(climb.is_err(), "a .. climb must not write");
+        assert!(!dir.join("escaped.bin").exists());
+        let absolute = fs_write_bytes_sync(
+            dir.join("escaped.bin").to_string_lossy().to_string(),
+            b64(b"x"),
+            0,
+            true,
+            None,
+            Some(root.to_string_lossy().to_string()),
+        );
+        assert!(absolute.is_err(), "an outside absolute path must not write");
+        assert!(!dir.join("escaped.bin").exists());
+    }
+
+    #[test]
+    fn the_workspace_root_itself_is_not_a_file() {
+        let dir = ws("root");
+        let err = put(&dir, ".", b"x", 0, true).expect_err("root as target");
+        assert!(err.contains("Not a file"), "got: {err}");
+    }
+
+    #[test]
+    fn bytes_past_the_cap_are_refused() {
+        let dir = ws("cap");
+        let err = put(&dir, "huge.bin", &[0u8; 16], WRITE_BYTES_CAP, true).expect_err("over the cap");
+        assert!(err.contains("too large"), "got: {err}");
+        assert!(!dir.join("huge.bin").exists());
+    }
+
+    #[test]
+    fn broken_base64_is_an_error_not_an_empty_file() {
+        let dir = ws("b64");
+        let err = fs_write_bytes_sync(
+            "x.bin".into(),
+            "not base64 !!".into(),
+            0,
+            true,
+            None,
+            Some(dir.to_string_lossy().to_string()),
+        )
+        .expect_err("bad base64");
+        assert!(err.contains("Invalid base64"), "got: {err}");
+        assert!(!dir.join("x.bin").exists());
     }
 }
 

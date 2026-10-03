@@ -520,6 +520,7 @@ fn main() {
             commands::filesystem::fs_read,
             commands::filesystem::fs_read_bytes,
             commands::filesystem::fs_write,
+            commands::filesystem::fs_write_bytes,
             commands::filesystem::fs_list,
             commands::filesystem::fs_search,
             commands::filesystem::fs_info,

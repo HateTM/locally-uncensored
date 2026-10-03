@@ -38,6 +38,8 @@ export function PluginsDropdown({
   const [cavemanOpen, setCavemanOpen] = useState(false)
   const [personaOpen, setPersonaOpen] = useState(false)
   const [groupOpen, setGroupOpen] = useState(false)
+  // Which participant's persona list is open, by model name.
+  const [personaFor, setPersonaFor] = useState<string | null>(null)
   const { getActivePersona, setActivePersona } = useSettingsStore()
   const activePersona = getActivePersona()
   const allPersonas = useSettingsStore((s) => s.personas)
@@ -71,6 +73,8 @@ export function PluginsDropdown({
   // Group chat v1 (Nurse KillJoy): the selection lives on the conversation,
   // exactly like the persona flag, so every chat keeps its own line-up.
   const setGroupModels = useChatStore((s) => s.setGroupModels)
+  const setGroupPersona = useChatStore((s) => s.setGroupPersona)
+  const groupPersonas = activeConv?.groupPersonas
   const models = useModelStore((s) => s.models)
   const groupModels = activeConv?.groupModels ?? []
   const isGroupActive = isGroupChat(activeConv?.groupModels)
@@ -296,34 +300,84 @@ export function PluginsDropdown({
               </button>
 
               {groupOpen && (activeConvId ? (
-                <div className="pb-1.5 space-y-0.5 max-h-[180px] overflow-y-auto scrollbar-thin">
+                <div className="pb-1.5 space-y-0.5 max-h-[220px] overflow-y-auto scrollbar-thin">
                   <p className="px-2 pb-0.5 text-[0.5rem] leading-snug text-gray-400">
-                    Pick 2 to {GROUP_CHAT_MAX} models. They answer in turn on every message, and each sees what the others said.
+                    Pick 2 to {GROUP_CHAT_MAX} models. They answer in turn on every message, and each sees what the others said. Each one can speak as its own persona.
                   </p>
                   {groupChatCandidates(models, groupModels).map((m) => {
                     const on = groupModels.includes(m.name)
                     const full = !on && groupModels.length >= GROUP_CHAT_MAX
+                    // The persona THIS participant speaks as. None picked (or a
+                    // persona that was deleted since) means it follows the
+                    // chat's own persona setting, as every group did before.
+                    const ownPersona = allPersonas.find((p) => p.id === groupPersonas?.[m.name])
+                    const listOpen = on && personaFor === m.name
                     return (
-                      <button
-                        key={m.name}
-                        disabled={full}
-                        onClick={() =>
-                          setGroupModels(
-                            activeConvId,
-                            on ? groupModels.filter((x) => x !== m.name) : [...groupModels, m.name],
-                          )
-                        }
-                        className={`w-full flex items-center gap-1.5 px-2 py-1 rounded text-left transition-colors ${
-                          on
-                            ? 'bg-purple-500/10 text-purple-600 dark:text-purple-400'
-                            : full
-                              ? 'text-gray-400/50 cursor-default'
-                              : 'text-gray-500 hover:bg-gray-50 dark:hover:bg-white/[0.04] hover:text-gray-700 dark:hover:text-gray-300'
-                        }`}
-                      >
-                        {on && <div className="w-1 h-1 rounded-full bg-purple-400 shrink-0" />}
-                        <span className="text-[0.55rem] font-medium truncate" title={displayModelName(m.name)}>{displayModelName(m.name)}</span>
-                      </button>
+                      <div key={m.name} data-testid="group-participant" data-model={m.name}>
+                        <div
+                          className={`flex items-center rounded transition-colors ${
+                            on ? 'bg-purple-500/10 text-purple-600 dark:text-purple-400' : ''
+                          }`}
+                        >
+                          <button
+                            disabled={full}
+                            onClick={() => {
+                              if (on) setPersonaFor(null)
+                              setGroupModels(
+                                activeConvId,
+                                on ? groupModels.filter((x) => x !== m.name) : [...groupModels, m.name],
+                              )
+                            }}
+                            className={`flex-1 min-w-0 flex items-center gap-1.5 px-2 py-1 rounded text-left transition-colors ${
+                              on
+                                ? ''
+                                : full
+                                  ? 'text-gray-400/50 cursor-default'
+                                  : 'text-gray-500 hover:bg-gray-50 dark:hover:bg-white/[0.04] hover:text-gray-700 dark:hover:text-gray-300'
+                            }`}
+                          >
+                            {on && <div className="w-1 h-1 rounded-full bg-purple-400 shrink-0" />}
+                            <span className="text-[0.55rem] font-medium truncate" title={displayModelName(m.name)}>{displayModelName(m.name)}</span>
+                          </button>
+                          {on && (
+                            <button
+                              onClick={() => setPersonaFor(listOpen ? null : m.name)}
+                              aria-expanded={listOpen}
+                              aria-label={`Persona for ${displayModelName(m.name)}`}
+                              title="The persona this model speaks as in this chat"
+                              data-testid="group-persona-trigger"
+                              className="shrink-0 max-w-[45%] flex items-center gap-0.5 px-1.5 py-1 rounded t-micro hover:bg-purple-500/15 transition-colors"
+                            >
+                              <User size={8} className="shrink-0" />
+                              <span className="truncate">{ownPersona?.name ?? 'Chat persona'}</span>
+                              <ChevronDown size={8} className={`shrink-0 transition-transform ${listOpen ? 'rotate-180' : ''}`} />
+                            </button>
+                          )}
+                        </div>
+                        {listOpen && (
+                          <div data-testid="group-persona-list" className="ml-3 my-0.5 pl-1.5 border-l border-purple-400/30 space-y-0.5">
+                            {[{ id: null, name: 'Chat persona' }, ...allPersonas].map((p) => {
+                              const picked = (ownPersona?.id ?? null) === p.id
+                              return (
+                                <button
+                                  key={p.id ?? 'chat-persona'}
+                                  onClick={() => { setGroupPersona(activeConvId, m.name, p.id); setPersonaFor(null) }}
+                                  aria-pressed={picked}
+                                  title={p.id === null ? 'Follow the persona setting of this chat' : undefined}
+                                  className={`w-full flex items-center gap-1.5 px-1.5 py-0.5 rounded text-left transition-colors ${
+                                    picked
+                                      ? 'text-purple-600 dark:text-purple-400'
+                                      : 'text-gray-500 hover:bg-gray-50 dark:hover:bg-white/[0.04] hover:text-gray-700 dark:hover:text-gray-300'
+                                  }`}
+                                >
+                                  {picked && <div className="w-1 h-1 rounded-full bg-purple-400 shrink-0" />}
+                                  <span className="t-micro truncate">{p.name}</span>
+                                </button>
+                              )
+                            })}
+                          </div>
+                        )}
+                      </div>
                     )
                   })}
                   {groupModels.length === 1 && (
@@ -331,7 +385,7 @@ export function PluginsDropdown({
                   )}
                   {groupModels.length > 0 && (
                     <button
-                      onClick={() => setGroupModels(activeConvId, [])}
+                      onClick={() => { setPersonaFor(null); setGroupModels(activeConvId, []) }}
                       className="w-full px-2 py-1 rounded text-left text-[0.55rem] text-gray-500 hover:bg-gray-50 dark:hover:bg-white/[0.04] hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
                     >
                       Turn off

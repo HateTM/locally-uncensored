@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { useChatStore } from '../../stores/chatStore'
+import { useSettingsStore } from '../../stores/settingsStore'
+import { groupSpeakers } from '../../lib/group-chat'
 import { useAutoScroll } from '../../hooks/useAutoScroll'
 import { MessageBubble } from './MessageBubble'
 import { WorkingAnchor } from './WorkingAnchor'
@@ -71,6 +73,16 @@ export function MessageList({ isGenerating, isThisChatGenerating, isLoadingModel
     if (!s.activeConversationId) return undefined
     return s.conversations.find((c) => c.id === s.activeConversationId)
   })
+
+  // Group chat: who speaks as which persona (3.0.5). Resolved once for the
+  // list, so each bubble gets a plain string and stays memoised.
+  const personas = useSettingsStore((s) => s.personas)
+  const groupModels = conversation?.groupModels
+  const groupPersonas = conversation?.groupPersonas
+  const speakers = useMemo(
+    () => groupSpeakers(groupModels ?? [], groupPersonas, personas),
+    [groupModels, groupPersonas, personas],
+  )
 
   const lastMessage = conversation?.messages[conversation.messages.length - 1]
   // The approval id is part of the scroll trigger (G31): a run waiting for a
@@ -204,6 +216,9 @@ export function MessageList({ isGenerating, isThisChatGenerating, isLoadingModel
                 pendingApprovalId={pendingApprovalId}
                 onApprove={onApprove}
                 onReject={onReject}
+                speakerName={message.modelId && speakers[message.modelId]?.personaPrompt !== undefined
+                  ? speakers[message.modelId].name
+                  : undefined}
               />
               )}
               {compactAt.get(message.id)?.map((record) => (

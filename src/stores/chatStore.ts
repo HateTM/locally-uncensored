@@ -6,6 +6,7 @@ import type { AgentBlock } from '../types/agent-mode'
 import { clampSampling, type SamplingOverrides } from '../lib/sampling'
 import { idbStorage } from '../lib/idbStorage'
 import { externalizeConversations, hasInlineImages } from '../lib/chat-attachments'
+import { FILE_ONLY_TEXT } from '../lib/chat-files'
 import { holdBackup, releaseBackup } from '../lib/backup-hold'
 import { coalescedJSONStorage } from '../lib/coalescedStorage'
 import { migrateBlockInPlace } from '../api/agents/block-helpers'
@@ -142,6 +143,9 @@ interface ChatState {
   resetConversationSampling: (id: string) => void
   /** Group chat v1: the models that answer in turn (capped at 4). */
   setGroupModels: (id: string, models: string[]) => void
+  /** Group chat: the persona ONE participant speaks as in this chat, or
+   *  `null` to let it follow the chat's own persona setting again. */
+  setGroupPersona: (id: string, model: string, personaId: string | null) => void
   /** Write the model the open chat is actually running on.
    *
    *  Befund 4 of the abnahme counter-check (2026-08-29): switching the model
@@ -295,6 +299,19 @@ const CODEX_DEFAULT_TITLE = 'Coding Agent'
  * vergessener Fall, und code-sessions-heissen-verschieden.test.ts haelt sie
  * fest, damit sie es bleibt.
  */
+/**
+ * The name a chat takes from its first user message.
+ *
+ * A message with attached files carries their summaries in `content`, for the
+ * model. The title comes from what the user typed, and when nothing was typed
+ * from the name of the first file, never from a hex dump.
+ */
+function titleFromMessage(message: Message): string {
+  if (!message.files?.length) return message.content.slice(0, 50)
+  const typed = (message.displayContent ?? '').trim()
+  return (typed && typed !== FILE_ONLY_TEXT ? typed : message.files[0].name).slice(0, 50)
+}
+
 function isStillDefaultTitle(title: string): boolean {
   return title === NEW_CHAT_TITLE || title === CODEX_DEFAULT_TITLE
 }
@@ -412,9 +429,34 @@ export const useChatStore = create<ChatState>()(
 
       setGroupModels: (id, models) =>
         set((state) => ({
-          conversations: state.conversations.map((c) =>
-            c.id === id ? { ...c, groupModels: models.slice(0, 4), updatedAt: Date.now() } : c
-          ),
+          conversations: state.conversations.map((c) => {
+            if (c.id !== id) return c
+            const groupModels = models.slice(0, 4)
+            const next = { ...c, groupModels, updatedAt: Date.now() }
+            // A model that left the group takes its persona pick with it, so
+            // the pick does not come back as a surprise when the model is
+            // added again weeks later.
+            const kept = Object.entries(c.groupPersonas ?? {}).filter(([model]) => groupModels.includes(model))
+            if (kept.length > 0) next.groupPersonas = Object.fromEntries(kept)
+            else delete next.groupPersonas
+            return next
+          }),
+        })),
+
+      setGroupPersona: (id, model, personaId) =>
+        set((state) => ({
+          conversations: state.conversations.map((c) => {
+            if (c.id !== id) return c
+            const personas = { ...(c.groupPersonas ?? {}) }
+            if (personaId) personas[model] = personaId
+            else delete personas[model]
+            const next = { ...c, updatedAt: Date.now() }
+            // No pick left: the field goes, so the chat is stored exactly as a
+            // group from before this feature.
+            if (Object.keys(personas).length > 0) next.groupPersonas = personas
+            else delete next.groupPersonas
+            return next
+          }),
         })),
 
       setActiveConversationModel: (model) =>
@@ -452,7 +494,7 @@ export const useChatStore = create<ChatState>()(
                 updatedAt: Date.now(),
                 title:
                   isStillDefaultTitle(c.title) && message.role === 'user'
-                    ? message.content.slice(0, 50)
+                    ? titleFromMessage(message)
                     : c.title,
               }
               : c

@@ -87,7 +87,7 @@ describe('where the line comes and goes', () => {
     const show = chat.indexOf("show('agent-for-local-files', LOCAL_FILES_NOTICE)")
     expect(show).toBeGreaterThan(0)
     expect(chat).toContain('if (asksForLocalFiles(content)) {')
-    expect(show).toBeGreaterThan(chat.indexOf('return sendAgentMessage(content, images)'))
+    expect(show).toBeGreaterThan(chat.indexOf('return sendAgentMessage(content, images, { files })'))
     expect(show).toBeLessThan(chat.indexOf('resolveChatToolRoute(content'))
   })
 
@@ -95,7 +95,8 @@ describe('where the line comes and goes', () => {
     const agentBranch = chat.indexOf('useAgentModeStore.getState().isActive(store.activeConversationId)')
     const dismiss = chat.indexOf("dismiss('agent-for-local-files')")
     expect(dismiss).toBeGreaterThan(agentBranch)
-    expect(dismiss).toBeLessThan(chat.indexOf('return sendAgentMessage(content, images)'))
+    expect(chat).toContain('return sendAgentMessage(content, images, { files })')
+    expect(dismiss).toBeLessThan(chat.indexOf('return sendAgentMessage(content, images, { files })'))
   })
 
   it('turning Agent on takes it away, in a new agent chat and in this one', () => {
