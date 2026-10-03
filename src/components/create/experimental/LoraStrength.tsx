@@ -6,7 +6,8 @@ import {
 } from '../../../lib/lora-strength'
 
 interface Props {
-  /** The LoRA file this strength belongs to, for the field's accessible name. */
+  /** The LoRA this strength belongs to, as its row names it (a file name or
+   *  a catalogue name), for the field's accessible name. */
   name: string
   value: number
   onChange: (v: number) => void

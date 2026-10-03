@@ -121,6 +121,36 @@ test('a Z-Image character on an SDXL checkpoint says so and is not counted', asy
   await expect(row.locator('xpath=..').getByRole('slider')).toHaveCount(0)
 })
 
+// Found on 2026-10-03: after the download of the MiniMax H3 Turbo LoRA the
+// stack offered it on the image model Z-Image too, with its long file name
+// cut off. A LoRA from the catalogue is listed where its family runs, under
+// its catalogue name.
+const H3_TURBO = 'minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors'
+const PIXEL = 'pixel-art-xl.safetensors'
+
+test('Z-Image is not offered the MiniMax H3 turbo LoRA or the SDXL LoRA from the catalogue', async ({ page }) => {
+  await bootWithFakeComfy(page, [STYLE, H3_TURBO, PIXEL, CHAR], 'z_image_turbo_bf16.safetensors')
+  await openStack(page)
+  await expect(page.getByRole('button', { name: /film_grain_xl/ })).toBeVisible()
+  await expect(page.getByRole('button', { name: /char_mira_zimage/ })).toBeVisible()
+  await expect(page.getByText(/minimax_h3/i)).toHaveCount(0)
+  await expect(page.getByText(/MiniMax H3 Turbo LoRA/)).toHaveCount(0)
+  await expect(page.getByText(/Pixel Art XL/)).toHaveCount(0)
+})
+
+test('an SDXL checkpoint is offered Pixel Art XL under its catalogue name, and the run gets the file name', async ({ page }) => {
+  await bootWithFakeComfy(page, [STYLE, H3_TURBO, PIXEL], 'juggernautXL.safetensors')
+  await openStack(page)
+  const row = page.getByRole('button', { name: /Pixel Art XL · SDXL LoRA/ })
+  await expect(row).toBeVisible()
+  await expect(row).toHaveAttribute('title', PIXEL)
+  await expect(page.getByText(/MiniMax H3 Turbo LoRA/)).toHaveCount(0)
+  await row.click()
+  await expect(page.getByText('· 1 active')).toBeVisible()
+  await expect(page.getByRole('textbox', { name: 'Strength of Pixel Art XL · SDXL LoRA' })).toHaveValue('0.80')
+  await expect.poll(() => saved(page)).toEqual([{ name: PIXEL, strength: 0.8 }])
+})
+
 test('a render that left a LoRA out says so under the result', async ({ page }) => {
   // Gegenprobe 8 (02.10.): the "Skipping LoRA" progress line was gone a
   // second later, so the picture looked as if the style had been applied.

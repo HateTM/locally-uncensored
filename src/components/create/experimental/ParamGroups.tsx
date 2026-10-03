@@ -17,7 +17,7 @@ import { Button } from '../ui/Button'
 import { Tooltip } from '../ui/Tooltip'
 import { cn } from '../ui/cn'
 import { HINWEIS_TEXT } from '../../../lib/hinweis'
-import { lorasForRun, loraFitsModel } from '../../../lib/lora-stack'
+import { lorasForRun, loraRows } from '../../../lib/lora-stack'
 import { LoraStrength } from './LoraStrength'
 import { supportsTransparent } from '../../../lib/transparent-image'
 import { QWEN_ENCODER_HELP, pickQwenEncoder, qwenEncoderOptions, type QwenEncoderVariant } from '../../../lib/render/qwen-text-encoder'
@@ -67,6 +67,7 @@ export function ParamGroups() {
   const laneModel = isVideo ? s.videoModel : s.imageModel
   const laneType = (isVideo ? s.videoModelList : s.imageModelList).find((m) => m.name === laneModel)?.type ?? classifyModel(laneModel)
   const activeLoras = lorasForRun(s.selectedLoras, loraList, laneType).use.length
+  const stackRows = loraRows(loraList, s.selectedLoras, laneType)
 
   // On cloud the worker only honours steps for images and guidance_scale for
   // the flux family — hide the sliders elsewhere rather than show a dead
@@ -320,22 +321,27 @@ export function ParamGroups() {
             </div>
             {loraList.length === 0 ? (
               <div className="t-control text-gray-600">No LoRAs found yet. Drop .safetensors files into ComfyUI&apos;s models/loras folder and hit Rescan. Characters trained in Character Studio land there automatically.</div>
+            ) : stackRows.length === 0 ? (
+              <div className="t-control text-gray-600">The LoRAs in models/loras are made for other models. Pick the model they belong to, or drop in a LoRA for this one and hit Rescan.</div>
             ) : (
             <div className="space-y-1 max-h-44 overflow-y-auto scrollbar-thin">
               {/* Gegenprobe 8 (02.10.): "Z-Image only" showed only after a
-                  click, and the strength had no number next to it. */}
-              {loraList.map((name) => {
+                  click, and the strength had no number next to it.
+                  03.10.: the H3 turbo LoRA was offered on an image model, and
+                  its file name was cut off. A LoRA from the catalogue is
+                  listed where its family runs, under its catalogue name, with
+                  the file name as the tooltip (lib/lora-stack.ts). */}
+              {stackRows.map(({ name, label, file, fits, familyLabel }) => {
                 const active = s.selectedLoras.find((l) => l.name === name)
-                const fits = loraFitsModel(name, laneType)
                 return (
                   <div key={name} className={cn('rounded-md border transition-colors', active ? 'border-white/15 bg-white/[0.06]' : 'border-white/[0.06]')}>
-                    <button onClick={() => s.toggleLora(name)} className="w-full flex items-center justify-between px-2.5 py-1.5 t-control text-left text-gray-300">
-                      <span className="truncate">{name.replace(/\.safetensors$/, '')}</span>
-                      <span className={cn('t-mono', active && fits ? 'text-emerald-400' : 'text-gray-600')}>{fits ? (active ? 'on' : 'off') : 'Z-Image only'}</span>
+                    <button onClick={() => s.toggleLora(name)} title={file} className="w-full flex items-center justify-between gap-2 px-2.5 py-1.5 t-control text-left text-gray-300">
+                      <span className="truncate">{label}</span>
+                      <span className={cn('t-mono shrink-0', active && fits ? 'text-emerald-400' : 'text-gray-600')}>{fits ? (active ? 'on' : 'off') : `${familyLabel} only`}</span>
                     </button>
                     {active && fits && (
                       <div className="px-2.5 pb-2">
-                        <LoraStrength name={name} value={active.strength} onChange={(v) => s.setLoraStrengthFor(name, v)} />
+                        <LoraStrength name={label} value={active.strength} onChange={(v) => s.setLoraStrengthFor(name, v)} />
                       </div>
                     )}
                   </div>

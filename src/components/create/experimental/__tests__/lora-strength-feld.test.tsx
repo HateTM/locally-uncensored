@@ -130,7 +130,9 @@ describe('the slider next to it', () => {
 describe('the LoRA stack', () => {
   it('draws this control for every active LoRA and writes into the store per name', () => {
     const src = readFileSync(resolve(__dirname, '..', 'ParamGroups.tsx'), 'utf8')
-    expect(src).toMatch(/<LoraStrength name=\{name\} value=\{active\.strength\} onChange=\{\(v\) => s\.setLoraStrengthFor\(name, v\)\} \/>/)
+    // The field is named after what the row reads (a catalogue LoRA shows its
+    // catalogue name), the store is written under the file name.
+    expect(src).toMatch(/<LoraStrength name=\{label\} value=\{active\.strength\} onChange=\{\(v\) => s\.setLoraStrengthFor\(name, v\)\} \/>/)
     // The old slider that stopped at 2 is gone, not kept beside it.
     expect(src).not.toMatch(/label="Strength"/)
   })
