@@ -58,6 +58,11 @@ const FIT_MARK_COLOR = 'text-gray-500 dark:text-gray-600'
 
 const TEASER_PREFIX = 'lu-cloud-teaser:'
 const TEASER_ROWS = 4
+/** The heading over the hosted rows at the end of the local picker. The list
+ *  draws a heading only where the group changes, so rows without one ran on
+ *  under "Older models" (the box, 03.10.2026). A hosted model is not an older
+ *  one, with or without a tier from the server. */
+export const CLOUD_GROUP = 'LU Cloud'
 
 // Badge-aware model picker (replaces the raw <select>). Local backend lists
 // the installed checkpoints; the cloud backend lists the hosted catalog
@@ -240,6 +245,7 @@ function LocalModelChip() {
         label: m.label,
         sublabel: modelCostHint(m, 'generate'),
         badge: CLOUD_BADGE,
+        group: CLOUD_GROUP,
       })
     }
   }

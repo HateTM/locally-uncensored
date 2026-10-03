@@ -18,6 +18,10 @@ import { ModelChip } from '../ModelChip'
 import { useCreateStore } from '../../../../stores/createStore'
 import { OLDER_GROUP } from '../../../../lib/render/model-tier'
 import { classifyModel, type ClassifiedModel } from '../../../../api/comfyui'
+import { useCloudCatalogStore } from '../../../../stores/cloudCatalogStore'
+import { useSettingsStore } from '../../../../stores/settingsStore'
+import { neuerServer, alterServer } from '../../../../lib/render/__tests__/fixtures/test-catalogs'
+import { CLOUD_GROUP } from '../ModelChip'
 
 const model = (name: string): ClassifiedModel =>
   ({ name, type: classifyModel(name), folder: 'checkpoints' }) as unknown as ClassifiedModel
@@ -92,4 +96,47 @@ describe('lokaler Videowaehler', () => {
     expect(zeilen.filter((z) => z.davor === OLDER_GROUP)).toHaveLength(1)
     expect(zeilen).toHaveLength(4)
   })
+})
+
+// The box, 03.10.2026: the hosted models at the end of the local picker stood
+// under "Older models". They carry no group, and the list draws a heading only
+// where the group changes, so they ran on under the last heading. They have a
+// heading of their own now, whether the server sends a tier or not.
+describe('the hosted models at the end of the local picker', () => {
+  function cloudRows() {
+    render(<ModelChip />)
+    fireEvent.click(screen.getByRole('button'))
+    const liste = document.querySelector('.lu-elevated') as HTMLElement
+    const rows = Array.from(liste.querySelectorAll('button'))
+    // Each row is a wrapper holding an optional heading and the button. The
+    // heading a row stands under is the nearest one above it.
+    const headingOf = (b: Element) => {
+      for (let row: Element | null = b.parentElement; row; row = row.previousElementSibling) {
+        const head = row.querySelector(':scope > div')
+        if (head) return head.textContent ?? ''
+      }
+      return ''
+    }
+    return rows
+      .filter((b) => Array.from(b.querySelectorAll('span')).some((sp) => sp.textContent === 'Cloud'))
+      .map((b) => headingOf(b))
+  }
+
+  it.each([['a server with tiers', neuerServer], ['an older server without tiers', alterServer]])(
+    'stand under their own heading, not under "Older models" (%s)',
+    (_name, catalog) => {
+      useSettingsStore.getState().updateSettings({ cloudTeasersEnabled: true })
+      useCloudCatalogStore.setState({ models: catalog() })
+      useCreateStore.setState({
+        backend: 'local',
+        imageModelList: [model('z_image_turbo_bf16.safetensors'), model('Juggernaut-XL_v9_RunDiffusionPhoto_v2.safetensors')],
+      })
+      useCreateStore.getState().setIntent('image')
+      const headings = cloudRows()
+      expect(headings.length).toBeGreaterThan(0)
+      expect(CLOUD_GROUP).toBe('LU Cloud')
+      for (const h of headings) expect(h).toBe(CLOUD_GROUP)
+      expect(screen.getAllByText(OLDER_GROUP)).toHaveLength(1)
+    },
+  )
 })
