@@ -16,7 +16,7 @@
  *
  * Run: npx vitest run src/api/__tests__/vram-handoff.test.ts
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -102,6 +102,7 @@ vi.mock('../comfyui-ws', () => ({
 
 import { decideUnload, vramHandoffGenerate, pollGone, resolveClip, resolveModelName, resolveI2VResolution, comfyErrorHint, requestGenerationCancel, resolveTunables, __resetGenerationStateForTests } from '../vram-handoff'
 import { useSettingsStore } from '../../stores/settingsStore'
+import { useCreateStore } from '../../stores/createStore'
 import type { ModelCapabilities } from '../comfyui-nodes'
 
 const GB = 1024 * 1024 * 1024
@@ -1039,5 +1040,28 @@ describe('vramHandoffGenerate — what the image tool builds', () => {
     const [params, type] = built()
     expect(type).toBe('zimage')
     expect(params.modelParts).toEqual({ textEncoder: false, vae: false })
+  })
+
+  // Qwen-Image 2.1 with both editions of its text encoder installed: the
+  // picture made in chat reads the prompt with the one picked in Create.
+  describe('the Qwen-Image 2.1 text encoder picked in Create', () => {
+    const QWEN = { name: 'qwen_image_2.1_int8_convrot.safetensors', type: 'qwenimage', source: 'diffusion_model' }
+    afterEach(() => { useCreateStore.setState({ qwenTextEncoder: 'auto' }) })
+
+    it('the edition without refusals is handed to the builder', async () => {
+      useCreateStore.setState({ qwenTextEncoder: 'unfiltered' })
+      getImageModels.mockResolvedValue([QWEN])
+      await vramHandoffGenerate('image', { prompt: 'a lighthouse at dusk' })
+      const [params, type] = built()
+      expect(type).toBe('qwenimage')
+      expect(params.model).toBe(QWEN.name)
+      expect(params.qwenTextEncoder).toBe('unfiltered')
+    })
+
+    it('COUNTER-CHECK: with nothing picked no pick is sent, the builder takes the official one first', async () => {
+      getImageModels.mockResolvedValue([QWEN])
+      await vramHandoffGenerate('image', { prompt: 'a lighthouse at dusk' })
+      expect('qwenTextEncoder' in built()[0]).toBe(false)
+    })
   })
 })

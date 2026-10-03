@@ -20,6 +20,7 @@ import { HINWEIS_TEXT } from '../../../lib/hinweis'
 import { lorasForRun, loraFitsModel } from '../../../lib/lora-stack'
 import { LoraStrength } from './LoraStrength'
 import { supportsTransparent } from '../../../lib/transparent-image'
+import { QWEN_ENCODER_HELP, pickQwenEncoder, qwenEncoderOptions, type QwenEncoderVariant } from '../../../lib/render/qwen-text-encoder'
 import { MAX_SHOTS, MAX_SHOT_CHARS, supportsMultishot } from '../../../lib/ltx-multishot'
 
 // Video families whose dynamic-workflow strategy actually wires a LoRA node:
@@ -92,6 +93,13 @@ export function ParamGroups() {
   // Transparent background: local Qwen-Image 2.1 text-to-image only, the one
   // model family whose VAE writes an alpha channel (lib/transparent-image.ts).
   const showTransparent = !isCloud && !isVideo && meta.id === 'image' && !isMlxLocal && supportsTransparent(laneType)
+
+  // Text encoder: a local Qwen-Image 2.1 with both editions of its encoder
+  // installed, the official one and the one without refusals. Here, in the
+  // Expert section, the user says which one reads the prompt. With one
+  // edition installed there is nothing to choose and no row.
+  const encoderOptions = !isCloud && !isVideo && !isMlxLocal && laneType === 'qwenimage' ? qwenEncoderOptions(s.textEncoderList) : []
+  const activeEncoder = pickQwenEncoder(s.textEncoderList, s.qwenTextEncoder)?.variant
 
   // Shots: LTX 2.5 can cut between several shots in one run, with the same
   // figure (lib/ltx-multishot.ts). Local text-to-video on that model only.
@@ -341,6 +349,11 @@ export function ParamGroups() {
         {!isCloud && !isVideo && (
           <Field label="VAE" help="Override the checkpoint's built-in VAE. 'auto' lets the checkpoint decide.">
             <Select size="sm" options={vaes.map((v) => ({ value: v, label: v }))} value={s.selectedVae} onChange={s.setSelectedVae} />
+          </Field>
+        )}
+        {encoderOptions.length > 0 && activeEncoder && (
+          <Field label="Text encoder" help={QWEN_ENCODER_HELP}>
+            <Select size="sm" ariaLabel="Text encoder" options={encoderOptions.map((o) => ({ value: o.id, label: o.label }))} value={activeEncoder} onChange={(v) => s.setQwenTextEncoder(v as QwenEncoderVariant)} />
           </Field>
         )}
         {!isCloud && !isVideo && (

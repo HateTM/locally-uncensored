@@ -1102,6 +1102,9 @@ export function useCreate() {
         ...(selectedVae && selectedVae !== 'auto' ? { vae: selectedVae } : {}),
         ...(clipSkip > 0 ? { clipSkip } : {}),
         ...(listedModel?.parts ? { modelParts: listedModel.parts } : {}),
+        // Qwen-Image 2.1: the text encoder picked in the advanced settings.
+        // The builder reads it for that family only.
+        ...(state.qwenTextEncoder !== 'auto' ? { qwenTextEncoder: state.qwenTextEncoder } : {}),
       }
 
       let workflow: ComfyApiGraph = {}

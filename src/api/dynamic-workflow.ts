@@ -853,7 +853,7 @@ export async function buildDynamicWorkflow(
       }
     } else {
       try {
-        clip = await findMatchingCLIP(type, params.model)
+        clip = await findMatchingCLIP(type, params.model, params.qwenTextEncoder)
       } catch (clipErr) {
         if (!carriesClip) {
           const message = clipErr instanceof Error ? clipErr.message : 'Required text encoder not found in ComfyUI.'

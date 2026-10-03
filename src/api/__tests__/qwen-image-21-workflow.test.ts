@@ -373,10 +373,10 @@ describe('the resolvers pick the 2.1 files, and leave Krea 2 its own', () => {
 describe('Qwen-Image 2.1 bundle', () => {
   const bundle = getImageBundles().find(b => b.workflow === 'qwenimage')
 
-  it('exists exactly once', () => {
+  it('exists exactly once, next to the one edition with the other text encoder', () => {
     // The two prompt enhancer add-ons share the family and carry no model file.
     const withModel = getImageBundles().filter(b => b.workflow === 'qwenimage' && b.files.some(f => f.subfolder === 'diffusion_models'))
-    expect(withModel).toHaveLength(1)
+    expect(withModel.map(b => b.name)).toEqual(['Qwen-Image 2.1 (Generate and Edit)', 'Qwen-Image 2.1 (No Refusals)'])
     expect(withModel[0].name).toBe(bundle!.name)
     expect(bundle).toBeDefined()
   })

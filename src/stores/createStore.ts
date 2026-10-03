@@ -36,6 +36,7 @@ import type { ModelType, ClassifiedModel } from '../api/comfyui'
 import { MAX_SHOTS, MAX_SHOT_CHARS } from '../lib/ltx-multishot'
 import { clampLoraStrength, defaultLoraStrength } from '../lib/lora-strength'
 import { IMPROVE_WITH, type ImproveWith } from '../lib/render/qwen-enhancer'
+import { QWEN_ENCODER_CHOICES, type QwenEncoderChoice } from '../lib/render/qwen-text-encoder'
 import { classifyModel, hidreamSampling } from '../api/comfyui'
 import type { HiresUpscaleMethod } from '../api/hires-fix'
 import { releaseVideoBlobUrl } from '../api/mlx-video'
@@ -418,8 +419,12 @@ interface CreateState {
    *  enhancer installed (lib/render/qwen-enhancer.ts). Remembered. */
   improveWith: ImproveWith
   setImproveWith: (who: ImproveWith) => void
+  /** Which text encoder reads the prompt on a local Qwen-Image 2.1 run when
+   *  both editions are installed (lib/render/qwen-text-encoder.ts). Remembered. */
+  qwenTextEncoder: QwenEncoderChoice
+  setQwenTextEncoder: (which: QwenEncoderChoice) => void
   /** Runtime-only: the text encoder files ComfyUI lists, read with the model
-   *  lists. The switch finds the installed prompt enhancers in it. */
+   *  lists. The prompt enhancers and the Qwen-Image 2.1 encoders are found in it. */
   textEncoderList: string[]
   setTextEncoderList: (list: string[]) => void
   /** Runtime-only: the LOCAL model picked inside a specialized lane (ACE
@@ -744,6 +749,7 @@ export const useCreateStore = create<CreateState>()(
       cloudImageCount: 1,
       improvePrompt: false,
       improveWith: 'auto' as ImproveWith,
+      qwenTextEncoder: 'auto' as QwenEncoderChoice,
       textEncoderList: [] as string[],
       transparentBackground: false,
       videoShots: [],
@@ -1014,6 +1020,7 @@ export const useCreateStore = create<CreateState>()(
       setCloudImageCount: (count) => set({ cloudImageCount: clampImageCount(count) }),
       setImprovePrompt: (on) => set({ improvePrompt: on === true }),
       setImproveWith: (who) => set({ improveWith: IMPROVE_WITH.includes(who) ? who : 'auto' }),
+      setQwenTextEncoder: (which) => set({ qwenTextEncoder: QWEN_ENCODER_CHOICES.includes(which) ? which : 'auto' }),
       setTextEncoderList: (list) => set({ textEncoderList: list }),
       setVideoShotCount: (count) => set((st) => {
         const further = Math.max(1, Math.min(MAX_SHOTS, Math.floor(count) || 1)) - 1
@@ -1289,6 +1296,7 @@ export const useCreateStore = create<CreateState>()(
         musicHowtoSeen: state.musicHowtoSeen,
         improvePrompt: state.improvePrompt,
         improveWith: state.improveWith,
+        qwenTextEncoder: state.qwenTextEncoder,
         transparentBackground: state.transparentBackground,
         triggerWord: state.triggerWord,
         trainSteps: state.trainSteps,

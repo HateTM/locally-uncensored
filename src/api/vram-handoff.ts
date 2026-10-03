@@ -1289,11 +1289,17 @@ async function generateImage(
       inputImage = (await resolveInputImage(args.inputImage)).name
       denoise = clampFloat(args.denoise, 0.6, 0.05, 1.0)
     }
+    // Qwen-Image 2.1: the agent loads the text encoder the user picked in
+    // Create's advanced settings, so a picture made in chat reads the prompt
+    // with the same one.
+    const { useCreateStore } = await import('../stores/createStore')
+    const qwenTextEncoder = useCreateStore.getState().qwenTextEncoder
     const workflow = await buildDynamicWorkflow(
       {
         prompt,
         negativePrompt: typeof args.negativePrompt === 'string' ? args.negativePrompt : '',
         model,
+        ...(qwenTextEncoder !== 'auto' ? { qwenTextEncoder } : {}),
         sampler: tun.sampler,
         scheduler: tun.scheduler,
         steps: tun.steps,

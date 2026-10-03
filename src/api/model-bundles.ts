@@ -86,6 +86,31 @@ export interface DiscoverModel {
   sha256?: string
 }
 
+// The two Qwen-Image 2.1 files that both of its bundles load, the official one
+// and the one with the text encoder without refusals: the image model and the
+// VAE. One entry each, so the two bundles can never drift apart and a machine
+// that has one bundle does not fetch these again for the other. Byte counts
+// and SHA-256 are the Hugging Face LFS values of Comfy-Org/Qwen-Image-2.1,
+// read on 2026-10-03.
+const QWEN21_DIFFUSION_MODEL: DiscoverModel = {
+  name: 'Qwen-Image 2.1 (INT8)',
+  description: 'Diffusion model · generates and edits, native 2K, transparent backgrounds.',
+  pulls: '', tags: ['Diffusion Model', '7.26 GB'], updated: 'New',
+  downloadUrl: 'https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/diffusion_models/qwen_image_2.1_int8_convrot.safetensors',
+  filename: 'qwen_image_2.1_int8_convrot.safetensors', subfolder: 'diffusion_models', sizeGB: 6.76,
+  sizeBytes: 7256783064,
+  sha256: 'cb74113cb03faecd79611b01fd7fd642f0aa60d6f0b95086abee214d75eaa57d',
+}
+const QWEN21_VAE: DiscoverModel = {
+  name: 'Qwen-Image 2.1 VAE',
+  description: 'Required autoencoder for Qwen-Image 2.1.',
+  pulls: '', tags: ['VAE', '676 MB'], updated: '',
+  downloadUrl: 'https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/vae/qwen_image_2.1_vae_bf16.safetensors',
+  filename: 'qwen_image_2.1_vae_bf16.safetensors', subfolder: 'vae', sizeGB: 0.63,
+  sizeBytes: 675509688,
+  sha256: 'bb21f7473051e1ac368515dd3f2e15cd44d7a11748ee8823e1ddca3e4876b7c9',
+}
+
 // ─── Image Model Bundles ───
 
 export function getImageBundles(): ModelBundle[] {
@@ -372,27 +397,54 @@ export function getImageBundles(): ModelBundle[] {
       tier: 'best',
       url: 'https://huggingface.co/Comfy-Org/Qwen-Image-2.1',
       files: [
-        {
-          name: 'Qwen-Image 2.1 (INT8)',
-          description: 'Diffusion model · generates and edits, native 2K, transparent backgrounds.',
-          pulls: '', tags: ['Diffusion Model', '7.26 GB'], updated: 'New',
-          downloadUrl: 'https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/diffusion_models/qwen_image_2.1_int8_convrot.safetensors',
-          filename: 'qwen_image_2.1_int8_convrot.safetensors', subfolder: 'diffusion_models', sizeGB: 6.76,
-        },
+        QWEN21_DIFFUSION_MODEL,
         {
           name: 'Qwen3-VL 8B Text Encoder (INT8)',
           description: 'Required text encoder for Qwen-Image 2.1 prompt understanding.',
           pulls: '', tags: ['Text Encoder', '9.35 GB'], updated: 'New',
           downloadUrl: 'https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/text_encoders/qwen3vl_8b_int8_convrot.safetensors',
           filename: 'qwen3vl_8b_int8_convrot.safetensors', subfolder: 'text_encoders', sizeGB: 8.71,
+          sizeBytes: 9350798360,
+          sha256: '8bfd0f6e12abf2d2d697ecc888e5e90b0d6741d6708f05799f53afa560452e8f',
         },
+        QWEN21_VAE,
+      ],
+    },
+    // Qwen-Image 2.1 with the community text encoder that has its refusals
+    // removed. Read off the model card on 2026-10-03
+    // (pottokao/Qwen-Image-2.1-Text-Encoder-Heretic-int8-convrot, Apache 2.0):
+    // a Heretic directional ablation of Qwen/Qwen3-VL-8B-Instruct, the model
+    // Qwen-Image 2.1 uses as its text encoder, on o_proj and down_proj; the
+    // card states that only the text encoder is modified and that the file
+    // has the tensor names and the INT8 ConvRot layout of the official one,
+    // so the stock CLIPLoader loads it. The image model and the VAE are the
+    // official files, the same entries as in the bundle above, so a machine
+    // that has that bundle fetches only the encoder. Byte count and SHA-256
+    // are the Hugging Face LFS values read on 2026-10-03; the address answers
+    // without a token. Not marked verified: no run on real hardware yet.
+    {
+      name: 'Qwen-Image 2.1 (No Refusals)',
+      description: 'Qwen-Image 2.1 with a text encoder that has its refusal direction removed by the community (Heretic). Only the text encoder differs: the image model and the VAE are the official files, shared with the official bundle and not downloaded twice. Generates from a prompt and edits a reference image from a prompt, no mask needed. With both text encoders installed, pick one under Text encoder in the Expert settings. Image model under the Qwen Research License, non-commercial use: https://huggingface.co/Qwen/Qwen-Image-2.1/blob/main/LICENSE. Text encoder under Apache 2.0.',
+      tags: ['Qwen Image 2.1', 'Image', 'Edit', '1024px'],
+      uncensored: true,
+      // 6.76 + 8.71 + 0.63, in gibibytes like the official bundle.
+      totalSizeGB: 16.1,
+      vramRequired: '16-24 GB',
+      workflow: 'qwenimage',
+      tier: 'best',
+      url: 'https://huggingface.co/pottokao/Qwen-Image-2.1-Text-Encoder-Heretic-int8-convrot',
+      files: [
+        QWEN21_DIFFUSION_MODEL,
         {
-          name: 'Qwen-Image 2.1 VAE',
-          description: 'Required autoencoder for Qwen-Image 2.1.',
-          pulls: '', tags: ['VAE', '676 MB'], updated: '',
-          downloadUrl: 'https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/vae/qwen_image_2.1_vae_bf16.safetensors',
-          filename: 'qwen_image_2.1_vae_bf16.safetensors', subfolder: 'vae', sizeGB: 0.63,
+          name: 'Qwen3-VL 8B Text Encoder, No Refusals (INT8)',
+          description: 'Text encoder for Qwen-Image 2.1 with the refusal direction removed (Heretic). From pottokao/Qwen-Image-2.1-Text-Encoder-Heretic.',
+          pulls: '', tags: ['Text Encoder', '9.35 GB'], updated: 'New',
+          downloadUrl: 'https://huggingface.co/pottokao/Qwen-Image-2.1-Text-Encoder-Heretic-int8-convrot/resolve/main/qwen3vl_8b_int8_convrot_heretic.safetensors',
+          filename: 'qwen3vl_8b_int8_convrot_heretic.safetensors', subfolder: 'text_encoders', sizeGB: 8.71,
+          sizeBytes: 9350828392,
+          sha256: 'f15ce4275428e04f42cdb59e3a253cb290cae5de99259527f01d3d2e51153653',
         },
+        QWEN21_VAE,
       ],
     },
     // The Qwen-Image 2.1 prompt enhancers (GH #148). Add-ons to the bundle

@@ -18,6 +18,7 @@ import { isRecord, asString, asRecordArray } from '../types/json-guards'
 // jetzt in model-bundles.ts, das beide Seiten statisch lesen.
 import { getImageBundles, getVideoBundles } from './model-bundles'
 import { isQwenEnhancerFile } from '../lib/render/qwen-enhancer'
+import { pickQwenEncoder, qwenEncoderFile, type QwenEncoderChoice } from '../lib/render/qwen-text-encoder'
 import { COMPONENT_REGISTRY, type ComponentSpec } from './component-registry'
 
 // ─── Control-plane fetch timeouts ───
@@ -65,6 +66,10 @@ export interface GenerateParams {
   /** Qwen-Image 2.1 text-to-image only: ask for an RGBA picture with a
    *  transparent background (lib/transparent-image.ts). Ignored elsewhere. */
   transparent?: boolean
+  /** Qwen-Image 2.1 only: which installed text encoder reads the prompt, the
+   *  official one or the edition without refusals
+   *  (lib/render/qwen-text-encoder.ts). Ignored elsewhere. */
+  qwenTextEncoder?: QwenEncoderChoice
   // Local Edit (mask inpaint): ComfyUI /upload/image filename of the painted
   // mask (white = repaint). With inputImage set this selects the inpaint
   // pipeline (VAEEncodeForInpaint / InpaintModelConditioning) on the
@@ -1584,11 +1589,11 @@ function isQwenImage21Vae(name: string): boolean {
   return /qwen[._-]?image[._-]?2[._-]?1/.test(name.toLowerCase())
 }
 
-/** Qwen-Image 2.1's text encoder tier (Qwen3-VL 8B). Krea 2 uses the 4B
- *  sibling under a near-identical name, and the two have different embedding
- *  dimensions. */
+/** Qwen-Image 2.1's text encoder tier (Qwen3-VL 8B), official or with the
+ *  refusals removed. Krea 2 uses the 4B sibling under a near-identical name,
+ *  and the two have different embedding dimensions. */
 function isQwen3vl8b(name: string): boolean {
-  return /qwen3[._-]?vl[._-]?8b/.test(name.toLowerCase())
+  return qwenEncoderFile(name) !== null
 }
 
 /** MiniMax H3's own encoder (qwen3vl_32b_minimax_h3_*). It is a Qwen3-VL file
@@ -1817,8 +1822,10 @@ export async function findMiniMaxAudioVAE(): Promise<string> {
  *   the full-precision Qwen encoder. When omitted (legacy callers), we
  *   fall back to the full-precision variant, which is what most users
  *   want.
+ * @param qwenTextEncoder Qwen-Image 2.1 only: the edition the user picked in
+ *   the advanced settings. Omitted, the official one goes first.
  */
-export async function findMatchingCLIP(modelType: ModelType, activeModelName?: string): Promise<string> {
+export async function findMatchingCLIP(modelType: ModelType, activeModelName?: string, qwenTextEncoder?: QwenEncoderChoice): Promise<string> {
   // The Qwen-Image 2.1 prompt enhancers sit in the same folder and carry
   // "qwen" in their names, but they are text models, not encoders. Without
   // this they answer the loose "qwen" searches below (HunyuanVideo, FramePack,
@@ -1869,8 +1876,10 @@ export async function findMatchingCLIP(modelType: ModelType, activeModelName?: s
     // to the 8B tier with no fallback: Krea 2's 4B sibling sits in the same
     // folder under a near-identical name and has different embedding
     // dimensions, so a fallback would load silently and encode nonsense.
-    const match = clips.find(c => isQwen3vl8b(c))
-    if (match) return match
+    // Two editions can sit side by side, the official one and the one
+    // without refusals; the advanced settings say which one reads the prompt.
+    const match = pickQwenEncoder(clips, qwenTextEncoder)
+    if (match) return match.file
     throw new Error(`No Qwen-Image 2.1 text encoder found. Download "qwen3vl_8b_int8_convrot.safetensors" from the Model Manager.`)
   }
   if (modelType === 'krea2') {
