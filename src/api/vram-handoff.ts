@@ -2207,7 +2207,23 @@ let _renderJuggle: Promise<unknown> = Promise.resolve()
 let _renderEpoch = 0
 let _pendingRestore: RenderEviction | null = null
 let _restoreHolds = 0
+/** True while a restore is past its grace window and is reloading the chat
+ *  backends. An eviction that arrives now has to wait for that reload. */
+let _restoreInFlight = false
 export const RENDER_RESTORE_GRACE_MS = 2_000
+
+/**
+ * What the eviction is doing, for the waiting line of the run.
+ *
+ * Measured on the Windows box, 03.10.2026 (RTX 3060, LM Studio as the chat
+ * backend, a 6 GB chat model): the eviction itself is quick, 0.3 s for
+ * offload_local_models and 0.5 s for the LM Studio unload. The 25 to 30 s the
+ * stage stood on "Preparing workflow..." were the step before it: the previous
+ * render's restore was still reading the chat model back in, and an eviction
+ * waits its turn on the same chain, so the model is loaded completely and then
+ * unloaded again. The line now says which of the two is going on.
+ */
+export type RenderEvictionPhase = 'waiting-for-chat-model' | 'freeing'
 
 /** Test-only: reset the render-juggle chain state between unit tests. */
 export function __resetRenderJuggleForTests(): void {
@@ -2215,6 +2231,7 @@ export function __resetRenderJuggleForTests(): void {
   _renderEpoch = 0
   _pendingRestore = null
   _restoreHolds = 0
+  _restoreInFlight = false
 }
 
 function mergeEvictions(base: RenderEviction | null, add: RenderEviction): RenderEviction {
@@ -2229,11 +2246,16 @@ function mergeEvictions(base: RenderEviction | null, add: RenderEviction): Rende
 /**
  * Free the GPU for a Create-tab render, remembering what was evicted so
  * restoreChatBackendsAfterRender can bring it back. Never throws; a failed
- * probe just means that backend is not in the haul.
+ * probe just means that backend is not in the haul. `onPhase` is told what
+ * the wait is spent on (RenderEvictionPhase).
  */
-export function evictChatBackendsForRender(): Promise<RenderEviction> {
+export function evictChatBackendsForRender(onPhase?: (phase: RenderEvictionPhase) => void): Promise<RenderEviction> {
   _renderEpoch++
-  const run = _renderJuggle.catch(() => {}).then(() => evictBody())
+  if (_restoreInFlight) onPhase?.('waiting-for-chat-model')
+  const run = _renderJuggle.catch(() => {}).then(() => {
+    onPhase?.('freeing')
+    return evictBody()
+  })
   _renderJuggle = run.catch(() => {})
   return run.catch(() => ({ ...EMPTY_EVICTION }))
 }
@@ -2375,41 +2397,46 @@ async function restoreBody(evicted: RenderEviction, graceMs: number, myEpoch: nu
   // the 14B lanes), and `exclusiveVramMode: 'never'` already turns the whole
   // juggle off. Trading a render's load time against a chat model's is David's
   // call, not a fixer's.
-  try { await freeMemory() } catch { /* best effort */ }
-  if (todo.bundled) {
-    try {
-      await startBundledEngine(todo.bundled.modelPath)
-      if (todo.bundled.slotSaved) {
-        const restored = await backendCall<{ ok?: boolean }>('kv_slot_action', { port: todo.bundled.port, action: 'restore' }).catch(() => null)
-        if (restored?.ok !== true) {
-          // Non-fatal: the next turn re-processes the history, the pre-#85 cost.
-          log.warn('render_juggle.kv_restore_failed', { port: todo.bundled.port })
+  _restoreInFlight = true
+  try {
+    try { await freeMemory() } catch { /* best effort */ }
+    if (todo.bundled) {
+      try {
+        await startBundledEngine(todo.bundled.modelPath)
+        if (todo.bundled.slotSaved) {
+          const restored = await backendCall<{ ok?: boolean }>('kv_slot_action', { port: todo.bundled.port, action: 'restore' }).catch(() => null)
+          if (restored?.ok !== true) {
+            // Non-fatal: the next turn re-processes the history, the pre-#85 cost.
+            log.warn('render_juggle.kv_restore_failed', { port: todo.bundled.port })
+          }
         }
+      } catch (e) {
+        log.warn('render_juggle.bundled_reload_failed', { err: String(e instanceof Error ? e.message : e) })
       }
-    } catch (e) {
-      log.warn('render_juggle.bundled_reload_failed', { err: String(e instanceof Error ? e.message : e) })
     }
-  }
-  if (todo.ollamaModel) {
-    try {
-      await loadModel(todo.ollamaModel)
-    } catch (e) {
-      // No ComfyUI-restart recovery here on purpose: on the Create tab the
-      // user's next step is usually another render, so stopping ComfyUI to
-      // rescue a chat model would be the wrong trade. Ollama lazy-loads on
-      // the next message anyway.
-      log.warn('render_juggle.ollama_reload_failed', { model: todo.ollamaModel, err: String(e instanceof Error ? e.message : e) })
+    if (todo.ollamaModel) {
+      try {
+        await loadModel(todo.ollamaModel)
+      } catch (e) {
+        // No ComfyUI-restart recovery here on purpose: on the Create tab the
+        // user's next step is usually another render, so stopping ComfyUI to
+        // rescue a chat model would be the wrong trade. Ollama lazy-loads on
+        // the next message anyway.
+        log.warn('render_juggle.ollama_reload_failed', { model: todo.ollamaModel, err: String(e instanceof Error ? e.message : e) })
+      }
     }
-  }
-  if (todo.lms) {
-    try {
-      await backendCall('lmstudio_load_model', {
-        model: todo.lms.id,
-        ...(todo.lms.contextLength ? { contextLength: todo.lms.contextLength } : {}),
-      })
-    } catch (e) {
-      log.warn('render_juggle.lms_reload_failed', { model: todo.lms.id, err: String(e instanceof Error ? e.message : e) })
+    if (todo.lms) {
+      try {
+        await backendCall('lmstudio_load_model', {
+          model: todo.lms.id,
+          ...(todo.lms.contextLength ? { contextLength: todo.lms.contextLength } : {}),
+        })
+      } catch (e) {
+        log.warn('render_juggle.lms_reload_failed', { model: todo.lms.id, err: String(e instanceof Error ? e.message : e) })
+      }
     }
+  } finally {
+    _restoreInFlight = false
   }
   log.info('render_juggle.restored', {
     ollama: todo.ollamaModel,

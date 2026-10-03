@@ -285,12 +285,72 @@ describe('holdRenderRestore: a run of several renders restores once, at its end'
   })
 })
 
+// The box, 03.10.2026: 25 to 30 s under "Preparing workflow..." before a run.
+// Timed in the test build, the eviction itself took under a second; the rest
+// was the previous render's restore reading the chat model back in, which an
+// eviction has to wait for. The caller is told which of the two it is.
+describe('the eviction says what the wait is spent on', () => {
+  const LMS = { id: 'qwen/qwen2.5-vl-7b', contextLength: 4096 }
+
+  it('nothing in the way: it frees, and says so', async () => {
+    const phases: string[] = []
+    await evictChatBackendsForRender((p) => phases.push(p))
+    expect(phases).toEqual(['freeing'])
+  })
+
+  it('a restore that is reading the chat model back in: waits for it first', async () => {
+    let finishLoad: () => void = () => {}
+    const loading = new Promise<void>((resolve) => { finishLoad = resolve })
+    const base = backendCall.getMockImplementation()!
+    backendCall.mockImplementation(async (cmd: unknown, args?: unknown) => {
+      if (cmd === 'lmstudio_load_model') { await loading; return { ok: true } }
+      return base(cmd, args)
+    })
+    const restored = restoreChatBackendsAfterRender({ ollamaModel: null, lms: LMS, bundled: null } as RenderEviction, 0)
+    await vi.waitFor(() => expect(callsTo('lmstudio_load_model')).toHaveLength(1))
+
+    const phases: string[] = []
+    const next = evictChatBackendsForRender((p) => phases.push(p))
+    // Told at once, while the load is still running, and nothing is freed yet.
+    expect(phases).toEqual(['waiting-for-chat-model'])
+    expect(callsTo('offload_local_models')).toHaveLength(0)
+
+    finishLoad()
+    await restored
+    await next
+    expect(phases).toEqual(['waiting-for-chat-model', 'freeing'])
+    expect(callsTo('offload_local_models')).toHaveLength(1)
+  })
+
+  it('a restore still inside its grace window is not a wait for the chat model', async () => {
+    vi.useFakeTimers()
+    const restored = restoreChatBackendsAfterRender({ ollamaModel: null, lms: LMS, bundled: null } as RenderEviction)
+    const phases: string[] = []
+    const next = evictChatBackendsForRender((p) => phases.push(p))
+    expect(phases).toEqual([])
+    await vi.advanceTimersByTimeAsync(5_000)
+    await restored
+    await next
+    expect(phases).toEqual(['freeing'])
+    // The newer render inherited the haul: the chat model was never reloaded.
+    expect(callsTo('lmstudio_load_model')).toHaveLength(0)
+  })
+
+  it('the next eviction after a finished restore does not claim to wait', async () => {
+    await restoreChatBackendsAfterRender({ ollamaModel: null, lms: LMS, bundled: null } as RenderEviction, 0)
+    const phases: string[] = []
+    await evictChatBackendsForRender((p) => phases.push(p))
+    expect(phases).toEqual(['freeing'])
+  })
+})
+
 describe('wiring: useCreate uses the hand-off helpers', () => {
   const read = (rel: string) => fs.readFileSync(path.resolve(__dirname, rel), 'utf8')
 
   it('evicts via the helper, restores in its finally, bare offload pair is gone', () => {
     const src = read('../../hooks/useCreate.ts')
     expect(src).toContain('evictChatBackendsForRender()')
+    expect(src).toContain('renderEviction = await evictChatBackendsForRender((phase) => handoff.setLabel(HANDOFF_LINE[phase]))')
     expect(src).toContain('restoreChatBackendsAfterRender(renderEviction)')
     // The exact uncaptured kill Z36 flagged must not come back.
     expect(src).not.toContain("backendCall('offload_local_models'")

@@ -40,6 +40,7 @@ import {
   evictChatBackendsForRender,
   restoreChatBackendsAfterRender,
   type RenderEviction,
+  type RenderEvictionPhase,
 } from '../api/vram-handoff'
 import { cpuCauseSuffix } from '../lib/render-budget'
 import { backendCall } from '../api/backend'
@@ -86,6 +87,13 @@ import {
   getVideoStatus, listVideoModels, generateVideo, getVideoProgress, cancelVideo,
   buildMlxVideoModels, mlxVideoModelIdFor, readVideoAsBlobUrl,
 } from '../api/mlx-video'
+
+/** What the stage says while the graphics card is handed to the render
+ *  (api/vram-handoff, RenderEvictionPhase). */
+const HANDOFF_LINE: Record<RenderEvictionPhase, string> = {
+  'waiting-for-chat-model': 'Waiting for the chat model to finish loading...',
+  freeing: 'Freeing graphics memory...',
+}
 
 /**
  * The `[event, payload]` pairs of a `/history` status entry.
@@ -951,7 +959,6 @@ export function useCreate() {
       return
     }
 
-    setProgress(0, 'Preparing workflow...')
     abortRef.current = new AbortController()
 
     // Make VRAM room for the render. On a single local GPU a resident chat LLM
@@ -963,10 +970,20 @@ export function useCreate() {
     // is resident, saves the built-in engine's KV slot, then evicts; the
     // finally below brings everything back. exclusiveVramMode 'never' skips
     // the eviction. Best-effort, never blocks a render.
+    //
+    // The box, 03.10.2026: this wait stood for 25 to 30 s under "Preparing
+    // workflow..." with no counter. No workflow is prepared in it: the card is
+    // handed over, and most of the time goes into waiting for the previous
+    // render's restore to finish reading the chat model back in. The line
+    // says which it is and counts like every other waiting line.
     let renderEviction: RenderEviction | null = null
+    const handoff = elapsedLine((text) => setProgress(0, text), HANDOFF_LINE.freeing)
     try {
-      renderEviction = await evictChatBackendsForRender()
-    } catch { /* VRAM housekeeping is best-effort */ }
+      renderEviction = await evictChatBackendsForRender((phase) => handoff.setLabel(HANDOFF_LINE[phase]))
+    } catch { /* VRAM housekeeping is best-effort */ } finally {
+      handoff.stop()
+    }
+    setProgress(0, 'Preparing workflow...')
 
     try {
       // The Qwen prompt enhancer writes now: the chat model has left the card,
