@@ -1,13 +1,13 @@
 import { describe, it, expect } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { BundleTile } from '../ModelTiles'
-import { getImageBundles } from '../../../api/model-bundles'
+import { getImageBundles, getVideoBundles } from '../../../api/model-bundles'
 
 // October 2026, the owner's 12 GB box: the catalogue said "10-16 GB" about
 // Z-Image and the card stood five minutes in the load. The tile now compares
 // the bundle with the detected card, in the place the fit hint always had.
 
-const bundle = (name: string) => getImageBundles().find((b) => b.name === name)!
+const bundle = (name: string) => [...getImageBundles(), ...getVideoBundles()].find((b) => b.name === name)!
 
 function tile(name: string, vramGb: number | null, sharedMemory = false): string {
   return renderToStaticMarkup(
@@ -74,5 +74,22 @@ describe('a bundle tile compares itself with the detected card', () => {
     const html = tile('Krea 2 Companion Files (Text Encoder + VAE)', 12)
     expect(html).not.toContain('data-bundle-fit')
     expect(html).not.toMatch(/your 12 GB card/)
+  })
+
+  // The box, 03.10.2026: the 1.82 GB turbo LoRA read "Needs more than your
+  // 12 GB card". An add-on names what it belongs to and carries no verdict.
+  it('an add-on says what it is for instead of a verdict', () => {
+    const html = tile('MiniMax H3 Turbo LoRA · 8 Steps', 12)
+    expect(html).toContain('data-bundle-addon-for="MiniMax H3"')
+    expect(html).toContain('>For MiniMax H3<')
+    expect(html).not.toContain('data-bundle-fit')
+    expect(html).not.toMatch(/your 12 GB card/)
+    expect(tile('Pixel Art XL · SDXL LoRA', 12)).toContain('>For SDXL models<')
+  })
+
+  it('FramePack fits a 12 GB card, as its own description says', () => {
+    const html = tile('FramePack F1 (Image to Video)', 12)
+    expect(html).toContain('runs on 6 GB VRAM')
+    expect(html).toContain('Fits your 12 GB card')
   })
 })

@@ -209,7 +209,8 @@ describe('every bundle in the catalogue carries the two numbers', () => {
     ['LTX 2.5 · Small (GGUF Q4)', 16, 16, 'big big fits fits'],
     ['AnimateDiff Lightning', 6, 8, 'fits fits fits fits'],
     ['AnimateDiff v3', 6, 8, 'fits fits fits fits'],
-    ['FramePack F1 (Image to Video)', 6, 16.8, 'tight tight tight fits'],
+    // States its own comfortable value: built to run on 6 GB (see the test below).
+    ['FramePack F1 (Image to Video)', 6, 8, 'fits fits fits fits'],
     ['SVD-XT 1.1 (Image to Video)', 12, 12, 'big fits fits fits'],
     ['Mochi 1 Preview (FP8)', 16, 16, 'big big fits fits'],
     ['NVIDIA Cosmos 7B', 24, 24, 'big big big fits'],
@@ -223,6 +224,36 @@ describe('every bundle in the catalogue carries the two numbers', () => {
     ['Wan VACE 1.3B (Motion Control, light)', 8, 10, 'tight fits fits fits'],
     ['Wan 2.2 Animate Q4 (Motion Control, GGUF)', 10, 12.2, 'big tight fits fits'],
   ]
+
+  // The box, 03.10.2026: the 1.82 GB turbo LoRA read "Needs more than your
+  // 12 GB card", inherited from MiniMax H3's "24+ GB". The numbers stay (sort
+  // and size filters), the card shows what the add-on is for (ModelTiles).
+  it('the add-ons name what they belong to', () => {
+    expect(allBundles().filter((b) => b.addonFor).map((b) => [b.name, b.addonFor])).toEqual([
+      ['SDXL VAE (fp16-fix) · addon', 'SDXL models'],
+      ['Pixel Art XL · SDXL LoRA', 'SDXL models'],
+      ['MiniMax H3 Turbo LoRA · 8 Steps', 'MiniMax H3'],
+    ])
+    // Every LoRA add-on of the catalogue is one of them.
+    for (const b of getLoraAddonBundles()) expect(b.addonFor, b.name).toBeTruthy()
+  })
+
+  // The same day: FramePack's description says "runs on 6 GB VRAM", its verdict
+  // said "Tight" on 12 GB, because its 15.3 GB model is larger than the card.
+  // The model is built to run that way, and the bundle states so.
+  it('a stated comfortable value stands against the largest-weight rule', () => {
+    const framepack = allBundles().find((b) => b.name === 'FramePack F1 (Image to Video)')!
+    expect(framepack.description).toContain('runs on 6 GB VRAM')
+    expect(framepack.vramComfortStatedGB).toBe(8)
+    expect(vramFit(framepack, 12)).toBe('fits')
+    expect(vramFit(framepack, 6)).toBe('tight')
+    expect(vramFit(framepack, 4)).toBe('big')
+    // Without the statement the rule would raise it to the 15.3 GB weight.
+    expect(deriveVramNeed({ vramRequired: '6-8 GB', files: [{ sizeGB: 15.3 }] })).toEqual({ vramMinGB: 6, vramComfortGB: 16.8 })
+    expect(deriveVramNeed({ vramRequired: '6-8 GB', vramComfortStatedGB: 8, files: [{ sizeGB: 15.3 }] })).toEqual({ vramMinGB: 6, vramComfortGB: 8 })
+    // Nothing else in the catalogue claims it.
+    expect(allBundles().filter((b) => b.vramComfortStatedGB != null).map((b) => b.name)).toEqual(['FramePack F1 (Image to Video)'])
+  })
 
   it('and the table of all of them holds', () => {
     const all = allBundles()

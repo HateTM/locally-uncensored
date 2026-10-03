@@ -581,7 +581,11 @@ export function BundleTile({ bundle, lane, vramGb, sharedMemory = false, complet
   // With a detected card the tile names it and says what tight costs: the
   // owner's 12 GB box sat five minutes in a load the old "10-16 GB" never
   // announced. Shared memory has no card to name and keeps the general hint.
-  const cardLine = sharedMemory ? '' : vramFitLine(fit, vramGb)
+  // An add-on carries no verdict of its own: it says what it belongs to, and
+  // that model's card says whether it runs here. The box, 03.10.2026, read
+  // "Needs more than your 12 GB card" under the 1.82 GB H3 turbo LoRA.
+  const addonLine = bundle.addonFor ? `For ${bundle.addonFor}` : ''
+  const cardLine = sharedMemory || addonLine ? '' : vramFitLine(fit, vramGb)
   // Sizes come from the files' own byte counts, and Get names what is still
   // missing: the box, 03.10.2026, read "Get · 16.1 GB" on a card whose click
   // fetched one file of 8.7 GB, the other two being shared and already there.
@@ -609,6 +613,9 @@ export function BundleTile({ bundle, lane, vramGb, sharedMemory = false, complet
           {bundle.description && (
             <p className="t-micro text-gray-500 dark:text-gray-400 leading-snug mt-0.5 line-clamp-2">{bundle.description}</p>
           )}
+          {addonLine && (
+            <p className="mt-1.5 t-micro text-gray-500 dark:text-gray-400" data-bundle-addon-for={bundle.addonFor}>{addonLine}</p>
+          )}
           {cardLine && (
             <p
               className="flex items-center gap-1.5 mt-1.5 t-micro text-gray-500 dark:text-gray-400"
@@ -635,7 +642,7 @@ export function BundleTile({ bundle, lane, vramGb, sharedMemory = false, complet
       <div className="flex items-center gap-2 mt-2.5 min-h-[var(--control-h-sm)]">
         <SizePill bytes={plan.totalBytes} />
         <span className="text-[0.55rem] text-gray-400 dark:text-gray-500">{countLabel(bundle.files.length, 'file')}</span>
-        {!cardLine && <FitHint fit={fit} />}
+        {!cardLine && !addonLine && <FitHint fit={fit} />}
 
         <div className="flex items-center gap-1 shrink-0 ml-auto">
           {complete ? (

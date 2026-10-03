@@ -57,6 +57,13 @@ export type VramFit = 'fits' | 'tight' | 'big' | 'unknown'
 interface NeedSource {
   vramRequired?: string
   files?: readonly { sizeGB?: number }[]
+  /**
+   * The comfortable value as the model's authors state it, for a model that is
+   * built to run with most of its weights outside graphics memory. It replaces
+   * the largest-weight rule, which would call such a model tight on every card
+   * smaller than its file. Only beside a source that says so.
+   */
+  vramComfortStatedGB?: number
 }
 
 function round1(n: number): number {
@@ -80,6 +87,8 @@ export function largestWeightGb(files: readonly { sizeGB?: number }[] = []): num
  * In every case the comfortable value is raised to the largest weight plus
  * working memory, so a span whose upper end is below its own diffusion model
  * (FLUX.1 FP8: "8-10 GB" beside a 16.1 GB file) cannot call a 12 GB card a fit.
+ * The one exception is a bundle that states its comfortable value itself
+ * (`vramComfortStatedGB`): that number stands as written.
  */
 export function deriveVramNeed(source: NeedSource): VramNeed | null {
   const text = (source.vramRequired ?? '').trim()
@@ -102,6 +111,9 @@ export function deriveVramNeed(source: NeedSource): VramNeed | null {
     top = 0
   } else {
     return null
+  }
+  if (typeof source.vramComfortStatedGB === 'number') {
+    return { vramMinGB: min, vramComfortGB: source.vramComfortStatedGB }
   }
   const largest = largestWeightGb(source.files)
   const weight = largest > 0 ? round1(largest + VRAM_WORKING_GB) : 0

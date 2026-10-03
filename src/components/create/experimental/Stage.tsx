@@ -22,6 +22,8 @@ import { InstallCancelled } from '../../../lib/bundle-install'
 import { isMlxImageHost } from '../../../api/mlx-image'
 import { bundleForVideoIntent } from '../../../api/comfyui'
 import { getVideoBundles } from '../../../api/discover'
+import { lipsyncFitLine } from './lipsyncFit'
+import { useGraphicsCardGb } from '../../../hooks/useGraphicsMemory'
 import { ReferenceStrip } from './ReferenceStrip'
 import { BatchStrip, useBatchPickers } from './BatchStrip'
 import { addBatchFiles, useBatchOffered } from './batchRun'
@@ -623,7 +625,11 @@ const BUNDLE_COPY = {
   lipsync: {
     icon: Film,
     title: 'Local talking characters need a one-time download',
-    description: 'This sets up the Wan 2.2 S2V model plus its audio encoder (~20 GB total). Comfortable on 12 GB VRAM; smaller cards offload and render slower.',
+    // What it says about the graphics card is added below from the bundle's
+    // own verdict (lipsyncFitLine). The sentence that stood here said
+    // "Comfortable on 12 GB VRAM" while the same bundle's card in the Model
+    // Manager said "Tight on your 12 GB card".
+    description: 'This sets up the Wan 2.2 S2V model plus its audio encoder (~20 GB total).',
   },
   motion: {
     icon: Film,
@@ -654,9 +660,10 @@ function ModelInstallCard({ kind }: { kind: 'image' | 'video' | 'audio' | 'lipsy
   const mac = isMlxImageHost()
   const copy = (mac && (kind === 'image' || kind === 'video')) ? MAC_BUNDLE_COPY[kind] : BUNDLE_COPY[kind]
   // The Mac lane runs its own MLX stack and has no ComfyUI bundle to name.
+  const cardGb = useGraphicsCardGb()
   const description = (kind === 'video' && !mac)
     ? copy.description + videoBundleLine(intent)
-    : copy.description
+    : kind === 'lipsync' ? copy.description + lipsyncFitLine(cardGb) : copy.description
 
   const run = () => startInstallRun(kind, (onStatus, signal) =>
     installModelBundle(kind, onStatus, signal).catch((e: unknown) => {

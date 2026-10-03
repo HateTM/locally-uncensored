@@ -694,6 +694,7 @@ export function getImageBundles(): ModelBundle[] {
       verified: true,
       totalSizeGB: 0.33,
       vramRequired: 'any',
+      addonFor: 'SDXL models',
       workflow: 'sdxl',
       tier: 'older',
       url: 'https://huggingface.co/madebyollin/sdxl-vae-fp16-fix',
@@ -714,6 +715,7 @@ export function getImageBundles(): ModelBundle[] {
       verified: true,
       totalSizeGB: 0.17,
       vramRequired: 'any',
+      addonFor: 'SDXL models',
       workflow: 'sdxl',
       tier: 'older',
       url: 'https://huggingface.co/nerijs/pixel-art-xl',
@@ -862,6 +864,13 @@ export interface ModelBundle {
    */
   vramMinGB: number | null
   vramComfortGB: number | null
+  /** See lib/vram-fit NeedSource: the authors' own comfortable value, for a
+   *  model built to run mostly outside graphics memory. */
+  vramComfortStatedGB?: number
+  /** Set on an add-on (a LoRA, a VAE): what it belongs to. An add-on loads
+   *  into its model's memory, so its card carries no verdict of its own and
+   *  says what it is for instead ("For MiniMax H3"). */
+  addonFor?: string
   workflow: string
   /**
    * How the pickers order this bundle (Oct 2026, David). 'best' is today's open
@@ -1131,7 +1140,12 @@ export function getVideoBundles(): ModelBundle[] {
       description: 'Add-on for MiniMax H3: 8 steps instead of 20, from a prompt or a first frame. After the download, turn it on in Create, Advanced settings, Expert, LoRA stack.',
       tags: ['MiniMax H3', 'LoRA', 'Addon'],
       totalSizeGB: 1.82,
+      // Sized like the model it needs next to it, for the sort and the size
+      // filters. The card itself shows no verdict for an add-on (addonFor):
+      // "Needs more than your 12 GB card" under a 1.82 GB file read as a
+      // statement about the LoRA.
       vramRequired: '24+ GB',
+      addonFor: 'MiniMax H3',
       workflow: 'minimaxh3',
       tier: 'best',
       url: 'https://huggingface.co/Comfy-Org/MiniMax-H3',
@@ -1378,6 +1392,13 @@ export function getVideoBundles(): ModelBundle[] {
       verified: true,
       totalSizeGB: 27.0,
       vramRequired: '6-8 GB',
+      // FramePack is built to run with its weights outside graphics memory: it
+      // predicts the next frame section from a fixed length context and moves
+      // the 15.3 GB model through the card piece by piece. Its authors state
+      // 6 GB as enough (github.com/lllyasviel/FramePack, Requirements). The
+      // largest-weight rule read "tight" on every card below 16.8 GB, against
+      // the bundle's own description, so the stated value stands here.
+      vramComfortStatedGB: 8,
       workflow: 'framepack',
       tier: 'older',
       i2v: true,

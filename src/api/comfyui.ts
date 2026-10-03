@@ -1182,8 +1182,8 @@ async function inventoryLane(
  *  Two additions over getVideoModels, both of them things ComfyUI really can
  *  serve as video right now:
  *   - the motion modules themselves, wherever the pack keeps them
- *   - the SD checkpoints the AnimateDiff lane drives, but ONLY while motion
- *     modules exist, which is the same condition selectStrategy uses before it
+ *   - the SD checkpoints the catalogue's AnimateDiff bundles ship, but ONLY
+ *     while motion modules exist, which is the same condition selectStrategy uses before it
  *     routes a video request onto the animatediff pipeline. That is the second
  *     file of both AnimateDiff bundles (Realistic Vision), which used to be
  *     counted under Image alone, so a video bundle showed up half in the wrong
@@ -1199,9 +1199,18 @@ export async function getInstalledVideoModels(): Promise<ClassifiedModel[]> {
   ])
   const out: ClassifiedModel[] = [...videoModels, ...motionModels]
   if (motionModels.length > 0) {
+    // Only the checkpoints a video bundle of the catalogue ships, which is
+    // what "the second file of both AnimateDiff bundles" always meant. This
+    // used to take EVERY image checkpoint once a motion module was on disk,
+    // so sd_turbo (an image model no motion module here can drive) stood in
+    // the Video list of the box on 03.10.2026.
+    const bundled = new Set(getVideoBundles().flatMap((b) => b.files)
+      .filter((f) => f.subfolder === 'checkpoints' && f.filename)
+      .map((f) => f.filename!.toLowerCase()))
     const imageModels = await inventoryLane('image', getInstalledMainImageModels)
     for (const m of imageModels) {
       if (m.source !== 'checkpoint') continue
+      if (!bundled.has((m.name.split(/[\\/]/).pop() ?? m.name).toLowerCase())) continue
       if (out.some((x) => x.name === m.name)) continue
       out.push(m)
     }
