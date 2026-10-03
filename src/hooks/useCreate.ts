@@ -61,7 +61,8 @@ import { renderFixupDeps } from '../api/render-fixup-deps'
 import { checkPromptSafety, SAFETY_BLOCK_MESSAGE } from '../lib/render/safety'
 import { wantsTransparent } from '../lib/transparent-image'
 import { scenePromptFor } from '../lib/ltx-multishot'
-import { improveKindForIntent, type ImproveOutcome } from '../lib/render/improve-prompt'
+import { improveKindForIntent, IMPROVING_PROMPT, type ImproveOutcome } from '../lib/render/improve-prompt'
+import { elapsedLine } from '../lib/elapsed-line'
 import { improvePrompt } from '../lib/render/improve-prompt-run'
 import { pickQwenEnhancer } from '../lib/render/qwen-enhancer'
 import { buildQwenEnhancerWorkflow, runQwenEnhancer } from '../api/qwen-enhancer'
@@ -627,7 +628,7 @@ export function useCreate() {
       const own = new AbortController()
       abortRef.current = own
       setIsGenerating(true)
-      setProgress(3, 'Improving your prompt…')
+      const improving = elapsedLine((text) => setProgress(3, text), IMPROVING_PROMPT)
       const runModel = improveKind === 'music' ? state.localOpModel : improveKind === 'video' ? effVideoModel : effImageModel
       let out: ImproveOutcome = { status: 'failed' }
       try {
@@ -637,6 +638,7 @@ export function useCreate() {
           tags: improveKind === 'image' && ['sd15', 'sdxl'].includes(state.imageModelList.find((m) => m.name === runModel)?.type ?? classifyModel(runModel)),
         }, own.signal)
       } finally {
+        improving.stop()
         if (abortRef.current === own) abortRef.current = null
         setIsGenerating(false)
         setProgress(0)
@@ -972,7 +974,7 @@ export function useCreate() {
       // the same order, that the picture's graph numbers as image 1, 2, 3.
       // A ComfyUI too old for it is offered the update, like the model itself.
       if (qwenEnhancer) {
-        setProgress(3, 'Improving your prompt…')
+        setProgress(3, IMPROVING_PROMPT)
         const signal = abortRef.current?.signal
         const images = qwenEnhancer.mode === 'i2i' && effInputImage
           ? [effInputImage, ...references.map((r) => r.filename).filter(Boolean).slice(0, extraReferenceSlots(imageModelType, activeModel))]
@@ -981,7 +983,10 @@ export function useCreate() {
           () => buildQwenEnhancerWorkflow({ file: qwenEnhancer.file, mode: qwenEnhancer.mode, prompt: scenePrompt, images, seed: runSeed }),
           renderFixupDeps((line) => setProgress(3, line), signal),
         )
-        const out = await runQwenEnhancer(enhancerGraph, scenePrompt, { clientId: CLIENT_ID, signal })
+        // The rewrite is the long wait (70 to 175 s on a 12 GB card), so the
+        // line counts from here; the build above has its own status lines.
+        const improving = elapsedLine((text) => setProgress(3, text), IMPROVING_PROMPT)
+        const out = await runQwenEnhancer(enhancerGraph, scenePrompt, { clientId: CLIENT_ID, signal }).finally(improving.stop)
         if (signal?.aborted) throw new Error('Cancelled')
         takeRewrite(out)
       }
@@ -1317,7 +1322,6 @@ export function useCreate() {
       if (useWS) {
         // ── WebSocket-driven progress ──
         await new Promise<void>((resolve, reject) => {
-          const startTime = Date.now()
           const store = useCreateStore.getState()
           // The bar and its seconds used to repaint only when ComfyUI sent an
           // event. Long silent stretches are normal here (a 14B sampling step
@@ -1327,19 +1331,12 @@ export function useCreate() {
           // only change phase and percent; a ticker repaints the elapsed time
           // every second so a working render never looks hung.
           let phasePct = 10
-          let phaseLabel = 'Queued...'
-          const paint = () => {
-            const elapsed = Math.round((Date.now() - startTime) / 1000)
-            setProgress(phasePct, `${phaseLabel} ${elapsed}s`)
-          }
+          store.setProgressPhase('queued')
+          const line = elapsedLine((text) => setProgress(phasePct, text), 'Queued...')
           const setPhase = (pct: number, label: string) => {
             phasePct = pct
-            phaseLabel = label
-            paint()
+            line.setLabel(label)
           }
-          store.setProgressPhase('queued')
-          setPhase(10, 'Queued...')
-          const ticker = setInterval(paint, 1000)
 
           // Activity watchdog (2.5.8): the old hard wall-clock cap killed a
           // REAL render at exactly 60 minutes while ComfyUI was still
@@ -1426,7 +1423,7 @@ export function useCreate() {
           let abortCheck: ReturnType<typeof setInterval> | null = null
 
           const cleanup = () => {
-            clearInterval(ticker)
+            line.stop()
             clearInterval(timeoutTimer)
             clearInterval(heartbeat)
             if (abortCheck) clearInterval(abortCheck)

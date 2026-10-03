@@ -18,6 +18,8 @@ const seen = vi.hoisted(() => ({
   chat: [] as { prompt: string; kind: string }[],
   outcome: { status: 'improved', prompt: 'A long rewritten prompt from the enhancer.' } as { status: string; prompt?: string },
   buildError: null as Error | null,
+  /** What the stage said while each writer was at work. */
+  lineWhileWriting: [] as string[],
 }))
 
 vi.mock('../../api/mlx-image', () => ({
@@ -59,12 +61,19 @@ vi.mock('../../api/qwen-enhancer', () => ({
     seen.enhancer.push(req)
     return { '4': { class_type: 'TextGenerate', inputs: {} } }
   }),
-  runQwenEnhancer: vi.fn(async () => { seen.order.push('run-enhancer'); return seen.outcome }),
+  runQwenEnhancer: vi.fn(async () => {
+    seen.order.push('run-enhancer')
+    const { useCreateStore } = await import('../../stores/createStore')
+    seen.lineWhileWriting.push(useCreateStore.getState().progressText)
+    return seen.outcome
+  }),
 }))
 vi.mock('../../lib/render/improve-prompt-run', () => ({
   improvePrompt: vi.fn(async (prompt: string, target: { kind: string }) => {
     seen.order.push('chat-rewrite')
     seen.chat.push({ prompt, kind: target.kind })
+    const { useCreateStore } = await import('../../stores/createStore')
+    seen.lineWhileWriting.push(useCreateStore.getState().progressText)
     return { status: 'improved', prompt: 'A rewrite from the chat model.' }
   }),
 }))
@@ -91,6 +100,7 @@ describe.each(QWEN21_WEIGHTS)('local Qwen-Image 2.1, %s', (_weights, QWEN) => {
     seen.chat.length = 0
     seen.outcome = { status: 'improved', prompt: 'A long rewritten prompt from the enhancer.' }
     seen.buildError = null
+    seen.lineWhileWriting.length = 0
     useCreateStore.setState({
       backend: 'local', isGenerating: false, error: null, gallery: [], promptHistory: [],
       improvePrompt: true, improveWith: 'auto',
@@ -118,6 +128,14 @@ describe.each(QWEN21_WEIGHTS)('local Qwen-Image 2.1, %s', (_weights, QWEN) => {
       expect(seen.built[0].prompt).toBe('A long rewritten prompt from the enhancer.')
       // The field keeps the user's own words.
       expect(useCreateStore.getState().prompt).toBe('a fox in snow')
+    })
+
+    // The box, 03.10.2026: 70 s for a new picture and 175 s for an edit
+    // under a line that did not move. It counts its seconds like every other
+    // waiting line.
+    it('the waiting line counts its seconds while the enhancer writes', async () => {
+      await run()
+      expect(seen.lineWhileWriting).toEqual(['Improving your prompt… 0s'])
     })
 
     it('order on the card: chat model out, enhancer runs, then the picture is built', async () => {
@@ -188,6 +206,7 @@ describe.each(QWEN21_WEIGHTS)('local Qwen-Image 2.1, %s', (_weights, QWEN) => {
     it('no enhancer installed: the chat model writes, before the card is cleared for the picture', async () => {
       useCreateStore.setState({ textEncoderList: ['qwen3vl_8b_int8_convrot.safetensors'] } as never)
       await run()
+      expect(seen.lineWhileWriting).toEqual(['Improving your prompt… 0s'])
       expect(seen.enhancer).toHaveLength(0)
       expect(seen.chat).toEqual([{ prompt: 'a fox in snow', kind: 'image' }])
       expect(seen.order).toEqual(['chat-rewrite', 'evict-chat', 'build-picture', 'submit-picture'])

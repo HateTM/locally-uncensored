@@ -25,6 +25,10 @@ export function improveKindForIntent(intent: string): ImproveKind | null {
   }
 }
 
+/** The waiting line while the prompt is rewritten. The stage counts its
+ *  seconds behind it (lib/elapsed-line). */
+export const IMPROVING_PROMPT = 'Improving your prompt…'
+
 /** What the rewritten prompt may be at most. Under the 4000 characters the
  *  hosted queue accepts, so a long answer never turns into a rejected run. */
 export const IMPROVE_MAX_CHARS = 3000

@@ -42,7 +42,8 @@ import { STANDARD_UPSCALE, intentRoles, intentRequiredInputs, isStudioModel, res
 import { bumpSeed, runImageCount } from '../lib/render/image-count'
 import { STUDIO_MODELS, studioFields } from '../lib/render/studio-contract'
 import { modelLabel } from '../lib/render/preset-models'
-import { improveKindForIntent } from '../lib/render/improve-prompt'
+import { improveKindForIntent, IMPROVING_PROMPT } from '../lib/render/improve-prompt'
+import { elapsedLine } from '../lib/elapsed-line'
 import { improvePrompt } from '../lib/render/improve-prompt-run'
 import { bookedVideoSeconds } from '../lib/render/video-duration'
 import { studioQuote, StudioQuoteChangedError } from '../api/cloud/studio'
@@ -577,8 +578,8 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
       let improveFailed = false
       const improveKind = s.improvePrompt && !characterUse ? improveKindForIntent(intent) : null
       if (improveKind && s.prompt.trim() && !ac.signal.aborted) {
-        s.setProgress(8, 'Improving your prompt…')
-        const out = await improvePrompt(s.prompt, { kind: improveKind, modelLabel: modelLabel(model) }, ac.signal)
+        const improving = elapsedLine((text) => s.setProgress(8, text), IMPROVING_PROMPT)
+        const out = await improvePrompt(s.prompt, { kind: improveKind, modelLabel: modelLabel(model) }, ac.signal).finally(improving.stop)
         // The safety check covers the rewrite too: the user wrote an allowed
         // prompt, the model must not turn it into a refusal.
         if (out.status === 'improved' && !clientSafety(out.prompt).blocked) {
