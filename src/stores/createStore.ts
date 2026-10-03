@@ -31,6 +31,7 @@ const RUNTIME_ONLY_KEYS: readonly string[] = [
 ]
 import type { ModelType, ClassifiedModel } from '../api/comfyui'
 import { MAX_SHOTS, MAX_SHOT_CHARS } from '../lib/ltx-multishot'
+import { clampLoraStrength, defaultLoraStrength } from '../lib/lora-strength'
 import { classifyModel, hidreamSampling } from '../api/comfyui'
 import type { HiresUpscaleMethod } from '../api/hires-fix'
 import { releaseVideoBlobUrl } from '../api/mlx-video'
@@ -349,6 +350,9 @@ interface CreateState {
   targetResolution: '2k' | '4k' | '8k'
   showNegative: boolean
   selectedLoras: { name: string; strength: number }[]
+  /** The last strength set for each LoRA file, kept while the LoRA is off, so
+   *  ticking it again brings its own value back instead of the default. */
+  loraStrengths: Record<string, number>
   selectedVae: string
   clipSkip: number
   growMaskBy: number  // inpaint mask edge feather (VAEEncodeForInpaint grow_mask_by)
@@ -698,6 +702,7 @@ export const useCreateStore = create<CreateState>()(
       targetResolution: '4k' as '2k' | '4k' | '8k',
       showNegative: false,
       selectedLoras: [] as { name: string; strength: number }[],
+      loraStrengths: {} as Record<string, number>,
       selectedVae: 'auto',
       clipSkip: 0,
       growMaskBy: 6,
@@ -902,8 +907,15 @@ export const useCreateStore = create<CreateState>()(
         if (changed) set({ cloudStudioOptions: {} })
       },
       toggleNegative: () => set((s) => ({ showNegative: !s.showNegative })),
-      toggleLora: (name) => set((s) => ({ selectedLoras: s.selectedLoras.some((l) => l.name === name) ? s.selectedLoras.filter((l) => l.name !== name) : [...s.selectedLoras, { name, strength: 0.8 }] })),
-      setLoraStrengthFor: (name, strength) => set((s) => ({ selectedLoras: s.selectedLoras.map((l) => l.name === name ? { ...l, strength: Math.max(0, Math.min(2, strength)) } : l) })),
+      toggleLora: (name) => set((s) => ({ selectedLoras: s.selectedLoras.some((l) => l.name === name) ? s.selectedLoras.filter((l) => l.name !== name) : [...s.selectedLoras, { name, strength: s.loraStrengths[name] ?? defaultLoraStrength(name) }] })),
+      setLoraStrengthFor: (name, strength) => set((s) => {
+        if (!Number.isFinite(strength)) return {}
+        const value = clampLoraStrength(strength)
+        return {
+          selectedLoras: s.selectedLoras.map((l) => l.name === name ? { ...l, strength: value } : l),
+          loraStrengths: { ...s.loraStrengths, [name]: value },
+        }
+      }),
       clearLoras: () => set((s) => ({
         selectedLoras: [],
         selectedCharacter: s.selectedCharacter?.id.startsWith('local:') ? null : s.selectedCharacter,
@@ -912,8 +924,13 @@ export const useCreateStore = create<CreateState>()(
         const kept = s.selectedLoras.filter((l) => listed.includes(l.name))
         const char = s.selectedCharacter
         const charGone = !!char?.id.startsWith('local:') && !listed.includes(char.id.slice('local:'.length))
-        if (kept.length === s.selectedLoras.length && !charGone) return {}
-        return { selectedLoras: kept, ...(charGone ? { selectedCharacter: null } : {}) }
+        // A deleted file takes its remembered strength with it.
+        const remembered = Object.keys(s.loraStrengths)
+        const strengths = remembered.every((n) => listed.includes(n))
+          ? {}
+          : { loraStrengths: Object.fromEntries(remembered.filter((n) => listed.includes(n)).map((n) => [n, s.loraStrengths[n]])) }
+        if (kept.length === s.selectedLoras.length && !charGone) return strengths
+        return { selectedLoras: kept, ...strengths, ...(charGone ? { selectedCharacter: null } : {}) }
       }),
       setSelectedVae: (name) => set({ selectedVae: name || 'auto' }),
       setClipSkip: (n) => set({ clipSkip: Math.max(0, Math.min(12, Math.floor(n))) }),
@@ -1223,6 +1240,7 @@ export const useCreateStore = create<CreateState>()(
         //    are additive and merge() backfills missing keys from defaults. ──
         showNegative: state.showNegative,
         selectedLoras: state.selectedLoras,
+        loraStrengths: state.loraStrengths,
         selectedVae: state.selectedVae,
         clipSkip: state.clipSkip,
         growMaskBy: state.growMaskBy,
