@@ -22,7 +22,7 @@ export interface FixupDeps {
   ask: (prompt: FixupPrompt) => Promise<boolean>
   /** Download these files and wait until ComfyUI lists them. */
   download: (files: Array<ComponentSpec & { downloadUrl: string; subfolder: string }>) => Promise<void>
-  /** Update ComfyUI, start it again, and wait until it answers. */
+  /** Update ComfyUI (the update starts it again) and wait until it answers. */
   updateComfy: () => Promise<void>
   /** Drop the cached node catalogue so the next build reads the new state. */
   refresh: () => Promise<void>

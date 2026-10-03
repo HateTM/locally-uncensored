@@ -344,7 +344,7 @@ mod tests {
         for done in [
             "Install finished. ComfyUI is ready to start.",
             "Repair finished. ComfyUI is ready.",
-            "Update finished. Restart ComfyUI to load the new nodes.",
+            "Update finished. ComfyUI is starting again with the new nodes.",
         ] {
             let (line, kind) = finished_notice(done, None);
             assert_eq!(line, done);

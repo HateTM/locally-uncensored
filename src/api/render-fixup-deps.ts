@@ -3,7 +3,6 @@
 // prompt enhancer) and the agent's image and video tool (api/vram-handoff.ts).
 // The question itself is drawn by RenderFixupModal in the app shell.
 
-import { backendCall } from './backend'
 import { checkComfyConnection, refreshComfyModels } from './comfyui'
 import { clearNodeCache } from './comfyui-nodes'
 import { startModelDownload, getDownloadProgress, modelsNotVisibleInComfy, comfyModelTarget, catalogDigestFor } from './discover'
@@ -13,7 +12,9 @@ import { useCreateStore } from '../stores/createStore'
 import { useDownloadStore } from '../stores/downloadStore'
 import { useComfyInstallStore } from '../stores/comfyInstallStore'
 
-/** How long the updated ComfyUI gets to answer. */
+/** How long the updated ComfyUI gets to answer. The update starts it again
+ *  itself (update_comfyui in Rust, before it reports complete), so this only
+ *  waits for the port. */
 const COMFY_BACK_UP_TRIES = 90
 const POLL_MS = 2000
 
@@ -67,8 +68,6 @@ export function renderFixupDeps(onStatus: (line: string) => void, signal?: Abort
         const last = st.logs[st.logs.length - 1]
         if (last) onStatus(String(last))
       }
-      onStatus('Starting the updated ComfyUI…')
-      await backendCall('start_comfyui').catch(() => undefined)
       for (let i = 0; i < COMFY_BACK_UP_TRIES; i++) {
         if (await checkComfyConnection()) return
         onStatus(`Starting the updated ComfyUI… ${i * 2}s`)

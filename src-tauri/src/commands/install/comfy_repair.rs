@@ -1267,21 +1267,37 @@ pub fn update_comfyui(state: State<'_, AppState>, app: tauri::AppHandle) -> Resu
         }
 
         println!("[Update] ComfyUI update complete");
+        // The box, 03.10.2026: the guard at the top stopped LU's own ComfyUI,
+        // and the run ended on "Restart ComfyUI to load the new nodes" with
+        // the status on Stopped. It comes back up here, before `complete`:
+        // the panel and a render that asked for this update both stop
+        // watching on that word, and the render goes on as soon as the port
+        // answers. A start that fails does not undo the update, it is said in
+        // the closing line with its reason.
+        update("installing", "Starting ComfyUI again...");
+        let restarted = crate::commands::process::start_comfyui_blocking(&state).map(|_| ());
+        let (done, restart_failed) = update_finished_line(&restarted);
         if let Ok(mut s) = install_status.lock() {
-            let (line, kind) = finished_notice(
-                "Update finished. Restart ComfyUI to load the new nodes.",
-                requirements_fallback.as_ref(),
-            );
+            let (line, kind) = finished_notice(&done, requirements_fallback.as_ref());
             s.notice = line;
-            s.notice_kind = kind.to_string();
+            s.notice_kind = if restart_failed { "warn" } else { kind }.to_string();
         }
-        update(
-            "complete",
-            "ComfyUI updated. Restart ComfyUI to load the new nodes.",
-        );
+        update("complete", &done);
     });
 
     Ok(serde_json::json!({"status": "installing"}))
+}
+
+/// The closing line of an update, and whether it is a warning: ComfyUI is on
+/// its way up again, or it did not start and here is why.
+fn update_finished_line(restarted: &Result<(), String>) -> (String, bool) {
+    match restarted {
+        Ok(()) => ("Update finished. ComfyUI is starting again with the new nodes.".to_string(), false),
+        Err(reason) => (
+            format!("Update finished, but ComfyUI did not start again. Press Start to try again.\n\n{reason}"),
+            true,
+        ),
+    }
 }
 
 /// LU's own throwaway siblings inside a ComfyUI checkout, none of them named
@@ -1920,7 +1936,7 @@ mod tests {
         {
             let mut install = state.install_status.lock().unwrap();
             install.status = "complete".to_string();
-            install.notice = "Update finished. Restart ComfyUI to load the new nodes.".to_string();
+            install.notice = "Update finished. ComfyUI is starting again with the new nodes.".to_string();
             install.notice_kind = "ok".to_string();
             install.logs.push("a line from the run before this one".to_string());
         }
@@ -2007,6 +2023,43 @@ mod tests {
             !src[update_fn_start..].contains(&old_shape),
             "the guard is back to a `?`-early-return, which only compiles on the caller's thread",
         );
+    }
+
+    /// The box, 03.10.2026: the update stops LU's own ComfyUI before it
+    /// touches the checkout and then ended on "Restart ComfyUI to load the
+    /// new nodes" with the status on Stopped. Nothing restarted it, so the
+    /// customer had to find the Start button, and a render that had asked for
+    /// the update had nothing to continue on. Whoever stops it starts it
+    /// again: after the environment check passed, before the run reports
+    /// `complete` (the panel and Create stop watching on that word).
+    #[test]
+    fn a_finished_update_starts_comfyui_again_before_it_reports_complete() {
+        let src = include_str!("comfy_repair.rs");
+        let needle = |head: &str, tail: &str| format!("{head}{tail}");
+        let body_start = src.find("pub fn update_comfyui(").expect("update_comfyui is gone");
+        let body = &src[body_start..];
+        let body = &body[..body.find("\n}\n").expect("update_comfyui has no end")];
+
+        let at_check = body.find("verify_and_heal_environment(").expect("the update no longer checks the environment");
+        let at_start = body
+            .find(&needle("process::start_comfyui_bloc", "king(&state)"))
+            .expect("the update does not start ComfyUI again");
+        let at_complete = body.rfind(&needle("\"comp", "lete\"")).expect("the update never reports complete");
+        assert!(at_check < at_start, "ComfyUI must not be started on an environment nobody checked");
+        assert!(at_start < at_complete, "ComfyUI must be on its way up before the run reports complete");
+    }
+
+    #[test]
+    fn the_closing_line_of_an_update_says_whether_comfyui_came_back() {
+        let (line, warn) = update_finished_line(&Ok(()));
+        assert_eq!(line, "Update finished. ComfyUI is starting again with the new nodes.");
+        assert!(!warn);
+
+        let (line, warn) = update_finished_line(&Err("ModuleNotFoundError: No module named 'av'".to_string()));
+        assert!(line.starts_with("Update finished, but ComfyUI did not start again. Press Start to try again."), "got: {line}");
+        assert!(line.ends_with("ModuleNotFoundError: No module named 'av'"), "the reason is missing: {line}");
+        assert!(warn, "a ComfyUI that stayed down is not good news");
+        assert!(!line.contains("Restart ComfyUI"), "the customer is no longer the one who restarts it: {line}");
     }
 
     #[test]

@@ -770,7 +770,7 @@ function ComfyUpdateConfirmModal({
     <Modal open={open} onClose={onClose} title="Update ComfyUI?">
       <div className="space-y-4 text-sm text-gray-200">
         <p className="t-body leading-relaxed text-gray-300">
-          This pulls the latest ComfyUI and reinstalls its Python packages. It can take a few minutes. If ComfyUI is running and this app started it, it will be stopped first; a ComfyUI this app did not start blocks the update instead.
+          This pulls the latest ComfyUI and reinstalls its Python packages. It can take a few minutes. If ComfyUI is running and this app started it, it will be stopped first; a ComfyUI this app did not start blocks the update instead. ComfyUI starts again when the update is done.
         </p>
         {path && <p className="t-label text-gray-500 text-center">ComfyUI folder: {path}</p>}
         <div className="flex flex-col gap-2 pt-1">

@@ -1620,7 +1620,7 @@ pub async fn start_comfyui(app: tauri::AppHandle) -> Result<serde_json::Value, S
     .map_err(|e| format!("start_comfyui task: {e}"))?
 }
 
-fn start_comfyui_blocking(state: &AppState) -> Result<serde_json::Value, String> {
+pub(crate) fn start_comfyui_blocking(state: &AppState) -> Result<serde_json::Value, String> {
     let _gate = start_gate(&COMFY_START);
     // If user pointed LU at a remote ComfyUI, we have no local process to spawn.
     // Just report status — the remote side is responsible for running ComfyUI.
