@@ -176,7 +176,10 @@ export function isEditCapable(id: string): boolean {
  *  prompt and the picture alone, so the button must not wait for a mask. */
 export function editNeedsMask(id: string): boolean {
   if (STUDIO_MODELS[id]) return false
-  return cloudModelById(id)?.maskless !== true
+  // A server older than c341f5ac leaves the flag out of the catalog; the
+  // bundled registration knows that qwen-image-edit takes no mask.
+  const maskless = cloudModelById(id)?.maskless ?? CLOUD_MODEL_SEED.find((m) => m.id === id)?.maskless
+  return maskless !== true
 }
 
 /** The edit model a leftover pick falls back to: the open instruction editor

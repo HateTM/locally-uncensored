@@ -4,6 +4,7 @@ import { UploadCloud, ImagePlus, Scissors, Wand2, Sparkles, X, Loader2, Download
 import { useCreateStore, type GalleryItem } from '../../../stores/createStore'
 import { useCreateExp } from './CreateContext'
 import { INTENT_MAP } from './intents'
+import { editNeedsMask, defaultCloudModel, modelForOp } from '../../../stores/cloudCatalogStore'
 import { stageShowsSetupCard, laneModelCount } from './stageGate'
 import { GeneratingView, ResultView } from './OutputView'
 import { EmptyState } from '../ui/EmptyState'
@@ -318,6 +319,12 @@ function SourcePreview({ onOpenMaskEditor }: { onOpenMaskEditor: () => void }) {
   const setMask = useCreateStore((s) => s.setMask)
   const intent = useCreateStore((s) => s.intent())
   const meta = INTENT_MAP[intent]
+  const backend = useCreateStore((s) => s.backend)
+  const cloudImageModel = useCreateStore((s) => s.cloudImageModel)
+  // A cloud instruction editor (qwen-image-edit, every studio editor) takes no
+  // mask: same model and same rule as the Create button in the Composer.
+  const noMask = backend === 'cloud' && intent === 'edit' &&
+    !editNeedsMask(modelForOp('image', 'edit', cloudImageModel || defaultCloudModel('image')?.id || ''))
 
   // Zombie render: an intent switch drops the source in the same store update
   // that swaps this component out, but the child subscription can fire first.
@@ -341,7 +348,7 @@ function SourcePreview({ onOpenMaskEditor }: { onOpenMaskEditor: () => void }) {
         </div>
         <ReferenceStrip />
         <div className="flex items-center gap-2 mt-4">
-          {meta.allowsMask && (
+          {meta.allowsMask && !noMask && (
             <Button variant="secondary" icon={Wand2} onClick={onOpenMaskEditor}>{mask ? 'Edit mask' : 'Paint mask'}</Button>
           )}
           <ChangeImageButton onChange={(r) => setSource(r)} />
@@ -350,6 +357,7 @@ function SourcePreview({ onOpenMaskEditor }: { onOpenMaskEditor: () => void }) {
           {meta.id === 'removebg' ? 'Hit Create to cut out the subject and export a transparent PNG.'
             : meta.id === 'upscale' ? 'Hit Create to upscale the image.'
             : meta.id === 'eraser' ? 'Paint a mask over the object to remove, then hit Create.'
+            : noMask ? 'Write the edit prompt below, then Create. This model needs no mask.'
             : meta.allowsMask ? 'Leave the mask empty to restyle the whole image, or paint an area to change just that. Write your prompt below, then Create.'
             : 'Describe the motion below, then Create.'}
         </p>
