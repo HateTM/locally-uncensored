@@ -1,8 +1,11 @@
 import { expect, test } from '@playwright/test'
 import { DEFAULT_MODEL_NAME } from './support/tauri-mock'
 
+// The app's own port, from the configured baseURL, so a second config on another port still works.
+const appPort = () => new URL(test.info().project.use.baseURL ?? 'http://localhost:5273').port
+
 test('deleting through Memory Settings survives a late automatic extraction and reload', async ({ page }) => {
-  await page.route('**/*', route => new URL(route.request().url()).port === '5273' ? route.continue() : route.abort())
+  await page.route('**/*', route => new URL(route.request().url()).port === appPort() ? route.continue() : route.abort())
   await page.goto('/e2e/memory-sensitive-proof.html')
   await page.evaluate(async (modelName) => {
     const memoryPath = '/src/stores/memoryStore.ts'
