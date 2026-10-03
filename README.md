@@ -152,6 +152,7 @@ GLM 5.3 is in the catalog too, but its smallest local quant is 217 GB, so on a d
 | Z-Image Turbo | 10-16 GB | Unfiltered. Loads slowly below 16 GB. |
 | Qwen-Image 2.1 | 16-24 GB | Generates and edits in one model. Needs ComfyUI 0.37.0. Research license, non-commercial. |
 | Qwen-Image 2.1 (No Refusals) | 16-24 GB | The same model with a community text encoder that has its refusals removed (Heretic). |
+| Noct Q (Qwen-Image 2.1, Unfiltered) | 16-24 GB | A community finetune of Qwen-Image 2.1 with modified image model weights. Research license, non-commercial. |
 | ERNIE-Image Turbo | 24 GB | Baidu DiT, eight steps. |
 
 ### Video

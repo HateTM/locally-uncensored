@@ -27,13 +27,13 @@ import { getAllNodeInfo } from '../comfyui-nodes'
 import { localFetch } from '../backend'
 import { transparentPrompt } from '../../lib/transparent-image'
 import { nodeOf, nodesOf } from './graph-test-support'
+import { QWEN21_WEIGHTS } from './qwen21-weights'
 
-const MODEL = 'qwen_image_2.1_int8_convrot.safetensors'
 const ENCODER = 'qwen3vl_8b_int8_convrot.safetensors'
 const VAE_FILE = 'qwen_image_2.1_vae_bf16.safetensors'
 
-const QWEN_NODES = {
-  UNETLoader: { input: { required: { unet_name: [[MODEL]] } } },
+const qwenNodes = (model: string) => ({
+  UNETLoader: { input: { required: { unet_name: [[model]] } } },
   CLIPLoader: { input: { required: { clip_name: [[ENCODER]] } } },
   VAELoader: { input: { required: { vae_name: [[VAE_FILE]] } } },
   TextEncodeQwenImage21: { input: { required: { clip: ['CLIP'], prompt: ['STRING'], negative_prompt: ['STRING'], resolution: ['INT'] }, optional: { vae: ['VAE'], 'images.image_1': ['IMAGE'] } } },
@@ -43,17 +43,16 @@ const QWEN_NODES = {
   VAEDecode: { input: { required: {} } },
   LoadImage: { input: { required: {} } },
   SaveImage: { input: { required: {} } },
-}
+})
 
-const baseParams = {
-  model: MODEL,
+const paramsFor = (model: string) => ({
+  model,
   prompt: 'a red apple on a white plate', negativePrompt: '',
   sampler: 'euler', scheduler: 'simple',
   steps: 25, cfgScale: 1, width: 1024, height: 1024, seed: 42, batchSize: 1,
-}
+})
 
 beforeEach(() => {
-  vi.mocked(getAllNodeInfo).mockResolvedValue(QWEN_NODES as never)
   vi.mocked(localFetch).mockResolvedValue({
     ok: true,
     json: async () => ({
@@ -63,7 +62,10 @@ beforeEach(() => {
   } as never)
 })
 
-describe('Transparent background: the graph', () => {
+describe.each(QWEN21_WEIGHTS)('Transparent background: the graph, %s', (_weights, MODEL) => {
+  const baseParams = paramsFor(MODEL)
+  beforeEach(() => { vi.mocked(getAllNodeInfo).mockResolvedValue(qwenNodes(MODEL) as never) })
+
   it('wraps the prompt the way the official template says', async () => {
     const wf = await buildDynamicWorkflow({ ...baseParams, transparent: true } as never)
     const enc = nodesOf(wf, 'TextEncodeQwenImage21')

@@ -86,12 +86,13 @@ export interface DiscoverModel {
   sha256?: string
 }
 
-// The two Qwen-Image 2.1 files that both of its bundles load, the official one
-// and the one with the text encoder without refusals: the image model and the
-// VAE. One entry each, so the two bundles can never drift apart and a machine
-// that has one bundle does not fetch these again for the other. Byte counts
-// and SHA-256 are the Hugging Face LFS values of Comfy-Org/Qwen-Image-2.1,
-// read on 2026-10-03.
+// The Qwen-Image 2.1 files that more than one of its bundles load: the
+// official image model (the official bundle and the one with the text encoder
+// without refusals), the official text encoder (the official bundle and Noct
+// Q) and the VAE (all three). One entry each, so the bundles can never drift
+// apart and a machine that has one bundle does not fetch these again for
+// another. Byte counts and SHA-256 are the Hugging Face LFS values of
+// Comfy-Org/Qwen-Image-2.1, read on 2026-10-03.
 const QWEN21_DIFFUSION_MODEL: DiscoverModel = {
   name: 'Qwen-Image 2.1 (INT8)',
   description: 'Diffusion model · generates and edits, native 2K, transparent backgrounds.',
@@ -100,6 +101,15 @@ const QWEN21_DIFFUSION_MODEL: DiscoverModel = {
   filename: 'qwen_image_2.1_int8_convrot.safetensors', subfolder: 'diffusion_models', sizeGB: 6.76,
   sizeBytes: 7256783064,
   sha256: 'cb74113cb03faecd79611b01fd7fd642f0aa60d6f0b95086abee214d75eaa57d',
+}
+const QWEN21_TEXT_ENCODER: DiscoverModel = {
+  name: 'Qwen3-VL 8B Text Encoder (INT8)',
+  description: 'Required text encoder for Qwen-Image 2.1 prompt understanding.',
+  pulls: '', tags: ['Text Encoder', '9.35 GB'], updated: 'New',
+  downloadUrl: 'https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/text_encoders/qwen3vl_8b_int8_convrot.safetensors',
+  filename: 'qwen3vl_8b_int8_convrot.safetensors', subfolder: 'text_encoders', sizeGB: 8.71,
+  sizeBytes: 9350798360,
+  sha256: '8bfd0f6e12abf2d2d697ecc888e5e90b0d6741d6708f05799f53afa560452e8f',
 }
 const QWEN21_VAE: DiscoverModel = {
   name: 'Qwen-Image 2.1 VAE',
@@ -398,15 +408,7 @@ export function getImageBundles(): ModelBundle[] {
       url: 'https://huggingface.co/Comfy-Org/Qwen-Image-2.1',
       files: [
         QWEN21_DIFFUSION_MODEL,
-        {
-          name: 'Qwen3-VL 8B Text Encoder (INT8)',
-          description: 'Required text encoder for Qwen-Image 2.1 prompt understanding.',
-          pulls: '', tags: ['Text Encoder', '9.35 GB'], updated: 'New',
-          downloadUrl: 'https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/text_encoders/qwen3vl_8b_int8_convrot.safetensors',
-          filename: 'qwen3vl_8b_int8_convrot.safetensors', subfolder: 'text_encoders', sizeGB: 8.71,
-          sizeBytes: 9350798360,
-          sha256: '8bfd0f6e12abf2d2d697ecc888e5e90b0d6741d6708f05799f53afa560452e8f',
-        },
+        QWEN21_TEXT_ENCODER,
         QWEN21_VAE,
       ],
     },
@@ -444,6 +446,48 @@ export function getImageBundles(): ModelBundle[] {
           sizeBytes: 9350828392,
           sha256: 'f15ce4275428e04f42cdb59e3a253cb290cae5de99259527f01d3d2e51153653',
         },
+        QWEN21_VAE,
+      ],
+    },
+    // Noct Q, a community finetune of Qwen-Image 2.1. Read off Hugging Face on
+    // 2026-10-03 (Noctaluna/Noct-Q-Uncensored-Qwen-Image-2.1, not gated, Qwen
+    // Research License): the NOTICE file says "the Qwen-Image-2.1 transformer
+    // weights were modified by noctaluna", the card calls the result
+    // uncensored and says it edits with the same file in ComfyUI's Qwen Image
+    // 2.1 edit template. Unlike the bundle above, the image model itself is
+    // the changed file here. The safetensors header of NoctQ_V4_int8_convrot
+    // carries the same 649 tensor names, shapes and data types as the official
+    // qwen_image_2.1_int8_convrot, so UNETLoader and the whole Qwen-Image 2.1
+    // lane take it as they take the official file.
+    // The card names the official text encoder and the official VAE as its
+    // companions, so those are the two shared entries: the file is published
+    // against that encoder, and a machine with the official bundle fetches
+    // only the image model. Whoever has the encoder without refusals too picks
+    // it under Text encoder like for any Qwen-Image 2.1 run.
+    // Byte count and SHA-256 are the Hugging Face LFS values; the address
+    // answers without a token. Not marked verified: no run on real hardware.
+    {
+      name: 'Noct Q (Qwen-Image 2.1, Unfiltered)',
+      description: 'A community finetune of Qwen-Image 2.1 by Noctaluna, published as an unfiltered edition. The image model itself is changed: its notice says the Qwen-Image 2.1 transformer weights were modified. Generates from a prompt and edits a reference image from a prompt, no mask needed. The text encoder and the VAE are the official files, shared with the official bundle and not downloaded twice. Qwen Research License, non-commercial use: https://huggingface.co/Noctaluna/Noct-Q-Uncensored-Qwen-Image-2.1/blob/main/LICENSE',
+      tags: ['Qwen Image 2.1', 'Unfiltered', 'Image', 'Edit', '1024px'],
+      uncensored: true,
+      // 6.76 + 8.71 + 0.63, in gibibytes like the official bundle.
+      totalSizeGB: 16.1,
+      vramRequired: '16-24 GB',
+      workflow: 'qwenimage',
+      tier: 'best',
+      url: 'https://huggingface.co/Noctaluna/Noct-Q-Uncensored-Qwen-Image-2.1',
+      files: [
+        {
+          name: 'Noct Q V4 (INT8)',
+          description: 'Diffusion model · Qwen-Image 2.1 with transformer weights modified by Noctaluna.',
+          pulls: '', tags: ['Diffusion Model', '7.26 GB'], updated: 'New',
+          downloadUrl: 'https://huggingface.co/Noctaluna/Noct-Q-Uncensored-Qwen-Image-2.1/resolve/main/NoctQ_V4_int8_convrot.safetensors',
+          filename: 'NoctQ_V4_int8_convrot.safetensors', subfolder: 'diffusion_models', sizeGB: 6.76,
+          sizeBytes: 7256784368,
+          sha256: '4d92d5538253ab36e6a73b056cce5f697950f4303cb9e6686a3198d0ea13f9e8',
+        },
+        QWEN21_TEXT_ENCODER,
         QWEN21_VAE,
       ],
     },

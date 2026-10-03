@@ -9,7 +9,12 @@ import { seedOnboardingDone } from './support/cloud-mock'
  * files in its text encoder folder. Nothing is rendered.
  */
 
-const QWEN = 'qwen_image_2.1_int8_convrot.safetensors'
+// Once per image model file of the family: the official weights and the Noct
+// Q finetune, whose file name says neither "qwen" nor "2.1".
+const WEIGHTS = [
+  ['official weights', 'qwen_image_2.1_int8_convrot.safetensors'],
+  ['Noct Q', 'NoctQ_V4_int8_convrot.safetensors'],
+] as const
 const ENCODER = 'qwen3vl_8b_int8_convrot.safetensors'
 const ENHANCERS = [
   'qwen3.5_9b_qwen_image_2.1_pe_t2i.int8_convrot.safetensors',
@@ -18,7 +23,7 @@ const ENHANCERS = [
   'qwen3.5_9b_qwen_image_2.1_pe_i2i_heretic.int8_convrot.safetensors',
 ]
 
-async function bootWithFakeComfy(page: Page, textEncoders: string[]) {
+async function bootWithFakeComfy(page: Page, model: string, textEncoders: string[]) {
   await page.addInitScript(tauriMockInit, { assistantReply: DEFAULT_ASSISTANT_REPLY, modelName: DEFAULT_MODEL_NAME, platform: 'windows' as const })
   await seedOnboardingDone(page)
   await page.addInitScript(([model, encoders]) => {
@@ -45,7 +50,7 @@ async function bootWithFakeComfy(page: Page, textEncoders: string[]) {
       if (url.includes('/object_info')) return Promise.resolve(JSON.stringify(nodes))
       return Promise.resolve('{}')
     }
-  }, [QWEN, textEncoders] as const)
+  }, [model, textEncoders] as const)
 }
 
 async function openAdvanced(page: Page, intent: string) {
@@ -62,48 +67,50 @@ const saved = (page: Page) => page.evaluate(() => {
   return { improvePrompt: state?.improvePrompt, improveWith: state?.improveWith }
 })
 
-test('with the enhancers installed, the one switch offers who writes and remembers the pick', async ({ page }) => {
-  await bootWithFakeComfy(page, [ENCODER, ...ENHANCERS])
-  await openAdvanced(page, 'Image')
-  await expect(theSwitch(page)).toBeVisible({ timeout: 15_000 })
-  await expect(theSwitch(page)).toHaveCount(1)
-  await expect(theSwitch(page)).toHaveAttribute('aria-checked', 'false')
-  await expect(writers(page)).toHaveCount(0)
+for (const [weights, model] of WEIGHTS) {
+  test(`${weights}: with the enhancers installed, the one switch offers who writes and remembers the pick`, async ({ page }) => {
+    await bootWithFakeComfy(page, model, [ENCODER, ...ENHANCERS])
+    await openAdvanced(page, 'Image')
+    await expect(theSwitch(page)).toBeVisible({ timeout: 15_000 })
+    await expect(theSwitch(page)).toHaveCount(1)
+    await expect(theSwitch(page)).toHaveAttribute('aria-checked', 'false')
+    await expect(writers(page)).toHaveCount(0)
 
-  await theSwitch(page).click()
-  await expect(theSwitch(page)).toHaveAttribute('aria-checked', 'true')
-  await expect(writers(page).getByRole('radio')).toHaveText(['Qwen enhancer', 'Qwen enhancer, no refusals', 'Chat model'])
-  await expect(page.getByRole('radio', { name: 'Qwen enhancer', exact: true })).toHaveAttribute('aria-checked', 'true')
+    await theSwitch(page).click()
+    await expect(theSwitch(page)).toHaveAttribute('aria-checked', 'true')
+    await expect(writers(page).getByRole('radio')).toHaveText(['Qwen enhancer', 'Qwen enhancer, no refusals', 'Chat model'])
+    await expect(page.getByRole('radio', { name: 'Qwen enhancer', exact: true })).toHaveAttribute('aria-checked', 'true')
 
-  await page.getByRole('radio', { name: 'Qwen enhancer, no refusals' }).click()
-  await expect(page.getByRole('radio', { name: 'Qwen enhancer, no refusals' })).toHaveAttribute('aria-checked', 'true')
-  await expect.poll(() => saved(page)).toEqual({ improvePrompt: true, improveWith: 'unfiltered' })
+    await page.getByRole('radio', { name: 'Qwen enhancer, no refusals' }).click()
+    await expect(page.getByRole('radio', { name: 'Qwen enhancer, no refusals' })).toHaveAttribute('aria-checked', 'true')
+    await expect.poll(() => saved(page)).toEqual({ improvePrompt: true, improveWith: 'unfiltered' })
 
-  // Nothing of it sits in or above the prompt field: with the drawer closed
-  // the page shows neither the switch nor the row.
-  await page.keyboard.press('Escape')
-  await expect(theSwitch(page)).toHaveCount(0)
-  await expect(page.getByText('Rewritten by')).toHaveCount(0)
-})
+    // Nothing of it sits in or above the prompt field: with the drawer closed
+    // the page shows neither the switch nor the row.
+    await page.keyboard.press('Escape')
+    await expect(theSwitch(page)).toHaveCount(0)
+    await expect(page.getByText('Rewritten by')).toHaveCount(0)
+  })
 
-test('Edit gets the switch through the edit enhancer and lists no chat model', async ({ page }) => {
-  await bootWithFakeComfy(page, [ENCODER, ...ENHANCERS])
-  await openAdvanced(page, 'Edit / Image to Image')
-  await expect(theSwitch(page)).toBeVisible({ timeout: 15_000 })
-  await theSwitch(page).click()
-  await expect(writers(page).getByRole('radio')).toHaveText(['Qwen enhancer', 'Qwen enhancer, no refusals'])
-})
+  test(`${weights}: Edit gets the switch through the edit enhancer and lists no chat model`, async ({ page }) => {
+    await bootWithFakeComfy(page, model, [ENCODER, ...ENHANCERS])
+    await openAdvanced(page, 'Edit / Image to Image')
+    await expect(theSwitch(page)).toBeVisible({ timeout: 15_000 })
+    await theSwitch(page).click()
+    await expect(writers(page).getByRole('radio')).toHaveText(['Qwen enhancer', 'Qwen enhancer, no refusals'])
+  })
 
-test('without an enhancer the switch is the chat model switch: no row, and none on Edit', async ({ page }) => {
-  await bootWithFakeComfy(page, [ENCODER])
-  await openAdvanced(page, 'Image')
-  await expect(theSwitch(page)).toBeVisible({ timeout: 15_000 })
-  await theSwitch(page).click()
-  await expect(theSwitch(page)).toHaveAttribute('aria-checked', 'true')
-  await expect(writers(page)).toHaveCount(0)
-  await page.keyboard.press('Escape')
-  await page.getByRole('radio', { name: 'Edit / Image to Image', exact: true }).click()
-  await page.getByRole('button', { name: 'Advanced settings' }).click()
-  await expect(page.getByRole('button', { name: 'Quality' })).toBeVisible()
-  await expect(theSwitch(page)).toHaveCount(0)
-})
+  test(`${weights}: without an enhancer the switch is the chat model switch: no row, and none on Edit`, async ({ page }) => {
+    await bootWithFakeComfy(page, model, [ENCODER])
+    await openAdvanced(page, 'Image')
+    await expect(theSwitch(page)).toBeVisible({ timeout: 15_000 })
+    await theSwitch(page).click()
+    await expect(theSwitch(page)).toHaveAttribute('aria-checked', 'true')
+    await expect(writers(page)).toHaveCount(0)
+    await page.keyboard.press('Escape')
+    await page.getByRole('radio', { name: 'Edit / Image to Image', exact: true }).click()
+    await page.getByRole('button', { name: 'Advanced settings' }).click()
+    await expect(page.getByRole('button', { name: 'Quality' })).toBeVisible()
+    await expect(theSwitch(page)).toHaveCount(0)
+  })
+}

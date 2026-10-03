@@ -41,8 +41,8 @@ import { isQwenEnhancerFile, improveWriters, pickQwenEnhancer } from '../../lib/
 import { extraReferenceSlots } from '../../lib/edit-references'
 import { supportsTransparent } from '../../lib/transparent-image'
 import { localTier } from '../../lib/render/local-model-tier'
+import { QWEN21_OFFICIAL_MODEL as MODEL, NOCT_Q_MODEL, QWEN21_WEIGHTS } from './qwen21-weights'
 
-const MODEL = 'qwen_image_2.1_int8_convrot.safetensors'
 const OFFICIAL = 'qwen3vl_8b_int8_convrot.safetensors'
 const FREE = 'qwen3vl_8b_int8_convrot_heretic.safetensors'
 const VAE_FILE = 'qwen_image_2.1_vae_bf16.safetensors'
@@ -52,7 +52,7 @@ const T2I_FREE = 'qwen3.5_9b_qwen_image_2.1_pe_t2i_heretic.int8_convrot.safetens
 const I2I_FREE = 'qwen3.5_9b_qwen_image_2.1_pe_i2i_heretic.int8_convrot.safetensors'
 
 const nodes = (withEncodeNode = true) => ({
-  UNETLoader: { input: { required: { unet_name: [[MODEL]] } } },
+  UNETLoader: { input: { required: { unet_name: [[MODEL, NOCT_Q_MODEL]] } } },
   CLIPLoader: { input: { required: { clip_name: [[OFFICIAL, FREE]] } } },
   VAELoader: { input: { required: { vae_name: [[VAE_FILE]] } } },
   ...(withEncodeNode
@@ -66,12 +66,12 @@ const nodes = (withEncodeNode = true) => ({
   SaveImage: { input: { required: {} } },
 })
 
-const baseParams = {
-  model: MODEL,
+const paramsFor = (model: string) => ({
+  model,
   prompt: 'a red apple on a white plate', negativePrompt: '',
   sampler: 'euler', scheduler: 'simple',
   steps: 25, cfgScale: 1, width: 1024, height: 1024, seed: 42, batchSize: 1,
-}
+})
 
 /** What ComfyUI lists in models/text_encoders and models/vae. */
 function serve(clips: string[], vaes: string[] = [VAE_FILE]) {
@@ -155,7 +155,7 @@ describe('which encoder a run takes', () => {
 
 // ── The resolver ComfyUI graphs are built from ──────────────────────────
 
-describe('findMatchingCLIP for Qwen-Image 2.1', () => {
+describe.each(QWEN21_WEIGHTS)('findMatchingCLIP for Qwen-Image 2.1, %s', (_weights, MODEL) => {
   it('only the edition without refusals installed: it is the encoder', async () => {
     serve([FREE])
     expect(await findMatchingCLIP('qwenimage', MODEL)).toBe(FREE)
@@ -193,23 +193,25 @@ describe('findMatchingCLIP for Qwen-Image 2.1', () => {
 
 // ── Every graph of the family, with the other encoder in the loader ─────
 
-/** The same run built twice: with the official encoder, and with the edition
- *  without refusals. Nothing but the loader's file name may differ. */
-async function bothGraphs(params: Record<string, unknown>) {
-  serve([OFFICIAL])
-  const official = await buildDynamicWorkflow({ ...baseParams, ...params } as never)
-  serve([FREE])
-  const free = await buildDynamicWorkflow({ ...baseParams, ...params } as never)
-  return { official, free }
-}
-
 function withEncoder(graph: Awaited<ReturnType<typeof buildDynamicWorkflow>>, file: string) {
   const copy = JSON.parse(JSON.stringify(graph)) as typeof graph
   nodeOf(copy, 'CLIPLoader')![1].inputs.clip_name = file
   return copy
 }
 
-describe('buildDynamicWorkflow with the encoder without refusals', () => {
+describe.each(QWEN21_WEIGHTS)('buildDynamicWorkflow with the encoder without refusals, %s', (_weights, MODEL) => {
+  const baseParams = paramsFor(MODEL)
+
+  /** The same run built twice: with the official encoder, and with the edition
+   *  without refusals. Nothing but the loader's file name may differ. */
+  async function bothGraphs(params: Record<string, unknown>) {
+    serve([OFFICIAL])
+    const official = await buildDynamicWorkflow({ ...baseParams, ...params } as never)
+    serve([FREE])
+    const free = await buildDynamicWorkflow({ ...baseParams, ...params } as never)
+    return { official, free }
+  }
+
   const cases: [string, Record<string, unknown>][] = [
     ['Image: generate from a prompt', {}],
     ['Edit without a mask: one source image', { prompt: 'put a blue hat on the person', inputImage: 'source.png', denoise: 0.7 }],
@@ -278,7 +280,7 @@ describe('buildDynamicWorkflow with the encoder without refusals', () => {
 
 // ── What hangs on the family, not on the encoder ────────────────────────
 
-describe('what the family can do does not depend on the encoder', () => {
+describe.each(QWEN21_WEIGHTS)('what the family can do does not depend on the encoder, %s', (_weights, MODEL) => {
   it('reference slots, transparent background and the tier come from the image model', () => {
     const type = classifyModel(MODEL)
     expect(extraReferenceSlots(type, MODEL)).toBe(3)
@@ -287,7 +289,7 @@ describe('what the family can do does not depend on the encoder', () => {
   })
 
   it('the prompt enhancers are found and picked the same with this encoder installed', () => {
-    const situation = { local: true, modelType: 'qwenimage', textEncoders: [FREE, T2I, T2I_FREE, I2I_FREE] }
+    const situation = { local: true, modelType: classifyModel(MODEL), textEncoders: [FREE, T2I, T2I_FREE, I2I_FREE] }
     expect(improveWriters({ ...situation, intent: 'image' }).map((w) => w.id)).toEqual(['official', 'unfiltered', 'chat'])
     expect(pickQwenEnhancer({ ...situation, intent: 'image' }, 'unfiltered')?.file).toBe(T2I_FREE)
     expect(pickQwenEnhancer({ ...situation, intent: 'edit' }, 'auto')?.file).toBe(I2I_FREE)

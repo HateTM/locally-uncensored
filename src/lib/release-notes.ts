@@ -181,6 +181,10 @@ export const RELEASE_NOTES: ReleaseNote[] = [
             detail: 'Models, Image, Get new has "Qwen-Image 2.1 (No Refusals)". It is the same image model and the same VAE with a community text encoder that has its refusal direction removed (Heretic). If you already have Qwen-Image 2.1, only the text encoder is downloaded, about 9 GB. With both text encoders installed, the Expert settings in Create have a "Text encoder" row to pick which one reads your prompt, for new pictures, for edits and for pictures made in chat. The official one stays the default.',
           },
           {
+            title: 'Noct Q, an unfiltered finetune of Qwen-Image 2.1, is in the Model Manager.',
+            detail: 'Models, Image, Get new has "Noct Q (Qwen-Image 2.1, Unfiltered)", a community finetune of Qwen-Image 2.1 by Noctaluna. Here the image model itself is changed: its notice says the Qwen-Image 2.1 transformer weights were modified. It uses the official text encoder and VAE, so if you already have Qwen-Image 2.1, only the image model is downloaded, about 7 GB. The app treats it as Qwen-Image 2.1: new pictures, edits with reference images, transparent background, the text encoder choice and the prompt enhancer are there for it. Qwen Research License, non-commercial use. Not yet run on our own hardware.',
+          },
+          {
             title: 'Models carry a Best mark, and older ones sit under "Older models".',
             detail: 'The model picker in Create and the Model Manager put the current models first with a Best mark and collect the ones a newer family has replaced under "Older models". No model was removed.',
           },

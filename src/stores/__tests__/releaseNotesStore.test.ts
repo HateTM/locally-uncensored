@@ -406,6 +406,8 @@ describe('the notes table', () => {
       'transparent background', 'rewritten by', 'comfyui 0.37.2', 'issue 148',
       // Qwen-Image 2.1 mit dem Text-Encoder ohne Verweigerungen.
       'qwen-image 2.1 (no refusals)', 'which one reads your prompt',
+      // Noct Q, der Community-Finetune von Qwen-Image 2.1.
+      'noct q (qwen-image 2.1, unfiltered)', 'transformer weights were modified',
       // Shots, LoRA-Staerke, Turbo-LoRA, Marken.
       'shots slider', 'from -10 to 10', 'ready to install', 'older models',
       // Passt das Modell zur Grafikkarte: Model Manager, Waehler, Wartezeile.

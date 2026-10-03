@@ -324,6 +324,11 @@ export function classifyModel(name: string | null | undefined): ModelType {
   // Before the 'krea' check and the 'xl' suffix scan below, so no later tag
   // can take a 2.1 file first.
   if (/qwen[._-]?image/.test(lower) && /2[._-]?1/.test(lower)) return 'qwenimage'
+  // Noct Q (Noctaluna, September 2026): a Qwen-Image 2.1 finetune whose file
+  // names say neither "qwen" nor "2.1" (NoctQ_V4_int8_convrot.safetensors on
+  // Hugging Face, the CivitAI spelling noctQ_v4). Its header carries the
+  // tensor names and shapes of the official file, so it runs on the same lane.
+  if (/(^|[^a-z0-9])noct[._ -]?q(?![a-z])/.test(lower)) return 'qwenimage'
   // Qwen-Image 1 (2508, 2512) and Qwen-Image-Edit (2509, 2511, FireRed):
   // Qwen2.5-VL 7B encoder, qwen_image_vae, and for the edit files
   // TextEncodeQwenImageEditPlus (Discord 2026-09-28: "every model except

@@ -41,6 +41,16 @@ image models in the cloud catalogue.
   the Expert settings in Create have a "Text encoder" row to pick which one
   reads your prompt, for new pictures, for edits and for pictures made in
   chat. The official one stays the default.
+- **Noct Q, an unfiltered finetune of Qwen-Image 2.1, is in the Model
+  Manager.** Models, Image, Get new has "Noct Q (Qwen-Image 2.1,
+  Unfiltered)", a community finetune of Qwen-Image 2.1 by Noctaluna. Here
+  the image model itself is changed: its notice says the Qwen-Image 2.1
+  transformer weights were modified. It uses the official text encoder and
+  VAE, so if you already have Qwen-Image 2.1, only the image model is
+  downloaded, about 7 GB. The app treats it as Qwen-Image 2.1: new pictures,
+  edits with reference images, transparent background, the text encoder
+  choice and the prompt enhancer are there for it. Qwen Research License,
+  non-commercial use. Not yet run on our own hardware.
 - **"Improve my prompt" lets your chat model rewrite the prompt before a
   run.** The switch is in the advanced settings, off by default and
   remembered. When it is on, the chat model you picked rewrites your prompt

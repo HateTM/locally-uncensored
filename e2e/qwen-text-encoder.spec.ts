@@ -8,13 +8,19 @@ import { seedOnboardingDone } from './support/cloud-mock'
  * to pick which one reads the prompt. A rebuilt ComfyUI answers through
  * proxy_localhost with a local Qwen-Image 2.1 and, per test, the files in its
  * text encoder folder. Nothing is rendered.
+ *
+ * Run once per image model file of the family: the official weights and the
+ * Noct Q finetune, whose file name says neither "qwen" nor "2.1".
  */
 
-const QWEN = 'qwen_image_2.1_int8_convrot.safetensors'
+const WEIGHTS = [
+  ['official weights', 'qwen_image_2.1_int8_convrot.safetensors'],
+  ['Noct Q', 'NoctQ_V4_int8_convrot.safetensors'],
+] as const
 const OFFICIAL = 'qwen3vl_8b_int8_convrot.safetensors'
 const FREE = 'qwen3vl_8b_int8_convrot_heretic.safetensors'
 
-async function bootWithFakeComfy(page: Page, textEncoders: string[]) {
+async function bootWithFakeComfy(page: Page, model: string, textEncoders: string[]) {
   await page.addInitScript(tauriMockInit, { assistantReply: DEFAULT_ASSISTANT_REPLY, modelName: DEFAULT_MODEL_NAME, platform: 'windows' as const })
   await seedOnboardingDone(page)
   await page.addInitScript(([model, encoders]) => {
@@ -41,7 +47,7 @@ async function bootWithFakeComfy(page: Page, textEncoders: string[]) {
       if (url.includes('/object_info')) return Promise.resolve(JSON.stringify(nodes))
       return Promise.resolve('{}')
     }
-  }, [QWEN, textEncoders] as const)
+  }, [model, textEncoders] as const)
 }
 
 async function openExpert(page: Page, intent: string) {
@@ -55,34 +61,36 @@ async function openExpert(page: Page, intent: string) {
 const row = (page: Page) => page.getByRole('button', { name: 'Text encoder', exact: true })
 const saved = (page: Page) => page.evaluate(() => JSON.parse(localStorage.getItem('create-store') || '{}').state?.qwenTextEncoder)
 
-test('with both text encoders installed, Expert offers which one reads the prompt and remembers the pick', async ({ page }) => {
-  await bootWithFakeComfy(page, [OFFICIAL, FREE])
-  await openExpert(page, 'Image')
-  await expect(row(page)).toBeVisible({ timeout: 15_000 })
-  await expect(row(page)).toHaveCount(1)
-  await expect(row(page)).toHaveText('Qwen3-VL 8B')
+for (const [weights, model] of WEIGHTS) {
+  test(`${weights}: with both text encoders installed, Expert offers which one reads the prompt and remembers the pick`, async ({ page }) => {
+    await bootWithFakeComfy(page, model, [OFFICIAL, FREE])
+    await openExpert(page, 'Image')
+    await expect(row(page)).toBeVisible({ timeout: 15_000 })
+    await expect(row(page)).toHaveCount(1)
+    await expect(row(page)).toHaveText('Qwen3-VL 8B')
 
-  await row(page).click()
-  await expect(page.getByRole('option')).toHaveText(['Qwen3-VL 8B', 'Qwen3-VL 8B, no refusals'])
-  await page.getByRole('option', { name: 'Qwen3-VL 8B, no refusals' }).click()
-  await expect(row(page)).toHaveText('Qwen3-VL 8B, no refusals')
-  await expect.poll(() => saved(page)).toBe('unfiltered')
+    await row(page).click()
+    await expect(page.getByRole('option')).toHaveText(['Qwen3-VL 8B', 'Qwen3-VL 8B, no refusals'])
+    await page.getByRole('option', { name: 'Qwen3-VL 8B, no refusals' }).click()
+    await expect(row(page)).toHaveText('Qwen3-VL 8B, no refusals')
+    await expect.poll(() => saved(page)).toBe('unfiltered')
 
-  // Nothing of it sits in or above the prompt field: with the drawer closed
-  // the page shows no such row.
-  await page.keyboard.press('Escape')
-  await expect(row(page)).toHaveCount(0)
-  await expect(page.getByText('Text encoder', { exact: true })).toHaveCount(0)
+    // Nothing of it sits in or above the prompt field: with the drawer closed
+    // the page shows no such row.
+    await page.keyboard.press('Escape')
+    await expect(row(page)).toHaveCount(0)
+    await expect(page.getByText('Text encoder', { exact: true })).toHaveCount(0)
 
-  // The pick is still there after a restart, and Edit shows the same row.
-  await page.reload()
-  await openExpert(page, 'Edit / Image to Image')
-  await expect(row(page)).toHaveText('Qwen3-VL 8B, no refusals', { timeout: 15_000 })
-})
+    // The pick is still there after a restart, and Edit shows the same row.
+    await page.reload()
+    await openExpert(page, 'Edit / Image to Image')
+    await expect(row(page)).toHaveText('Qwen3-VL 8B, no refusals', { timeout: 15_000 })
+  })
 
-test('with one text encoder installed there is nothing to choose and no row', async ({ page }) => {
-  await bootWithFakeComfy(page, [FREE])
-  await openExpert(page, 'Image')
-  await expect(page.getByText('Sampler', { exact: true })).toBeVisible({ timeout: 15_000 })
-  await expect(row(page)).toHaveCount(0)
-})
+  test(`${weights}: with one text encoder installed there is nothing to choose and no row`, async ({ page }) => {
+    await bootWithFakeComfy(page, model, [FREE])
+    await openExpert(page, 'Image')
+    await expect(page.getByText('Sampler', { exact: true })).toBeVisible({ timeout: 15_000 })
+    await expect(row(page)).toHaveCount(0)
+  })
+}

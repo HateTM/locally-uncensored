@@ -188,6 +188,7 @@ describe('every bundle in the catalogue carries the two numbers', () => {
     ['Z-Image Base (Unfiltered, Quality)', 10, 16, 'big tight fits fits'],
     ['Qwen-Image 2.1 (Generate and Edit)', 16, 24, 'big big tight fits'],
     ['Qwen-Image 2.1 (No Refusals)', 16, 24, 'big big tight fits'],
+    ['Noct Q (Qwen-Image 2.1, Unfiltered)', 16, 24, 'big big tight fits'],
     ['Qwen-Image 2.1 Prompt Enhancer (Official)', 16, 16, 'big big fits fits'],
     ['Qwen-Image 2.1 Prompt Enhancer (No Refusals)', 16, 16, 'big big fits fits'],
     ['DreamShaper XL Turbo V2 (Anime/Stylized)', 6, 8, 'fits fits fits fits'],
