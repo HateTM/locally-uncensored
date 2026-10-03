@@ -404,6 +404,8 @@ describe('the notes table', () => {
       'ltx 2.5 needs comfyui 0.32.0, fasth3 0.35.0 and yue2 0.36.0', 'small (gguf q4)',
       // Qwen-Image 2.1: Schalter und Prompt Enhancer (GitHub 148).
       'transparent background', 'rewritten by', 'comfyui 0.37.2', 'issue 148',
+      // Qwen-Image 2.1 mit dem Text-Encoder ohne Verweigerungen.
+      'qwen-image 2.1 (no refusals)', 'which one reads your prompt',
       // Shots, LoRA-Staerke, Turbo-LoRA, Marken.
       'shots slider', 'from -10 to 10', 'ready to install', 'older models',
       // Passt das Modell zur Grafikkarte: Model Manager, Waehler, Wartezeile.

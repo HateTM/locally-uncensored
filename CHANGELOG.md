@@ -33,6 +33,14 @@ image models in the cloud catalogue.
   both for 16 GB cards (issue 148). With one installed, "Improve my prompt"
   lets you choose who writes in the "Rewritten by" row: the enhancer or your
   chat model. The enhancer needs ComfyUI 0.37.2 or newer.
+- **Qwen-Image 2.1 comes with a text encoder without refusals.** Models,
+  Image, Get new has "Qwen-Image 2.1 (No Refusals)". It is the same image
+  model and the same VAE with a community text encoder that has its refusal
+  direction removed (Heretic). If you already have Qwen-Image 2.1, only the
+  text encoder is downloaded, about 9 GB. With both text encoders installed,
+  the Expert settings in Create have a "Text encoder" row to pick which one
+  reads your prompt, for new pictures, for edits and for pictures made in
+  chat. The official one stays the default.
 - **"Improve my prompt" lets your chat model rewrite the prompt before a
   run.** The switch is in the advanced settings, off by default and
   remembered. When it is on, the chat model you picked rewrites your prompt

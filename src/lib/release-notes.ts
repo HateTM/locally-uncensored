@@ -177,6 +177,10 @@ export const RELEASE_NOTES: ReleaseNote[] = [
             detail: '3.0.4 said the turbo LoRA runs MiniMax H3 at 8 steps but not where to get it. It is now under Models, Video, Get new and under Models, LoRAs, Get new in a "Ready to install" list. The LoRA stack in Create shows it as soon as the download is done. FastH3 is already an 8 step model and leaves the turbo LoRA out.',
           },
           {
+            title: 'Qwen-Image 2.1 comes with a text encoder without refusals.',
+            detail: 'Models, Image, Get new has "Qwen-Image 2.1 (No Refusals)". It is the same image model and the same VAE with a community text encoder that has its refusal direction removed (Heretic). If you already have Qwen-Image 2.1, only the text encoder is downloaded, about 9 GB. With both text encoders installed, the Expert settings in Create have a "Text encoder" row to pick which one reads your prompt, for new pictures, for edits and for pictures made in chat. The official one stays the default.',
+          },
+          {
             title: 'Models carry a Best mark, and older ones sit under "Older models".',
             detail: 'The model picker in Create and the Model Manager put the current models first with a Best mark and collect the ones a newer family has replaced under "Older models". No model was removed.',
           },
