@@ -1,7 +1,8 @@
 /**
  * Der Download-Katalog: welche Dateien es gibt, wie groß sie sind und in
  * welchen ComfyUI-Ordner sie gehören. Reine Daten plus die Formen, die sie
- * beschreiben — dieses Modul importiert außer einem Typ nichts.
+ * beschreiben. Dieses Modul importiert außer einem Typ nur die reine
+ * Grafikspeicher-Regel aus lib/vram-fit, die selbst nichts importiert.
  *
  * Audit W-T2: Der Katalog stand in api/discover.ts, dem Modul, das Downloads
  * anstößt und ComfyUI nach installierten Dateien fragt. api/comfyui.ts braucht
@@ -21,6 +22,7 @@
 
 import type { ProviderId } from './providers/types'
 import type { ModelTier } from '../lib/render/model-tier'
+import { withVramNeed } from '../lib/vram-fit'
 
 export interface DiscoverModel {
   name: string
@@ -87,7 +89,7 @@ export interface DiscoverModel {
 // ─── Image Model Bundles ───
 
 export function getImageBundles(): ModelBundle[] {
-  return [
+  return withVramNeed([
     {
       name: 'Juggernaut XL V9 (Photorealistic)',
       description: 'Best photorealistic SDXL checkpoint. All in one. Just install and generate.',
@@ -285,7 +287,7 @@ export function getImageBundles(): ModelBundle[] {
     },
     {
       name: 'Z-Image Turbo (Unfiltered, Fast)',
-      description: 'Explicitly unfiltered image model. 8 to 15 seconds per image. No safety filters. Text to Image and Image to Image.',
+      description: 'Explicitly unfiltered image model. No safety filters. Text to Image and Image to Image.',
       tags: ['Z-Image', 'Unfiltered', 'Fast', '1024px'],
       uncensored: true,
       verified: true,
@@ -613,7 +615,7 @@ export function getImageBundles(): ModelBundle[] {
         },
       ],
     },
-  ]
+  ])
 }
 
 // Flat list for backwards compat
@@ -713,6 +715,15 @@ export interface ModelBundle {
   tags: string[]
   totalSizeGB: number
   vramRequired: string
+  /**
+   * The same requirement as numbers, stamped on every entry by the one rule in
+   * lib/vram-fit (never written by hand, so no entry can disagree with its own
+   * text): from `vramMinGB` the model runs, from `vramComfortGB` it runs
+   * without moving weights out of graphics memory. Null when the text names no
+   * number, which is the companion files whose need is the checkpoint's.
+   */
+  vramMinGB: number | null
+  vramComfortGB: number | null
   workflow: string
   /**
    * How the pickers order this bundle (Oct 2026, David). 'best' is today's open
@@ -767,7 +778,7 @@ export function getLoraAddonBundles(): ModelBundle[] {
 }
 
 export function getVideoBundles(): ModelBundle[] {
-  return [
+  return withVramNeed([
     {
       name: 'Wan 2.1 · 1.3B (Lightweight)',
       description: 'Best for 8 to 10 GB VRAM GPUs. Generates 480p video. Fast and lightweight.',
@@ -1441,7 +1452,7 @@ export function getVideoBundles(): ModelBundle[] {
         },
       ],
     },
-  ]
+  ])
 }
 
 // ─── 2.5.8 specialized local-lane bundles (music / talking character / motion) ───
@@ -1453,7 +1464,7 @@ export function getVideoBundles(): ModelBundle[] {
 // video list above (real uncensored finetunes) instead.
 
 export function getAudioBundles(): ModelBundle[] {
-  return [
+  return withVramNeed([
     {
       name: 'ACE Step 1.5 Turbo (Music)',
       description: 'Newest full song generator, MIT licensed. Vocals, lyrics and instruments from a text description. One file.',
@@ -1518,7 +1529,7 @@ export function getAudioBundles(): ModelBundle[] {
         },
       ],
     },
-  ]
+  ])
 }
 
 export function getLipsyncBundles(): ModelBundle[] {
@@ -1546,10 +1557,10 @@ export function getLipsyncBundles(): ModelBundle[] {
       filename: 'wav2vec2_large_english_fp16.safetensors', subfolder: 'audio_encoders', sizeGB: 0.59,
     },
   ]
-  return [
+  return withVramNeed([
     {
       name: 'Wan 2.2 S2V Q4 (Talking Character, GGUF)',
-      description: 'A portrait plus any voice becomes a talking video. Q4 quant, the comfortable pick for 12 GB cards.',
+      description: 'A portrait plus any voice becomes a talking video. Q4 quant, the pick for 12 GB cards.',
       tags: ['Wan 2.2', 'S2V', 'GGUF'],
       totalSizeGB: 20.0,
       vramRequired: '10-12 GB',
@@ -1588,7 +1599,7 @@ export function getLipsyncBundles(): ModelBundle[] {
         ...s2vSupport,
       ],
     },
-  ]
+  ])
 }
 
 export function getMotionBundles(): ModelBundle[] {
@@ -1608,7 +1619,7 @@ export function getMotionBundles(): ModelBundle[] {
       filename: 'wan_2.1_vae.safetensors', subfolder: 'vae', sizeGB: 0.24,
     },
   ]
-  return [
+  return withVramNeed([
     {
       name: 'Wan VACE 1.3B (Motion Control, light)',
       description: 'Your character copies the moves from any dance or pose video. The light pick, runs from 8 GB VRAM.',
@@ -1651,5 +1662,5 @@ export function getMotionBundles(): ModelBundle[] {
         ...wanSupport,
       ],
     },
-  ]
+  ])
 }

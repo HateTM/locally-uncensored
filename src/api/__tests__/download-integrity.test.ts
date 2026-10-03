@@ -33,6 +33,8 @@ function bundle(files: Array<Partial<DiscoverModel>>, totalSizeGB = 0): ModelBun
     tags: [],
     totalSizeGB,
     vramRequired: '8 GB',
+    vramMinGB: 8,
+    vramComfortGB: 8,
     workflow: 'wan',
     tier: 'standard',
     files: files.map(f => ({
