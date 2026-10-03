@@ -122,8 +122,8 @@ export function ReferenceStrip() {
             : `Name them in the prompt as ${shown.map((_, i) => `image ${i + 2}`).join(', ')}.`}
       </p>
       {/* A character saved from a video (lib/saved-characters) loads its photos
-          here with one click: the first becomes the source, the rest fill the
-          strip. */}
+          here with one click: they join the strip, and the first becomes the
+          source only when none is loaded. */}
       <SavedCharacterChips
         label="Saved characters"
         disabled={loading}

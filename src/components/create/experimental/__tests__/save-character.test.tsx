@@ -165,15 +165,17 @@ describe('what a saved character does next', () => {
     expect(s.trainImages.map((t) => t.name)).toEqual(['mira-01.jpg', 'mira-02.jpg'])
   })
 
-  it('the reference strip loads a saved character with one click', async () => {
+  it('the reference strip loads a saved character with one click, next to the source that is loaded', async () => {
     await saveCharacter('Mira', [photo('a'), photo('b'), photo('c'), photo('d'), photo('e'), photo('f')])
     useCreateStore.getState().setIntent('edit')
     useCreateStore.getState().setSource({ filename: 'scene.png', url: 'data:image/png;base64,AA', width: 8, height: 8 })
     render(<ReferenceStrip />)
     fireEvent.click(await screen.findByTitle('Load the photos of Mira'))
-    await waitFor(() => expect(useCreateStore.getState().source?.filename).toBe('up_mira-01.jpg'))
     // The store keeps four further photos at most, a model shows what it reads.
-    expect(useCreateStore.getState().references).toHaveLength(4)
+    await waitFor(() => expect(useCreateStore.getState().references).toHaveLength(4))
+    expect(useCreateStore.getState().references[0].filename).toBe('up_mira-01.jpg')
+    // The picture being edited is not replaced (box run, 03.10.2026).
+    expect(useCreateStore.getState().source?.filename).toBe('scene.png')
   })
 
   it('the Character Studio board adds the photos of a saved character', async () => {

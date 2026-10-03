@@ -12,20 +12,30 @@ function asFiles(name: string, photos: readonly Blob[]): File[] {
 }
 
 /**
- * The first photo becomes the source image, the next ones fill the reference
- * strip under it. Edit and Animate Image keep their tab, every other tab
- * switches to Edit. A model shows and sends only as many photos as it reads.
+ * Loads the photos for an edit. With a source image already loaded in Edit or
+ * Animate Image it stays, with its mask, and the photos join the reference
+ * strip as far as it has room. Otherwise the first photo becomes the source
+ * and the next ones fill the strip. Edit and Animate Image keep their tab,
+ * every other tab switches to Edit and starts over with these photos. A model
+ * shows and sends only as many photos as it reads.
  * Returns how many photos were loaded.
  */
 export async function loadPhotosAsReferences(name: string, photos: readonly Blob[]): Promise<number> {
-  const files = asFiles(name, photos).slice(0, MAX_STORED_REFERENCES + 1)
-  if (files.length === 0) return 0
   const st = useCreateStore.getState()
   const intent = st.intent()
-  if (intent !== 'edit' && intent !== 'animate') st.setIntent('edit')
+  const stays = intent === 'edit' || intent === 'animate'
+  if (!stays) st.setIntent('edit')
+  const keepSource = stays && !!st.source
+  const room = keepSource ? MAX_STORED_REFERENCES - st.references.length : MAX_STORED_REFERENCES + 1
+  const files = asFiles(name, photos).slice(0, Math.max(0, room))
+  if (files.length === 0) return 0
   const refs = []
   for (const file of files) refs.push(await loadImageRef(file))
   const now = useCreateStore.getState()
+  if (keepSource && now.source) {
+    now.setReferences([...now.references, ...refs].slice(0, MAX_STORED_REFERENCES))
+    return refs.length
+  }
   now.setBatchSources([])
   now.setMask(null)
   now.setSource(refs[0])
