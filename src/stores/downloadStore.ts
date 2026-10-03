@@ -121,6 +121,10 @@ interface DownloadStoreState {
   bundleMap: BundleMap  // filename → bundle name
   /** Partials found on disk with no transfer behind them, keyed by stem. */
   orphans: Record<string, OrphanEntry>
+  /** Files the user cancelled and has not started again. The tray keeps them
+   *  with their bundle, so a bundle with cancelled files never reads as
+   *  complete (lib/download-tray). This session only. */
+  cancelled: string[]
   polling: boolean
   pollInterval: ReturnType<typeof setInterval> | null
   pollCount: number
@@ -137,6 +141,8 @@ interface DownloadStoreState {
   resume: (id: string) => Promise<void>
   retry: (id: string) => Promise<void>
   dismiss: (id: string) => void
+  /** The user cleared the bundle's row: its cancelled files go with it. */
+  forgetCancelled: (ids: string[]) => void
   scanOrphans: () => Promise<void>
   resumeOrphan: (stem: string) => Promise<void>
   discardOrphan: (stem: string) => Promise<void>
@@ -229,6 +235,7 @@ export const useDownloadStore = create<DownloadStoreState>()(persist((set, get) 
   downloadMeta: {},
   bundleMap: {},
   orphans: {},
+  cancelled: [],
   polling: false,
   pollInterval: null,
 
@@ -308,7 +315,9 @@ export const useDownloadStore = create<DownloadStoreState>()(persist((set, get) 
         // entries that matter are the ones just started.
         for (const k of keys.slice(0, keys.length - META_LIMIT)) delete next[k]
       }
-      return { downloadMeta: next }
+      // Every start goes through here first, so a file that is started
+      // again stops counting as cancelled.
+      return { downloadMeta: next, cancelled: s.cancelled.filter((f) => f !== filename) }
     })
   },
 
@@ -349,13 +358,20 @@ export const useDownloadStore = create<DownloadStoreState>()(persist((set, get) 
   /** The user aborting: the transfer stops AND the partial file goes. The one
    *  path that is allowed to throw bytes away. */
   cancel: async (id: string) => {
+    // A finished file has nothing to cancel. "Cancel all" on a bundle used to
+    // drop its row too, and the next poll brought it straight back.
+    if (get().downloads[id]?.status === 'complete') return
     await cancelDownload(id)
     set(s => {
       const updated = { ...s.downloads }
       delete updated[id]
       // An adopted orphan must go from BOTH places or the next poll re-adopts
       // the row the user just cancelled.
-      return { downloads: updated, orphans: withoutFilename(s.orphans, id) }
+      return {
+        downloads: updated,
+        orphans: withoutFilename(s.orphans, id),
+        cancelled: s.cancelled.includes(id) ? s.cancelled : [...s.cancelled, id],
+      }
     })
   },
 
@@ -433,6 +449,10 @@ export const useDownloadStore = create<DownloadStoreState>()(persist((set, get) 
       delete updated[id]
       return { downloads: updated, orphans: withoutFilename(s.orphans, id) }
     })
+  },
+
+  forgetCancelled: (ids: string[]) => {
+    set(s => ({ cancelled: s.cancelled.filter((f) => !ids.includes(f)) }))
   },
 
   /**

@@ -8,9 +8,9 @@ import { useDownloadStore } from '../../stores/downloadStore'
 import { isPermanentDownloadError } from '../../api/discover'
 import { useMlxInstallStore } from '../../stores/mlxInstallStore'
 import { isMlxImageHost } from '../../api/mlx-image'
-import { formatBytes, countLabel } from '../../lib/formatters'
+import { formatBytes } from '../../lib/formatters'
 import { HINWEIS_TEXT, PUNKT_FARBE } from '../../lib/hinweis'
-import { trayAfterPulse, TRAY_CLOSED, NO_PULSE } from '../../lib/download-tray'
+import { trayAfterPulse, trayBundles, bundleVerdict, TRAY_CLOSED, NO_PULSE } from '../../lib/download-tray'
 
 function ProgressBar({ progress }: { progress: number }) {
   return (
@@ -44,13 +44,10 @@ export function DownloadBadge() {
   )
   const comfyActiveCount = comfyEntries.filter(([, d]) => d.status === 'downloading' || d.status === 'connecting').length
 
-  // Group comfyUI downloads by bundle name
-  const comfyBundles = new Map<string, { id: string; d: typeof comfyDownloads[string] }[]>()
-  for (const [id, d] of comfyEntries) {
-    const bundleName = bundleMap[id] || id // Ungrouped files show as individual
-    if (!comfyBundles.has(bundleName)) comfyBundles.set(bundleName, [])
-    comfyBundles.get(bundleName)!.push({ id, d })
-  }
+  // Grouped by bundle, each bundle with the files the user cancelled
+  // (lib/download-tray). Ungrouped files show as individual rows.
+  const cancelledFiles = useDownloadStore(s => s.cancelled)
+  const comfyBundles = trayBundles(Object.fromEntries(comfyEntries), bundleMap, cancelledFiles)
 
   // MLX installs (macOS image/video engines + models), fed by the Rust
   // install slots via mlxInstallStore.
@@ -153,6 +150,10 @@ export function DownloadBadge() {
                   onClick={() => {
                     textEntries.filter(([, s]) => s.complete).forEach(([n]) => dismissPull(n))
                     comfyEntries.filter(([, d]) => d.status === 'complete').forEach(([id]) => useDownloadStore.getState().dismiss(id))
+                    // A bundle that is over takes its cancelled files with it.
+                    useDownloadStore.getState().forgetCancelled(
+                      comfyBundles.filter(b => bundleVerdict(b).state !== 'running').flatMap(b => b.cancelled),
+                    )
                     mlxEntries.filter(e => e.status === 'complete').forEach(e => useMlxInstallStore.getState().dismiss(e.kind))
                   }}
                   className="text-[0.6rem] text-gray-500 hover:text-gray-300 transition-colors"
@@ -210,13 +211,18 @@ export function DownloadBadge() {
               })}
 
               {/* ComfyUI downloads (image/video models) — grouped by bundle */}
-              {Array.from(comfyBundles.entries()).map(([bundleName, files]) => {
-                const allComplete = files.every(f => f.d.status === 'complete')
+              {comfyBundles.map((bundle) => {
+                const { name: bundleName, files, cancelled } = bundle
+                // 'partial' is a bundle whose remaining files all finished
+                // while others were cancelled: nothing runs any more, and it
+                // is not complete either.
+                const verdict = bundleVerdict(bundle)
+                const settled = verdict.state !== 'running'
                 const totalBytes = files.reduce((s, f) => s + f.d.total, 0)
                 const doneBytes = files.reduce((s, f) => s + f.d.progress, 0)
                 const bundleProg = totalBytes > 0 ? (doneBytes / totalBytes) * 100 : 0
                 const bundleSpeed = files.reduce((s, f) => s + (f.d.status === 'downloading' ? (f.d.speed || 0) : 0), 0)
-                const isBundle = files.length > 1
+                const isBundle = files.length + cancelled.length > 1
                 const failed = files.filter(f => f.d.status === 'error')
                 // Der Grund, aus dem ein Download stehen blieb, in Worten. Eine
                 // abgelehnte Uebertragung zeigte frueher nur einen Retry-Knopf,
@@ -252,16 +258,42 @@ export function DownloadBadge() {
                         {retryable.length > 0 && (
                           <button onClick={() => retryable.forEach(f => useDownloadStore.getState().retry(f.id))} className="p-0.5 rounded hover:bg-red-500/20 text-red-400 hover:text-red-300 transition-colors" title="Retry failed"><RotateCcw size={11} /></button>
                         )}
-                        {allComplete ? (
-                          <button onClick={() => files.forEach(f => useDownloadStore.getState().dismiss(f.id))} className="p-0.5 rounded hover:bg-white/10 text-gray-500 hover:text-gray-300 transition-colors" title={files.length === 1 ? 'Dismiss' : 'Dismiss all'}><X size={11} /></button>
+                        {settled ? (
+                          <button
+                            onClick={() => {
+                              files.forEach(f => useDownloadStore.getState().dismiss(f.id))
+                              useDownloadStore.getState().forgetCancelled(cancelled)
+                            }}
+                            className="p-0.5 rounded hover:bg-white/10 text-gray-500 hover:text-gray-300 transition-colors" title={isBundle ? 'Dismiss all' : 'Dismiss'}
+                          ><X size={11} /></button>
                         ) : (
                           <button onClick={() => files.forEach(f => useDownloadStore.getState().cancel(f.id))} className="p-0.5 rounded hover:bg-white/10 text-gray-500 hover:text-gray-300 transition-colors" title={files.length === 1 ? 'Cancel' : 'Cancel all'}><X size={11} /></button>
                         )}
                       </div>
                     </div>
 
-                    {allComplete ? (
-                      <div className="flex items-center gap-1.5 text-green-400"><CheckCircle size={11} /><span className="text-[0.65rem]">Complete ({countLabel(files.length, 'file')})</span></div>
+                    {verdict.state === 'complete' ? (
+                      <div className="flex items-center gap-1.5 text-green-400"><CheckCircle size={11} /><span className="text-[0.65rem]">{verdict.line}</span></div>
+                    ) : verdict.state === 'partial' ? (
+                      // No check and no green: files of this bundle are
+                      // missing, and its card offers the download again.
+                      <>
+                        <p className={`text-[0.65rem] ${HINWEIS_TEXT.ruhig}`}>{verdict.line}</p>
+                        <div className="mt-1.5 space-y-0.5">
+                          {files.map(({ id, d }) => (
+                            <div key={id} className="flex items-center justify-between text-[0.55rem] text-gray-500">
+                              <span className="truncate flex-1 font-mono">{d.filename || id}</span>
+                              <span className="shrink-0 ml-2 text-green-400">Done</span>
+                            </div>
+                          ))}
+                          {cancelled.map((id) => (
+                            <div key={id} className="flex items-center justify-between text-[0.55rem] text-gray-500">
+                              <span className="truncate flex-1 font-mono">{id}</span>
+                              <span className="shrink-0 ml-2">Cancelled</span>
+                            </div>
+                          ))}
+                        </div>
+                      </>
                     ) : (
                       <>
                         {totalBytes > 0 && <ProgressBar progress={bundleProg} />}
@@ -327,6 +359,12 @@ export function DownloadBadge() {
                                     : d.total > 0 ? <>{Math.round((d.progress / d.total) * 100)}%{d.speed > 0 && <span className="ml-1 text-gray-400">{formatBytes(d.speed)}/s</span>}</>
                                     : d.status === 'connecting' ? 'Connecting' : '...'}
                                 </span>
+                              </div>
+                            ))}
+                            {cancelled.map((id) => (
+                              <div key={id} className="flex items-center justify-between text-[0.55rem] text-gray-500">
+                                <span className="truncate flex-1 font-mono">{id}</span>
+                                <span className="shrink-0 ml-2">Cancelled</span>
                               </div>
                             ))}
                           </div>

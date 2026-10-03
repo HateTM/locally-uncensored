@@ -1206,7 +1206,7 @@ export function getVideoBundles(): ModelBundle[] {
     },
     {
       name: 'LTX 2.5 · Small (GGUF Q4)',
-      description: 'The same video with sound model in a smaller 4 bit version for 16 GB graphics cards. Needs the ComfyUI-GGUF node pack, the install offers it. Slightly softer detail than the full version.',
+      description: 'The same video with sound model in a smaller 4 bit version for 16 GB graphics cards. The ComfyUI-GGUF node pack it needs is installed with it. Slightly softer detail than the full version.',
       tags: ['LTX 2.5', 'Audio', 'GGUF'],
       totalSizeGB: 28.4,
       vramRequired: '16 GB',
