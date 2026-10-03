@@ -1134,6 +1134,11 @@ export const useCreateStore = create<CreateState>()(
           hiresUpscaleMethod: 'nearest-exact',
           ...(d.frames ? { frames: d.frames } : {}),
           ...(d.fps ? { fps: d.fps } : {}),
+          // A model's defaults carry no LoRA, so the stack goes off like with
+          // Clear (and the local character that rode on it). The strength each
+          // LoRA was left at stays in loraStrengths for the next time.
+          selectedLoras: [],
+          selectedCharacter: s.selectedCharacter?.id.startsWith('local:') ? null : s.selectedCharacter,
         })
       },
 

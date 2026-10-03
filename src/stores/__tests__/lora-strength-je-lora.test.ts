@@ -99,3 +99,31 @@ describe('one value per LoRA', () => {
     expect(saved.loraStrengths).toEqual({ [A]: -2 })
   })
 })
+
+// The box, 03.10.2026: "Reset to model defaults" left a LoRA from an earlier
+// session switched on (only Clear removed it), so the run after a reset was
+// not the model's own picture. Reset switches the stack off like Clear does.
+// The strength each LoRA was left at stays remembered.
+describe('Reset to model defaults and the LoRA stack', () => {
+  it('switches the stack off and keeps the remembered strength', () => {
+    useCreateStore.setState({ selectedLoras: [], loraStrengths: {}, selectedCharacter: null } as never)
+    const s = useCreateStore.getState()
+    s.toggleLora('char_lukompass_zimage.safetensors')
+    s.setLoraStrengthFor('char_lukompass_zimage.safetensors', 1.33)
+    useCreateStore.getState().resetParamsToModelDefaults()
+    expect(useCreateStore.getState().selectedLoras).toEqual([])
+    expect(useCreateStore.getState().loraStrengths['char_lukompass_zimage.safetensors']).toBe(1.33)
+    useCreateStore.getState().toggleLora('char_lukompass_zimage.safetensors')
+    expect(useCreateStore.getState().selectedLoras).toEqual([{ name: 'char_lukompass_zimage.safetensors', strength: 1.33 }])
+  })
+
+  it('takes the local character that rode on a LoRA with it, like Clear', () => {
+    useCreateStore.setState({
+      selectedLoras: [{ name: 'char_probe.safetensors', strength: 1 }],
+      selectedCharacter: { id: 'local:char_probe.safetensors', name: 'probe' },
+    } as never)
+    useCreateStore.getState().resetParamsToModelDefaults()
+    expect(useCreateStore.getState().selectedLoras).toEqual([])
+    expect(useCreateStore.getState().selectedCharacter).toBeNull()
+  })
+})
