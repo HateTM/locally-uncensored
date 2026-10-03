@@ -15,7 +15,9 @@ import { useUIStore } from '../../../stores/uiStore'
 import { useContentPolicy } from '../../../hooks/useContentPolicy'
 import { Select, type SelectOption } from '../ui/Select'
 import { TYPE_BADGE } from './badges'
-import { resolveLocalOpPick, videoLaneModels } from '../../../api/comfyui'
+import { useLocalPick } from './localPick'
+import { useLocalModelFits } from '../../../hooks/useLocalModelFit'
+import { vramFitLabel } from '../../../lib/vram-fit'
 
 // Portplan P7: lipsync/music/extend/motion reach the Studio track through the
 // SAME picker as their classic op-specialized twins, one list, matching what
@@ -51,6 +53,9 @@ const NO_REFUSALS_COLOR = {
 // Local-mode discovery (2.5.8): hosted models ride at the bottom of the local
 // picker as teaser rows — picking one opens the Cloud sheet instead of
 // changing the selection. Value prefix keeps them apart from real checkpoints.
+// The card mark on a local row wears the same quiet tone as "Open weights".
+const FIT_MARK_COLOR = 'text-gray-500 dark:text-gray-600'
+
 const TEASER_PREFIX = 'lu-cloud-teaser:'
 const TEASER_ROWS = 4
 
@@ -196,16 +201,6 @@ function CloudModelChip() {
 }
 
 function LocalModelChip() {
-  const mode = useCreateStore((s) => s.mode)
-  const intent = useCreateStore((s) => s.intent())
-  const imageModel = useCreateStore((s) => s.imageModel)
-  const videoModel = useCreateStore((s) => s.videoModel)
-  const localOpModel = useCreateStore((s) => s.localOpModel)
-  const imageModelList = useCreateStore((s) => s.imageModelList)
-  const videoModelList = useCreateStore((s) => s.videoModelList)
-  const audioModelList = useCreateStore((s) => s.audioModelList)
-  const lipsyncModelList = useCreateStore((s) => s.lipsyncModelList)
-  const motionModelList = useCreateStore((s) => s.motionModelList)
   const setImageModel = useCreateStore((s) => s.setImageModel)
   const setVideoModel = useCreateStore((s) => s.setVideoModel)
   const setLocalOpModel = useCreateStore((s) => s.setLocalOpModel)
@@ -213,28 +208,16 @@ function LocalModelChip() {
   const setCloudTeaser = useUIStore((s) => s.setCloudTeaser)
   const catalogModels = useCloudCatalogStore((s) => s.models)
 
-  const isVideo = mode === 'video'
-  // The 2.5.8 lanes with their own local model families. Extend is NOT here:
-  // it rides the regular i2v-capable video list (last-frame continue).
-  const laneList =
-    intent === 'music' ? audioModelList
-    : intent === 'lipsync' ? lipsyncModelList
-    : intent === 'motion' ? motionModelList
-    : null
-
-  // Mirror the cloud picker's op-gating (David 2026-07-17: "only offer models
-  // that can actually do it"): Animate/Extend list i2v-capable local models,
-  // Video lists t2v-capable ones (SVD/FramePack are i2v-only and drop there).
-  // Shared with Stage's missing-models gate so card and picker cannot drift.
-  const rawList = isVideo ? videoModelList : imageModelList
-  const list = laneList ?? (!isVideo ? rawList : videoLaneModels(rawList, intent))
-  const stored = laneList ? localOpModel : (isVideo ? videoModel : imageModel)
-  // Reflect the model the run will really use — a leftover pick the current
-  // op can't perform must not show as "selected". Lanes share the submit-side
-  // rule (resolveLocalOpPick) so chip, meter and run always agree.
-  const value = laneList
-    ? resolveLocalOpPick(stored, list)
-    : list.some((m) => m.name === stored) ? stored : (list[0]?.name ?? stored)
+  // Which model a run takes lives in localPick, shared with the waiting area.
+  const { isVideo, laneList, list, value } = useLocalPick()
+  // A model that does not sit comfortably on the detected card says so on its
+  // row, here, where it is picked. Never at the prompt field. A model that
+  // fits, and a machine without a detected card, add nothing.
+  const { cardGb, fitOf } = useLocalModelFits(list)
+  const fitMarks = (name: string) => {
+    const fit = fitOf(name)
+    return fit === 'tight' || fit === 'big' ? [{ label: vramFitLabel(fit, cardGb), color: FIT_MARK_COLOR }] : []
+  }
 
   // Beste oben mit der Marke "Best", Aeltere gesammelt unten unter "Older
   // models", der Rest in gewohnter Reihenfolge. Wie im Cloud-Waehler; nichts
@@ -245,7 +228,7 @@ function LocalModelChip() {
     label: prettyName(m.name),
     badge: TYPE_BADGE[m.type],
     group: tierGroup({ tier }),
-    tags: tierMarks({ tier }),
+    tags: [...tierMarks({ tier }), ...fitMarks(m.name)],
   }))
   // Discovery rows: a few hosted models of this kind at the list's tail.
   // Picking one opens the Cloud sheet; the local selection stays untouched.

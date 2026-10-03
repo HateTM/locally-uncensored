@@ -1,8 +1,11 @@
 import { itemHasAlpha } from '../../../lib/transparent-image'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
 import { Cpu, Sparkles, ImageDown, Maximize2, Download, Wand2, MonitorOff, AudioLines, Film, Trash2, UserRoundPlus } from 'lucide-react'
 import { coldLoadHint } from '../../../lib/cold-load-notice'
+import { slowLoadHint } from '../../../lib/vram-fit'
+import { useLocalModelFits } from '../../../hooks/useLocalModelFit'
+import { useLocalPick } from './localPick'
 import { useCreateStore, type GalleryItem, type ProgressPhase } from '../../../stores/createStore'
 import { isMlxImageHost } from '../../../api/mlx-image'
 import { ICON_LG, ICON_STROKE_MARK } from '../../ui/icon-size'
@@ -61,9 +64,22 @@ function ColdLoadLine() {
     const id = setInterval(() => setElapsedMs((ms) => ms + 1000), 1000)
     return () => clearInterval(id)
   }, [])
+  // After a minute a model that does not sit comfortably on the card gets the
+  // reason for the wait (the owner's 12 GB box, October 2026: Z-Image stood
+  // here for more than 300 s and the line said nothing about why). Same clock,
+  // same place, and silent for a model that fits or a card nobody detected.
+  const { list, value } = useLocalPick()
+  const picked = useMemo(() => list.filter((m) => m.name === value), [list, value])
+  const { fitOf } = useLocalModelFits(picked)
   const hint = coldLoadHint(true, elapsedMs)
   if (!hint) return null
-  return <p className="t-body text-gray-500 text-center max-w-[22rem]">{hint}</p>
+  const slow = slowLoadHint(fitOf(value), elapsedMs)
+  return (
+    <div className="space-y-1 text-center max-w-[22rem]">
+      <p className="t-body text-gray-500">{hint}</p>
+      {slow && <p className="t-body text-gray-500" data-testid="slow-load-hint">{slow}</p>}
+    </div>
+  )
 }
 
 // Generation progress — phase-aware animation.
