@@ -7,7 +7,7 @@ import { checkComfyConnection, refreshComfyModels } from './comfyui'
 import { clearNodeCache } from './comfyui-nodes'
 import { startModelDownload, getDownloadProgress, modelsNotVisibleInComfy, comfyModelTarget, catalogDigestFor } from './discover'
 import { downloadBundleFiles, waitForModelsVisible } from '../lib/bundle-install'
-import type { FixupDeps } from '../lib/render-fixups'
+import { WAITING_FOR_ANSWER, type FixupDeps } from '../lib/render-fixups'
 import { useCreateStore } from '../stores/createStore'
 import { useDownloadStore } from '../stores/downloadStore'
 import { useComfyInstallStore } from '../stores/comfyInstallStore'
@@ -26,6 +26,7 @@ export function renderFixupDeps(onStatus: (line: string) => void, signal?: Abort
   }
   return {
     ask: (prompt) => new Promise<boolean>((resolve) => {
+      onStatus(WAITING_FOR_ANSWER)
       useCreateStore.getState().setFixupPrompt({
         ...prompt,
         resolve: (go) => { useCreateStore.getState().setFixupPrompt(null); resolve(go) },

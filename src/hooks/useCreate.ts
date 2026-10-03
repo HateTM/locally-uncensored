@@ -56,7 +56,7 @@ import { getAllNodeInfo, clearNodeCache } from '../api/comfyui-nodes'
 import { apiNodes, type ComfyApiGraph, type ComfyExecutionMessage, type ComfyHistoryEntry } from '../types/comfy-graph'
 import { restartComfyForNewNodes } from '../api/comfy-restart'
 import { installCustomNodes } from '../api/discover'
-import { buildWithFixups, wasDeclined } from '../lib/render-fixups'
+import { buildWithFixups, wasDeclined, WAITING_FOR_ANSWER } from '../lib/render-fixups'
 import { renderFixupDeps } from '../api/render-fixup-deps'
 import { checkPromptSafety, SAFETY_BLOCK_MESSAGE } from '../lib/render/safety'
 import { wantsTransparent } from '../lib/transparent-image'
@@ -1171,6 +1171,7 @@ export function useCreate() {
           try {
             const caps = await checkVideoOutputCapability()
             if (caps.webpOnly) {
+              setProgress(5, WAITING_FOR_ANSWER)
               const choice = await new Promise<'install' | 'webp' | 'cancel'>((resolve) => {
                 useCreateStore.getState().setVhsInstallPrompt(resolve)
               })

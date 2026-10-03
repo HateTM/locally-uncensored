@@ -85,6 +85,11 @@ export function remoteUpdateMessage(remote: RemoteComfy): string {
   return `This model needs a newer ComfyUI than the one on ${remote.host}. Update ComfyUI on that machine, restart it, then hit Create again.`
 }
 
+/** What the stage says while a dialog waits for the user. The box,
+ *  03.10.2026: "Building workflow..." stood there for ten minutes while the
+ *  MP4 question was open, and it read as a hang. */
+export const WAITING_FOR_ANSWER = 'Waiting for your answer in the dialog…'
+
 export const UPDATE_PROMPT: FixupPrompt = {
   title: 'ComfyUI needs an update',
   detail: 'This model needs a newer ComfyUI than the one installed. LU updates it (git pull plus its Python packages), restarts it, then starts the render. Takes a few minutes.',
