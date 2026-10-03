@@ -278,7 +278,7 @@ export function ParamGroups() {
 
       {/* Only render a section with controls the selected backend can use. */}
       {showExpert && (
-      <Section title="Expert" icon={FlaskConical} defaultOpen={false}>
+      <Section title="Expert" icon={FlaskConical} open={s.expertOpen} onOpenChange={s.setExpertOpen}>
         {/* Sampler/Scheduler are ComfyUI-only knobs — the hosted WaveSpeed
             endpoints don't accept them, so hide them on the cloud backend
             rather than let the user tune a control that's silently dropped. */}

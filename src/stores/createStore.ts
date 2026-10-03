@@ -356,6 +356,9 @@ interface CreateState {
   /** Upscale target for the cloud super-resolution endpoint. */
   targetResolution: '2k' | '4k' | '8k'
   showNegative: boolean
+  /** Whether the Expert section of the advanced settings is unfolded. Kept
+   *  here so it outlives the panel; this run of the app only, never saved. */
+  expertOpen: boolean
   selectedLoras: { name: string; strength: number }[]
   /** The last strength set for each LoRA file, kept while the LoRA is off, so
    *  ticking it again brings its own value back instead of the default. */
@@ -503,6 +506,7 @@ interface CreateState {
   intent: () => CreateIntent
   setIntent: (intent: CreateIntent) => void
   toggleNegative: () => void
+  setExpertOpen: (open: boolean) => void
   toggleLora: (name: string) => void
   setLoraStrengthFor: (name: string, strength: number) => void
   clearLoras: () => void
@@ -728,6 +732,7 @@ export const useCreateStore = create<CreateState>()(
       musicHowtoSeen: false,
       targetResolution: '4k' as '2k' | '4k' | '8k',
       showNegative: false,
+      expertOpen: false,
       selectedLoras: [] as { name: string; strength: number }[],
       loraStrengths: {} as Record<string, number>,
       selectedVae: 'auto',
@@ -941,6 +946,7 @@ export const useCreateStore = create<CreateState>()(
         if (get().batchSources.length && (!get().source || !BATCH_INTENTS.has(intent))) get().setBatchSources([])
       },
       toggleNegative: () => set((s) => ({ showNegative: !s.showNegative })),
+      setExpertOpen: (expertOpen) => set({ expertOpen }),
       toggleLora: (name) => set((s) => ({ selectedLoras: s.selectedLoras.some((l) => l.name === name) ? s.selectedLoras.filter((l) => l.name !== name) : [...s.selectedLoras, { name, strength: s.loraStrengths[name] ?? defaultLoraStrength(name) }] })),
       setLoraStrengthFor: (name, strength) => set((s) => {
         if (!Number.isFinite(strength)) return {}
