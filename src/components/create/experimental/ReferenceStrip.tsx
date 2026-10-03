@@ -10,9 +10,9 @@
 import { useRef, useState } from 'react'
 import { ImagePlus, Loader2, X } from 'lucide-react'
 import { useCreateStore } from '../../../stores/createStore'
-import { classifyModel } from '../../../api/comfyui'
-import { extraReferenceSlots } from '../../../lib/edit-references'
-import { referenceModel, studioExtraPhotoSlots } from '../../../lib/render/create-studio'
+import { useReferenceSlots } from './referenceSlots'
+import { SavedCharacterChips } from './SavedCharacters'
+import { loadPhotosAsReferences } from './characterPhotos'
 import { loadImageRef } from './loadImage'
 import { GALLERY_DRAG_TYPE, fetchGalleryItemBlob } from './galleryUrl'
 import { cn } from '../ui/cn'
@@ -27,22 +27,12 @@ export function ReferenceStrip() {
   const gallery = useCreateStore((s) => s.gallery)
   const backend = useCreateStore((s) => s.backend)
   const intent = useCreateStore((s) => s.intent())
-  const imageModel = useCreateStore((s) => s.imageModel)
-  const listedType = useCreateStore((s) => s.imageModelList.find((m) => m.name === s.imageModel)?.type)
-  const cloudImageModel = useCreateStore((s) => s.cloudImageModel)
-  const cloudVideoModel = useCreateStore((s) => s.cloudVideoModel)
-  const cloudOpModel = useCreateStore((s) => s.cloudOpModel)
   const inputRef = useRef<HTMLInputElement>(null)
   const [loading, setLoading] = useState(false)
   const [drag, setDrag] = useState(false)
 
-  // The type from the fetched list carries the header sniff; the name is the
-  // fallback, exactly as useCreate decides the pipeline.
   const cloud = backend === 'cloud'
-  const cloudPick = cloud ? referenceModel(intent, { cloudImageModel, cloudVideoModel, cloudOpModel }) : undefined
-  const slots = cloud
-    ? (cloudPick ? studioExtraPhotoSlots(cloudPick) : 0)
-    : intent === 'edit' ? extraReferenceSlots(listedType ?? classifyModel(imageModel), imageModel) : 0
+  const slots = useReferenceSlots()
   if (slots === 0) return null
   const shown = references.slice(0, slots)
   const canAdd = shown.length < slots
@@ -131,6 +121,21 @@ export function ReferenceStrip() {
             ? `Add up to ${slots} more images, for example a person or an outfit to bring into this one.`
             : `Name them in the prompt as ${shown.map((_, i) => `image ${i + 2}`).join(', ')}.`}
       </p>
+      {/* A character saved from a video (lib/saved-characters) loads its photos
+          here with one click: the first becomes the source, the rest fill the
+          strip. */}
+      <SavedCharacterChips
+        label="Saved characters"
+        disabled={loading}
+        title={(c) => `Load the photos of ${c.name}`}
+        onPick={(c) => {
+          setLoading(true)
+          setError(null)
+          void loadPhotosAsReferences(c.name, c.photos)
+            .catch((err: unknown) => setError(`Could not load the photos: ${err instanceof Error ? err.message : String(err)}`))
+            .finally(() => setLoading(false))
+        }}
+      />
       <input
         ref={inputRef}
         type="file"

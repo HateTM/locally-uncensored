@@ -108,6 +108,7 @@ export function CreatePanel({ open, onOpenChange, activeId, onSelect }: Props) {
                   <div key={g.id} className="relative group">
                     <button
                       onClick={() => onSelect(g.id)}
+                      title={g.sourceName ? `From ${g.sourceName}` : undefined}
                       draggable={g.type === 'image' && !g.unavailable}
                       onDragStart={(e) => {
                         e.dataTransfer.setData(GALLERY_DRAG_TYPE, g.id)

@@ -214,12 +214,25 @@ let activeAbort: AbortController | null = null
  *  mid-render, and a mis-routed cancel strands a billing cloud job. */
 export const hasActiveCloudRun = (): boolean => activeAbort !== null
 
+/** Why the last generate() was refused, when the reason holds for the next run
+ *  too. A batch over several source images (lib/batch-edit) reads it after each
+ *  image to decide whether going on makes sense. A code, never the message. */
+export interface CloudRunStop { reason: 'credits' | 'price' | 'auth' | 'throttle'; retryAfterMs?: number }
+let lastRunStop: CloudRunStop | null = null
+/** Reads the reason once and clears it. */
+export function takeCloudRunStop(): CloudRunStop | null {
+  const stop = lastRunStop
+  lastRunStop = null
+  return stop
+}
+
 export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
   const { onQuotaChange } = opts
 
   const generate = useCallback(async () => {
     const s = useCreateStore.getState()
     if (s.isGenerating) return
+    lastRunStop = null
     const intent = s.intent()
     let { kind, op } = intentToJob(intent)
     // Character-Studio 'use' surface: a plain image generate with the trained
@@ -708,7 +721,10 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
       if (ids.length > 1) {
         // Jedes Bild landet in der Galerie, sobald es fertig ist. Ein Auftrag,
         // der scheitert, stoppt die anderen nicht und gibt nur seinen Preis zurueck.
-        if (submitted.stopped === 'credits_exhausted') signalCreditsExhausted('credits')
+        if (submitted.stopped === 'credits_exhausted') {
+          signalCreditsExhausted('credits')
+          lastRunStop = { reason: 'credits' }
+        }
         const finished = new Set<string>()
         const outcomes = await Promise.allSettled(ids.map(async (jid, index) => {
           const job = await pollJob(jid, {
@@ -813,10 +829,16 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
         // new quote against the number this message just showed, and books.
         st.setCloudStudioCredits(err.credits)
         st.setError(`The price changed to ${err.credits.toLocaleString('en-US')} credits. Review it, then hit Create again.`)
+        lastRunStop = { reason: 'price' }
       } else if (err instanceof CloudJobError && err.status === 429) {
         st.setError(throttleMessage(err))
+        // The three money codes end a batch, a plain "too fast" only pauses it.
+        lastRunStop = err.code === 'credits_exhausted' || err.code === 'video_budget_exhausted' || err.code === 'trainings_exhausted'
+          ? { reason: 'credits' }
+          : { reason: 'throttle', retryAfterMs: err.retryAfterMs }
       } else if (err instanceof CloudJobError && err.status === 401) {
         st.setError('Sign in to your LU Cloud account to render in the cloud.')
+        lastRunStop = { reason: 'auth' }
       } else if (err instanceof CloudJobError && err.message === 'render timed out') {
         // The desktop app has no jobs-history view — point at the account
         // page instead of promising an in-app surface that doesn't exist.

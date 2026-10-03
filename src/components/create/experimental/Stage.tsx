@@ -22,6 +22,12 @@ import { isMlxImageHost } from '../../../api/mlx-image'
 import { bundleForVideoIntent } from '../../../api/comfyui'
 import { getVideoBundles } from '../../../api/discover'
 import { ReferenceStrip } from './ReferenceStrip'
+import { BatchStrip, useBatchPickers } from './BatchStrip'
+import { addBatchFiles, useBatchOffered } from './batchRun'
+import { filesFromDrop } from './batchFiles'
+import { useReferenceSlots } from './referenceSlots'
+import { SavedCharacterChips } from './SavedCharacters'
+import { loadPhotosAsReferences, sendPhotosToStudio } from './characterPhotos'
 import { MIN_TRAIN_IMAGES, maxTrainImages } from '../../../lib/train-image-cap'
 
 interface Props {
@@ -37,14 +43,18 @@ interface Props {
    *  as onEditResult above. */
   onAnimateResult?: (item: GalleryItem) => void
   onFullscreen: (item: GalleryItem) => void
+  /** Pick frames of a finished video and save them as a character. */
+  onSaveCharacter?: (item: GalleryItem) => void
   /** ComfyUI is coming up: no setup card in that window (./stageGate). */
   comfyStarting?: boolean
 }
 
-export function Stage({ displayed, onOpenMaskEditor, onEditResult, onAnimateResult, onFullscreen, comfyStarting }: Props) {
+export function Stage({ displayed, onOpenMaskEditor, onEditResult, onAnimateResult, onFullscreen, onSaveCharacter, comfyStarting }: Props) {
   const intent = useCreateStore((s) => s.intent())
   const meta = INTENT_MAP[intent]
-  const isGenerating = useCreateStore((s) => s.isGenerating)
+  // A batch over several source images is one stretch of work: between two of
+  // its images nothing is rendering, and the Stage must not flash back.
+  const isGenerating = useCreateStore((s) => s.isGenerating || s.batchRun !== null)
   const source = useCreateStore((s) => s.source)
   const sourceSetAt = useCreateStore((s) => s.sourceSetAt)
   const setPrompt = useCreateStore((s) => s.setPrompt)
@@ -129,6 +139,7 @@ export function Stage({ displayed, onOpenMaskEditor, onEditResult, onAnimateResu
         onFullscreen={() => onFullscreen(displayed)}
         onSendToEditor={displayed.type === 'image' && onEditResult ? () => onEditResult(displayed) : undefined}
         onAnimate={displayed.type === 'image' && onAnimateResult ? () => onAnimateResult(displayed) : undefined}
+        onSaveCharacter={displayed.type === 'video' && onSaveCharacter ? () => onSaveCharacter(displayed) : undefined}
       />
     )
   } else {
@@ -208,6 +219,12 @@ function InputSlot() {
   const inputRef = useRef<HTMLInputElement>(null)
   const [drag, setDrag] = useState(false)
   const [loading, setLoading] = useState(false)
+  // Edit, Remove Background and Enhance Image take several images at once
+  // where no mask is needed (lib/batch-edit).
+  const batchOffered = useBatchOffered()
+  // A model that reads several photos of a figure can start from a saved
+  // character (lib/saved-characters) instead of a file.
+  const referenceSlots = useReferenceSlots()
 
   // David 2026-07-10: ops never auto-adopt a gallery image — instead the slot
   // offers the recent gallery images as an EXPLICIT pick, next to drag&drop
@@ -248,6 +265,15 @@ function InputSlot() {
     }
   }
 
+  // More than one file: the list. One file: the plain single source.
+  const handleFiles = async (files: File[]) => {
+    if (files.length === 0) return
+    if (!batchOffered || files.length === 1) return handleFile(files[0])
+    setLoading(true)
+    try { await addBatchFiles(files) } finally { setLoading(false) }
+  }
+  const { inputs: batchInputs, pickFiles, pickFolder } = useBatchPickers((files) => { void handleFiles(files) })
+
   return (
     // Scroll-safe centering: `m-auto` centres the column when there's room and
     // collapses to a scroll when the dropzone + gallery strip exceed a short
@@ -256,14 +282,13 @@ function InputSlot() {
     <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin flex flex-col">
       <div className="m-auto w-full max-w-sm flex flex-col items-center p-6">
         <div
-          onClick={() => inputRef.current?.click()}
+          onClick={() => (batchOffered ? pickFiles() : inputRef.current?.click())}
           onDragOver={(e) => { e.preventDefault(); setDrag(true) }}
           onDragLeave={() => setDrag(false)}
           onDrop={(e) => {
             e.preventDefault()
             setDrag(false)
-            const f = e.dataTransfer.files[0]
-            if (f) { void handleFile(f); return }
+            if (e.dataTransfer.files.length) { void filesFromDrop(e.dataTransfer).then(handleFiles); return }
             const item = gallery.find((g) => g.id === e.dataTransfer.getData(GALLERY_DRAG_TYPE))
             if (item && !loading) void adoptFromGallery(item)
           }}
@@ -284,9 +309,38 @@ function InputSlot() {
           <div className="text-center">
             <div className="t-title text-gray-300">{meta.id === 'removebg' ? 'Drop an image to cut out' : meta.id === 'animate' ? 'Drop an image to animate' : 'Drop an image to edit'}</div>
             <div className="t-body text-gray-600">or click to browse · PNG, JPG, WebP</div>
+            {batchOffered && <div className="t-body text-gray-600">Pick several to give them all the same run</div>}
           </div>
           <input ref={inputRef} type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f) }} />
         </div>
+        {batchOffered && (
+          <>
+            {batchInputs}
+            <button
+              onClick={pickFolder}
+              disabled={loading}
+              className="mt-2 t-control text-gray-500 hover:text-gray-300 underline underline-offset-2 transition-colors"
+            >
+              or choose a folder of images
+            </button>
+          </>
+        )}
+        {referenceSlots > 0 && (
+          <div className="mt-4 w-full">
+            <SavedCharacterChips
+              label="or start from a saved character"
+              disabled={loading}
+              title={(c) => `Load the photos of ${c.name}`}
+              onPick={(c) => {
+                setLoading(true)
+                setError(null)
+                void loadPhotosAsReferences(c.name, c.photos)
+                  .catch((err: unknown) => setError(`Could not load the photos: ${err instanceof Error ? err.message : String(err)}`))
+                  .finally(() => setLoading(false))
+              }}
+            />
+          </div>
+        )}
         {galleryImages.length > 0 && (
           <div className="mt-4 w-full">
             <div className="t-label text-gray-600 mb-2 text-center">or pick from your gallery</div>
@@ -318,14 +372,27 @@ function SourcePreview({ onOpenMaskEditor }: { onOpenMaskEditor: () => void }) {
   const setMask = useCreateStore((s) => s.setMask)
   const intent = useCreateStore((s) => s.intent())
   const meta = INTENT_MAP[intent]
+  const batchCount = useCreateStore((s) => s.batchSources.length)
+  const batchOffered = useBatchOffered()
+  // The same run over several images: no mask (it belongs to one image), and
+  // the list below replaces "Change image".
+  const batchOn = batchOffered && batchCount > 1
 
   // Zombie render: an intent switch drops the source in the same store update
   // that swaps this component out, but the child subscription can fire first.
   if (!source) return null
 
   return (
-    <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin flex flex-col">
-      <div className="m-auto flex flex-col items-center p-6">
+    <div
+      className="flex-1 min-h-0 overflow-y-auto scrollbar-thin flex flex-col"
+      onDragOver={(e) => { if (batchOffered && e.dataTransfer.types.includes('Files')) e.preventDefault() }}
+      onDrop={(e) => {
+        if (!batchOffered || !e.dataTransfer.files.length) return
+        e.preventDefault()
+        void filesFromDrop(e.dataTransfer).then(addBatchFiles)
+      }}
+    >
+      <div className="m-auto flex flex-col items-center p-6 max-w-full">
         <div className="relative">
           <img src={source.url} alt="source" className={cn('max-h-[52vh] max-w-full object-contain rounded-[var(--radius-panel)] border border-white/[0.06]', intent === 'removebg' && 'lu-checker')} />
           {mask && (
@@ -340,14 +407,21 @@ function SourcePreview({ onOpenMaskEditor }: { onOpenMaskEditor: () => void }) {
           </button>
         </div>
         <ReferenceStrip />
-        <div className="flex items-center gap-2 mt-4">
-          {meta.allowsMask && (
-            <Button variant="secondary" icon={Wand2} onClick={onOpenMaskEditor}>{mask ? 'Edit mask' : 'Paint mask'}</Button>
-          )}
-          <ChangeImageButton onChange={(r) => setSource(r)} />
-        </div>
+        {!batchOn && (
+          <div className="flex items-center gap-2 mt-4">
+            {meta.allowsMask && (
+              <Button variant="secondary" icon={Wand2} onClick={onOpenMaskEditor}>{mask ? 'Edit mask' : 'Paint mask'}</Button>
+            )}
+            <ChangeImageButton onChange={(r) => setSource(r)} />
+          </div>
+        )}
+        <BatchStrip />
         <p className="t-body text-gray-600 mt-3 text-center max-w-sm">
-          {meta.id === 'removebg' ? 'Hit Create to cut out the subject and export a transparent PNG.'
+          {batchOn ? (
+            meta.id === 'removebg' ? `Hit Create to cut out all ${batchCount} images.`
+              : meta.id === 'upscale' ? `Hit Create to upscale all ${batchCount} images.`
+              : `Write your prompt below, then Create. All ${batchCount} images get the same edit.`
+          ) : meta.id === 'removebg' ? 'Hit Create to cut out the subject and export a transparent PNG.'
             : meta.id === 'upscale' ? 'Hit Create to upscale the image.'
             : meta.id === 'eraser' ? 'Paint a mask over the object to remove, then hit Create.'
             : meta.allowsMask ? 'Leave the mask empty to restyle the whole image, or paint an area to change just that. Write your prompt below, then Create.'
@@ -653,7 +727,13 @@ function TrainSetBoard() {
             One person or character, varied angles and lighting works best
           </div>
         </button>
-      ) : (
+      ) : null}
+      <SavedCharacterChips
+        label={trainImages.length === 0 ? 'or start from a saved character' : 'Add the photos of a saved character'}
+        title={(c) => `Add the ${c.photos.length} photos of ${c.name}`}
+        onPick={(c) => sendPhotosToStudio(c.name, c.photos)}
+      />
+      {trainImages.length === 0 ? null : (
         <>
           <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin">
             <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">

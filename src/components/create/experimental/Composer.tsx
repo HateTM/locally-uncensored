@@ -53,7 +53,9 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
   const toggleNegative = useCreateStore((s) => s.toggleNegative)
   const source = useCreateStore((s) => s.source)
   const mask = useCreateStore((s) => s.mask)
-  const isGenerating = useCreateStore((s) => s.isGenerating)
+  // A batch over several source images counts as one run in flight, also in
+  // the short gap between two of its images: the button stays Cancel.
+  const isGenerating = useCreateStore((s) => s.isGenerating || s.batchRun !== null)
   const backend = useCreateStore((s) => s.backend)
   const targetResolution = useCreateStore((s) => s.targetResolution)
   const setTargetResolution = useCreateStore((s) => s.setTargetResolution)
