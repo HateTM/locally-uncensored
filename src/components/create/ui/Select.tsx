@@ -9,6 +9,9 @@ export interface SelectOption {
   value: string
   label: string
   sublabel?: string
+  /** Tooltip der Zeile und des geschlossenen Feldes, etwa der Dateiname hinter
+   *  einem Anzeigenamen. Die Suche findet den Eintrag auch darueber. */
+  title?: string
   /** Ueberschrift ueber diesem und den folgenden Eintraegen derselben Gruppe. */
   group?: string
   badge?: { label: string; color: string }
@@ -69,7 +72,8 @@ export function Select({
     return options.filter(
       (option) =>
         option.label.toLowerCase().includes(normalizedQuery) ||
-        option.sublabel?.toLowerCase().includes(normalizedQuery),
+        option.sublabel?.toLowerCase().includes(normalizedQuery) ||
+        option.title?.toLowerCase().includes(normalizedQuery),
     )
   }, [options, query])
 
@@ -148,7 +152,7 @@ export function Select({
               />
             )}
 
-            <span className="truncate">
+            <span className="truncate" title={current?.title}>
               {current?.label ?? placeholder}
             </span>
           </span>
@@ -244,6 +248,7 @@ export function Select({
                         type="button"
                         role="option"
                         aria-selected={selected}
+                        title={option.title}
                         onClick={() => {
                           onChange(option.value)
                           closeMenu()

@@ -18,6 +18,7 @@ import { TYPE_BADGE } from './badges'
 import { useLocalPick } from './localPick'
 import { useLocalModelFits } from '../../../hooks/useLocalModelFit'
 import { vramFitLabel } from '../../../lib/vram-fit'
+import { localModelLabel } from '../../../lib/local-model-name'
 
 // Portplan P7: lipsync/music/extend/motion reach the Studio track through the
 // SAME picker as their classic op-specialized twins, one list, matching what
@@ -230,7 +231,9 @@ function LocalModelChip() {
   // zeigt, welches Modell ein Lauf wirklich nimmt.
   const options: SelectOption[] = sortByTier(list.map((m) => ({ m, tier: localTier(m) }))).map(({ m, tier }) => ({
     value: m.name,
-    label: prettyName(m.name),
+    // The catalogue's name for a file it knows, the file name as the tooltip
+    // (lib/local-model-name); any other file as before.
+    ...localModelLabel(m.name),
     badge: TYPE_BADGE[m.type],
     group: tierGroup({ tier }),
     tags: [...tierMarks({ tier }), ...fitMarks(m.name)],
@@ -276,8 +279,4 @@ function LocalModelChip() {
       }}
     />
   )
-}
-
-function prettyName(filename: string): string {
-  return filename.replace(/\.(safetensors|ckpt|pt|gguf)$/i, '').replace(/[_]+/g, ' ')
 }
