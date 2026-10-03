@@ -278,16 +278,16 @@ export function DownloadBadge() {
                       // No check and no green: files of this bundle are
                       // missing, and its card offers the download again.
                       <>
-                        <p className={`text-[0.65rem] ${HINWEIS_TEXT.ruhig}`}>{verdict.line}</p>
+                        <p className={`t-micro ${HINWEIS_TEXT.ruhig}`}>{verdict.line}</p>
                         <div className="mt-1.5 space-y-0.5">
                           {files.map(({ id, d }) => (
-                            <div key={id} className="flex items-center justify-between text-[0.55rem] text-gray-500">
+                            <div key={id} className="flex items-center justify-between t-micro text-gray-500">
                               <span className="truncate flex-1 font-mono">{d.filename || id}</span>
                               <span className="shrink-0 ml-2 text-green-400">Done</span>
                             </div>
                           ))}
                           {cancelled.map((id) => (
-                            <div key={id} className="flex items-center justify-between text-[0.55rem] text-gray-500">
+                            <div key={id} className="flex items-center justify-between t-micro text-gray-500">
                               <span className="truncate flex-1 font-mono">{id}</span>
                               <span className="shrink-0 ml-2">Cancelled</span>
                             </div>
@@ -362,7 +362,7 @@ export function DownloadBadge() {
                               </div>
                             ))}
                             {cancelled.map((id) => (
-                              <div key={id} className="flex items-center justify-between text-[0.55rem] text-gray-500">
+                              <div key={id} className="flex items-center justify-between t-micro text-gray-500">
                                 <span className="truncate flex-1 font-mono">{id}</span>
                                 <span className="shrink-0 ml-2">Cancelled</span>
                               </div>
