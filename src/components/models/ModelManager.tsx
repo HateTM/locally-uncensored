@@ -14,6 +14,7 @@ import { PullModelDialog } from './PullModelDialog'
 import { DiscoverModels } from './DiscoverModels'
 import { CivitaiSearchPanel } from './CivitaiSearchPanel'
 import { LoraManager, LORA_USE_HINT, type LoraRow } from './LoraManager'
+import { LoraAddons } from './LoraAddons'
 import { Modal } from '../ui/Modal'
 import { GlowButton } from '../ui/GlowButton'
 import { showModel } from '../../api/ollama'
@@ -630,6 +631,7 @@ export function ModelManager() {
                 <p className="px-1 t-micro text-gray-500 dark:text-gray-500">
                   Downloads land in ComfyUI&apos;s models/loras folder. {LORA_USE_HINT}
                 </p>
+                <LoraAddons search={searchQuery} />
                 <CivitaiSearchPanel
                   modelType="LORA"
                   title="Search CivitAI for LoRAs"

@@ -683,6 +683,14 @@ const H3_SHARED_FILES: DiscoverModel[] = [
     },
 ]
 
+/** The catalog's LoRA add-ons: bundles that are nothing but files for
+ *  models/loras (Pixel Art XL, the MiniMax H3 turbo LoRA). Models, LoRAs,
+ *  Get new lists them, so a LoRA is found where LoRAs are. */
+export function getLoraAddonBundles(): ModelBundle[] {
+  return [...getImageBundles(), ...getVideoBundles()]
+    .filter((b) => b.files.length > 0 && b.files.every((f) => f.subfolder === 'loras'))
+}
+
 export function getVideoBundles(): ModelBundle[] {
   return [
     {
@@ -867,7 +875,7 @@ export function getVideoBundles(): ModelBundle[] {
     // the VRAM line.
     {
       name: 'MiniMax H3 · Video with Sound',
-      description: 'Video with its own sound track, speech, effects and music in one pass. From a prompt alone or from a first frame. Up to about 15 seconds at 24 fps.',
+      description: 'Video with its own sound from a prompt or a first frame, up to about 15 seconds. Fastest way: add the MiniMax H3 Turbo LoRA, 8 steps instead of 20.',
       tags: ['MiniMax H3', 'Audio', '768p'],
       verified: true,
       totalSizeGB: 40.1,
@@ -884,6 +892,35 @@ export function getVideoBundles(): ModelBundle[] {
           filename: 'minimax_h3_fl2va_pruned_int8_convrot.safetensors', subfolder: 'diffusion_models', sizeGB: 21.0,
         },
         ...H3_SHARED_FILES,
+      ],
+    },
+    // The 8 step turbo LoRA for MiniMax H3 (Discord 2026-10-03, boromirofgeo:
+    // "how do I get the turbo lora into the stack"). The file is the one the
+    // official templates video_minimax_h3_t2v and _i2v load with
+    // LoraLoaderModelOnly at strength 1. Free to download, read from the
+    // Hugging Face tree API and an anonymous HEAD on 2026-10-03: 1956193000
+    // bytes, and lightx2v/Minimax-h3-Turbo (the origin) states the same digest.
+    // It lands in models/loras, the LoRA stack lists it, and the H3 builder
+    // reads the 8 steps from its name.
+    {
+      name: 'MiniMax H3 Turbo LoRA · 8 Steps',
+      description: 'Add-on for MiniMax H3: 8 steps instead of 20, from a prompt or a first frame. After the download, turn it on in Create, Advanced settings, Expert, LoRA stack.',
+      tags: ['MiniMax H3', 'LoRA', 'Addon'],
+      totalSizeGB: 1.82,
+      vramRequired: '24+ GB',
+      workflow: 'minimaxh3',
+      tier: 'best',
+      url: 'https://huggingface.co/Comfy-Org/MiniMax-H3',
+      files: [
+        {
+          name: 'MiniMax H3 Turbo LoRA (8 steps)',
+          description: 'Step distillation LoRA for the MiniMax H3 fl2va model → models/loras.',
+          pulls: '', tags: ['LoRA', '1.82 GB'], updated: 'New',
+          downloadUrl: 'https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/loras/minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors',
+          filename: 'minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors', subfolder: 'loras', sizeGB: 1.82,
+          sizeBytes: 1956193000,
+          sha256: '2339acdf19bfe123f46b971ea35d367a84adb85de43627e1eceafa5a5b2b111e',
+        },
       ],
     },
     // FastH3 (FastVideo, 8 step distilled MiniMax H3). A full checkpoint of its

@@ -18,6 +18,7 @@ import { Tooltip } from '../ui/Tooltip'
 import { cn } from '../ui/cn'
 import { HINWEIS_TEXT } from '../../../lib/hinweis'
 import { lorasForRun, loraFitsModel } from '../../../lib/lora-stack'
+import { LoraStrength } from './LoraStrength'
 import { supportsTransparent } from '../../../lib/transparent-image'
 import { MAX_SHOTS, MAX_SHOT_CHARS, supportsMultishot } from '../../../lib/ltx-multishot'
 
@@ -326,7 +327,7 @@ export function ParamGroups() {
                     </button>
                     {active && fits && (
                       <div className="px-2.5 pb-2">
-                        <Slider label="Strength" min={0} max={2} step={0.05} value={active.strength} onChange={(v) => s.setLoraStrengthFor(name, v)} format={(v) => v.toFixed(2)} />
+                        <LoraStrength name={name} value={active.strength} onChange={(v) => s.setLoraStrengthFor(name, v)} />
                       </div>
                     )}
                   </div>
