@@ -241,7 +241,7 @@ mod tests {
         // install's ROCm DLLs, and the environment check died on "Bad Image".
         // The venv is built on every platform, not only behind PEP 668.
         assert!(
-            !install_body.contains("is_pep668_protected"),
+            !install_body.contains("pep668_protected"),
             "the venv is only built where PEP 668 forces it again"
         );
     }

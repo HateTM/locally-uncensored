@@ -25,7 +25,8 @@
 use std::fs;
 use std::path::PathBuf;
 use crate::python::python_command;
-use super::pip::is_permission_denied_pip_error;
+use super::pip::{is_permission_denied_pip_error, user_site_allowed};
+use super::venv::is_venv_python;
 use std::process::Stdio;
 
 #[cfg(target_os = "windows")]
@@ -333,9 +334,13 @@ pub(crate) fn install_node_requirements(
         // controlnet_aux stranded the Motion install card, 2026-07-19).
         // Retry into the per-user site — the same interpreter imports from
         // there, no admin needed. The Windows twin of the PEP 668 --user
-        // escape above; a venv Python never hits a permission error here,
-        // and if the retry fails too we surface the original diagnosis.
-        if is_permission_denied_pip_error(&combined) {
+        // escape above; if the retry fails too we surface the original
+        // diagnosis. A venv is asked first and never retried: pip refuses
+        // `--user` there, whether it is ComfyUI's own venv or a fallback
+        // Python that happens to be one.
+        if is_permission_denied_pip_error(&combined)
+            && user_site_allowed(is_venv_python(&python_bin))
+        {
             println!(
                 "[Install] {} requirements hit a permission error — retrying into the user site (--user)",
                 node_name
