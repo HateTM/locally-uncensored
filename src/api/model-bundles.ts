@@ -393,6 +393,81 @@ export function getImageBundles(): ModelBundle[] {
         },
       ],
     },
+    // The Qwen-Image 2.1 prompt enhancers (GH #148). Add-ons to the bundle
+    // above, not models of their own: a 9B text model that turns a short
+    // prompt or edit instruction into the long prompt Qwen-Image 2.1 works
+    // best with. One file writes prompts for new pictures (t2i), the other
+    // rewrites edit instructions and reads the pictures (i2i). ComfyUI runs
+    // them with its own TextGenerate node, no node pack; "Improve my prompt"
+    // uses them when they are installed (api/qwen-enhancer.ts), and that needs
+    // ComfyUI 0.37.2 or newer. Byte counts and SHA-256 are the Hugging Face
+    // LFS values read on 2026-10-03; all four addresses answer without a
+    // token. sizeGB is gibibytes, as everywhere in this file. The VRAM figure
+    // is the one the enhancer's node pack author measured for running it
+    // inside ComfyUI ("16 GB recommended"). The tier is the family's, as for
+    // every add-on (local-model-tier.test.ts).
+    {
+      name: 'Qwen-Image 2.1 Prompt Enhancer (Official)',
+      description: 'Add-on for Qwen-Image 2.1. Turns a short prompt or edit instruction into the long, detailed prompt the model works best with, and looks at your pictures when you edit. It runs before the image model and makes room for it afterwards. Made to play it safe: it can soften or refuse an instruction. Turn it on with Improve my prompt in the advanced settings. Qwen Research License, non-commercial use: https://huggingface.co/Qwen/Qwen-Image-2.1-PE-T2I/blob/main/LICENSE',
+      tags: ['Qwen Image 2.1', 'Prompt Enhancer', 'Addon'],
+      uncensored: false,
+      totalSizeGB: 17.64,
+      vramRequired: '16 GB',
+      workflow: 'qwenimage',
+      tier: 'best',
+      url: 'https://huggingface.co/Comfy-Org/Qwen-Image-2.1',
+      files: [
+        {
+          name: 'Qwen Prompt Enhancer, Image (INT8)',
+          description: 'Writes the prompt for a new picture.',
+          pulls: '', tags: ['Prompt Enhancer', '9.47 GB'], updated: 'New',
+          downloadUrl: 'https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/text_encoders/qwen3.5_9b_qwen_image_2.1_pe_t2i.int8_convrot.safetensors',
+          filename: 'qwen3.5_9b_qwen_image_2.1_pe_t2i.int8_convrot.safetensors', subfolder: 'text_encoders', sizeGB: 8.82,
+          sizeBytes: 9471072252,
+          sha256: '9182abae56fe05459840a86d22abd21f972061c92fce032630af680c8c5178d3',
+        },
+        {
+          name: 'Qwen Prompt Enhancer, Edit (INT8)',
+          description: 'Rewrites an edit instruction and reads your pictures.',
+          pulls: '', tags: ['Prompt Enhancer', '9.47 GB'], updated: 'New',
+          downloadUrl: 'https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/text_encoders/qwen3.5_9b_qwen_image_2.1_pe_i2i.int8_convrot.safetensors',
+          filename: 'qwen3.5_9b_qwen_image_2.1_pe_i2i.int8_convrot.safetensors', subfolder: 'text_encoders', sizeGB: 8.82,
+          sizeBytes: 9471072252,
+          sha256: '32707d01b427e488af252b95c551989aad59f9fec611a694f5db6bde7f0f1f6c',
+        },
+      ],
+    },
+    {
+      name: 'Qwen-Image 2.1 Prompt Enhancer (No Refusals)',
+      description: 'Add-on for Qwen-Image 2.1. The same prompt enhancer with its refusals taken out by the community (Heretic), so your prompt and your edit instruction stay what you wrote. Turns a short prompt into a long, detailed one and looks at your pictures when you edit. It runs before the image model and makes room for it afterwards. Turn it on with Improve my prompt in the advanced settings. Qwen Research License, non-commercial use: https://huggingface.co/Adahm/PE-Heretic-INT8-ConvRot-for-Qwen-Image-2.1/blob/main/LICENSE',
+      tags: ['Qwen Image 2.1', 'Prompt Enhancer', 'Addon'],
+      uncensored: true,
+      totalSizeGB: 17.64,
+      vramRequired: '16 GB',
+      workflow: 'qwenimage',
+      tier: 'best',
+      url: 'https://huggingface.co/Adahm/PE-Heretic-INT8-ConvRot-for-Qwen-Image-2.1',
+      files: [
+        {
+          name: 'Qwen Prompt Enhancer, Image, No Refusals (INT8)',
+          description: 'Writes the prompt for a new picture. From pottokao/Qwen-Image-2.1-PE-T2I-Heretic.',
+          pulls: '', tags: ['Prompt Enhancer', '9.47 GB'], updated: 'New',
+          downloadUrl: 'https://huggingface.co/Adahm/PE-Heretic-INT8-ConvRot-for-Qwen-Image-2.1/resolve/main/qwen3.5_9b_qwen_image_2.1_pe_t2i_heretic.int8_convrot.safetensors',
+          filename: 'qwen3.5_9b_qwen_image_2.1_pe_t2i_heretic.int8_convrot.safetensors', subfolder: 'text_encoders', sizeGB: 8.82,
+          sizeBytes: 9471072252,
+          sha256: '91b9ba42539fb662775181eabce845befe2c1441658a736fadf0033dd799d8f3',
+        },
+        {
+          name: 'Qwen Prompt Enhancer, Edit, No Refusals (INT8)',
+          description: 'Rewrites an edit instruction and reads your pictures. From darrellbest/Qwen-Image-2.1-PE-I2I-Heretic.',
+          pulls: '', tags: ['Prompt Enhancer', '9.47 GB'], updated: 'New',
+          downloadUrl: 'https://huggingface.co/Adahm/PE-Heretic-INT8-ConvRot-for-Qwen-Image-2.1/resolve/main/qwen3.5_9b_qwen_image_2.1_pe_i2i_heretic.int8_convrot.safetensors',
+          filename: 'qwen3.5_9b_qwen_image_2.1_pe_i2i_heretic.int8_convrot.safetensors', subfolder: 'text_encoders', sizeGB: 8.82,
+          sizeBytes: 9471072252,
+          sha256: '979b9063dd16645f0191c9ff55aa5059105bfe84096d96a817a85deed22231f0',
+        },
+      ],
+    },
     {
       name: 'DreamShaper XL Turbo V2 (Anime/Stylized)',
       description: 'Fast anime and stylized art. Turbo mode for 4 step generation. Great for creative work.',

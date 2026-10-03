@@ -374,7 +374,10 @@ describe('Qwen-Image 2.1 bundle', () => {
   const bundle = getImageBundles().find(b => b.workflow === 'qwenimage')
 
   it('exists exactly once', () => {
-    expect(getImageBundles().filter(b => b.workflow === 'qwenimage')).toHaveLength(1)
+    // The two prompt enhancer add-ons share the family and carry no model file.
+    const withModel = getImageBundles().filter(b => b.workflow === 'qwenimage' && b.files.some(f => f.subfolder === 'diffusion_models'))
+    expect(withModel).toHaveLength(1)
+    expect(withModel[0].name).toBe(bundle!.name)
     expect(bundle).toBeDefined()
   })
 
