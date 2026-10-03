@@ -172,7 +172,7 @@ mod tests {
             ("comfy_repair.rs", "\"Environment repaired.", "the repair"),
             (
                 "comfy_repair.rs",
-                "\"ComfyUI updated. Restart ComfyUI",
+                "update(\"complete\", &done);",
                 "the update",
             ),
         ] {
