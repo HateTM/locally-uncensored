@@ -117,7 +117,7 @@ export function CloudTeaserModal() {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 backdrop-blur-sm"
+          className="fixed inset-0 z-[90] flex overflow-y-auto overscroll-contain p-4 bg-black/60 backdrop-blur-sm"
           onClick={close}
         >
           <motion.div
@@ -126,7 +126,7 @@ export function CloudTeaserModal() {
             exit={{ opacity: 0, y: 10, scale: 0.97 }}
             transition={{ duration: 0.15, ease: 'easeOut' }}
             onClick={(e) => e.stopPropagation()}
-            className="w-[360px] max-w-[92vw] rounded-2xl bg-[#232323] border border-white/[0.08] shadow-2xl shadow-black/50 overflow-hidden"
+            className="m-auto shrink-0 w-[360px] max-w-[92vw] rounded-2xl bg-[#232323] border border-white/[0.08] shadow-2xl shadow-black/50 overflow-hidden"
           >
             {/* Demo stage */}
             <div className="relative h-[130px] bg-[#1b1b1b] border-b border-white/[0.06] overflow-hidden">
