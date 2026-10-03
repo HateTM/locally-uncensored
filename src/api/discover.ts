@@ -688,6 +688,49 @@ async function runVisibilityConfirmation(filename: string): Promise<void> {
   }
 }
 
+/**
+ * ONE space check for the whole bundle, before the first byte moves.
+ *
+ * Every file starts its own transfer and every transfer checked the free
+ * space on its own, so a four file bundle passed the same free bytes four
+ * times over and then filled the drive between them. The sum is the only
+ * honest question, and it has to be asked before anything starts: refusing
+ * file three after files one and two have written 20 GB helps nobody. Throws
+ * with the numbers (how much is short, the download, the free space) when the
+ * missing files plus the reserve do not fit.
+ */
+export async function assertBundleFits(bundle: ModelBundle, installed: ReadonlySet<string>): Promise<void> {
+  const pending = bundleBytesToFetch(bundle, installed)
+  if (pending.bytes <= 0 || !pending.subfolder) return
+  const verdict = await checkDownloadSpace({ subfolder: pending.subfolder }, pending.bytes)
+  if (verdict && !verdict.fits) {
+    throw new Error(verdict.message || `${bundle.name} does not fit on this drive.`)
+  }
+}
+
+/**
+ * The node packs of `keys` the running ComfyUI has not loaded.
+ *
+ * The box, 03.10.2026: a click on Get for a GGUF bundle pulled ComfyUI-GGUF
+ * again and restarted ComfyUI, with the pack loaded all along and nothing on
+ * the surface saying so. A pack whose nodes are registered needs neither. One
+ * that is on disk and failed to import is not loaded, so it still gets the
+ * install that heals it. With ComfyUI not answering nobody can tell, and
+ * every pack counts as missing, as before.
+ */
+export async function nodePacksNotLoaded(keys: string[]): Promise<string[]> {
+  let registered: Set<string>
+  try {
+    registered = new Set(Object.keys(await getAllNodeInfo()))
+  } catch {
+    return keys
+  }
+  return keys.filter((key) => {
+    const entry = CUSTOM_NODE_REGISTRY[key]
+    return !entry || !entry.requiredNodes.every((node) => registered.has(node))
+  })
+}
+
 export async function installBundleComplete(bundle: ModelBundle): Promise<{ remote?: RemoteBundleReport }> {
   const errors: string[] = []
   // GH #143: a ComfyUI on another machine. The files land here for the user
@@ -759,20 +802,7 @@ export async function installBundleComplete(bundle: ModelBundle): Promise<{ remo
   // it ran "lazily", which was not true, the request always goes out).
   const judgeable = judgeableFolders()
 
-  // ONE space check for the whole bundle, before the first byte moves.
-  //
-  // Every file starts its own transfer and every transfer checked the free
-  // space on its own, so a four file bundle passed the same free bytes four
-  // times over and then filled the drive between them. The sum is the only
-  // honest question, and it has to be asked before anything starts: refusing
-  // file three after files one and two have written 20 GB helps nobody.
-  const pendingBytes = bundleBytesToFetch(bundle, installedFiles)
-  if (pendingBytes.bytes > 0 && pendingBytes.subfolder) {
-    const verdict = await checkDownloadSpace({ subfolder: pendingBytes.subfolder }, pendingBytes.bytes)
-    if (verdict && !verdict.fits) {
-      throw new Error(verdict.message || `${bundle.name} does not fit on this drive.`)
-    }
-  }
+  await assertBundleFits(bundle, installedFiles)
 
   // Step 1: Start downloads only for files NOT already installed
   for (const file of bundle.files) {
@@ -814,7 +844,10 @@ export async function installBundleComplete(bundle: ModelBundle): Promise<{ remo
   // (T-67), and its restart was a hand-rolled sleep that could not tell a
   // ComfyUI LU owns from one it does not.
   if (bundle.customNodes && bundle.customNodes.length > 0 && !target.remote) {
-    void installCustomNodes([...bundle.customNodes], { keepGoing: true, restart: true })
+    // Only the packs ComfyUI has not loaded: installing one that is there
+    // restarts ComfyUI for nothing (nodePacksNotLoaded).
+    void nodePacksNotLoaded([...bundle.customNodes])
+      .then((missing) => (missing.length > 0 ? installCustomNodes(missing, { keepGoing: true, restart: true }) : undefined))
       .catch((err) => log.warn('[discover] Custom node install/restart failed', { err }))
   }
 

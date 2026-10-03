@@ -117,6 +117,12 @@ export interface OrphanEntry extends OrphanDownload {
 
 interface DownloadStoreState {
   downloads: Record<string, DownloadProgress>
+  /** Rows this side wrote itself: a bundle file that was on disk already, a
+   *  file ComfyUI does not list. Rust has no entry for them, so a poll that
+   *  takes Rust's list as the whole picture wiped them a second later, and a
+   *  bundle of five showed three files (the box, 03.10.2026). They are merged
+   *  under Rust's rows and go when the user clears, cancels or restarts them. */
+  ownRows: Record<string, DownloadProgress>
   downloadMeta: Record<string, DownloadMeta>
   bundleMap: BundleMap  // filename → bundle name
   /** Partials found on disk with no transfer behind them, keyed by stem. */
@@ -232,6 +238,7 @@ const META_LIMIT = 400
 
 export const useDownloadStore = create<DownloadStoreState>()(persist((set, get) => ({
   downloads: {},
+  ownRows: {},
   downloadMeta: {},
   bundleMap: {},
   orphans: {},
@@ -263,12 +270,12 @@ export const useDownloadStore = create<DownloadStoreState>()(persist((set, get) 
       // Rust owns the live rows; an adopted orphan only fills a gap Rust has
       // nothing for. The moment a resume starts, the real entry takes over and
       // the orphan stops being one.
-      const { orphans, downloadMeta } = get()
+      const { orphans, downloadMeta, ownRows } = get()
       const stillOrphaned = Object.fromEntries(
         Object.entries(orphans).filter(([, o]) => !o.filename || !prog[o.filename]),
       )
       set({
-        downloads: { ...orphanRows(stillOrphaned, downloadMeta), ...prog },
+        downloads: { ...orphanRows(stillOrphaned, downloadMeta), ...ownRows, ...prog },
         orphans: stillOrphaned,
         pollCount: count,
       })
@@ -316,8 +323,9 @@ export const useDownloadStore = create<DownloadStoreState>()(persist((set, get) 
         for (const k of keys.slice(0, keys.length - META_LIMIT)) delete next[k]
       }
       // Every start goes through here first, so a file that is started
-      // again stops counting as cancelled.
-      return { downloadMeta: next, cancelled: s.cancelled.filter((f) => f !== filename) }
+      // again stops counting as cancelled, and what this side said about
+      // it before (already there, not listed) is no longer the news.
+      return { downloadMeta: next, cancelled: s.cancelled.filter((f) => f !== filename), ownRows: without(s.ownRows, filename) }
     })
   },
 
@@ -330,23 +338,21 @@ export const useDownloadStore = create<DownloadStoreState>()(persist((set, get) 
   },
 
   markComplete: (filename: string) => {
+    const row: DownloadProgress = { progress: 1, total: 1, speed: 0, filename, status: 'complete' }
     set(s => ({
-      downloads: {
-        ...s.downloads,
-        [filename]: { progress: 1, total: 1, speed: 0, filename, status: 'complete' },
-      },
+      downloads: { ...s.downloads, [filename]: row },
+      ownRows: { ...s.ownRows, [filename]: row },
     }))
   },
 
   markInvisible: (filename: string) => {
+    const row: DownloadProgress = {
+      progress: 0, total: 0, speed: 0, filename, status: 'error',
+      error: invisibleFileMessage(filename),
+    }
     set(s => ({
-      downloads: {
-        ...s.downloads,
-        [filename]: {
-          progress: 0, total: 0, speed: 0, filename, status: 'error',
-          error: invisibleFileMessage(filename),
-        },
-      },
+      downloads: { ...s.downloads, [filename]: row },
+      ownRows: { ...s.ownRows, [filename]: row },
     }))
   },
 
@@ -369,6 +375,7 @@ export const useDownloadStore = create<DownloadStoreState>()(persist((set, get) 
       // the row the user just cancelled.
       return {
         downloads: updated,
+        ownRows: without(s.ownRows, id),
         orphans: withoutFilename(s.orphans, id),
         cancelled: s.cancelled.includes(id) ? s.cancelled : [...s.cancelled, id],
       }
@@ -416,11 +423,11 @@ export const useDownloadStore = create<DownloadStoreState>()(persist((set, get) 
     if (current?.status === 'error') {
       await clearDownloadEntry(id).catch(() => { /* best effort — a restart clears it */ })
     }
-    set(s => {
-      const updated = { ...s.downloads }
-      delete updated[id]
-      return { downloads: updated, orphans: withoutFilename(s.orphans, id) }
-    })
+    set(s => ({
+      downloads: without(s.downloads, id),
+      ownRows: without(s.ownRows, id),
+      orphans: withoutFilename(s.orphans, id),
+    }))
     // Re-start the download — use path-based for GGUF text models, subfolder-based for ComfyUI
     if (meta.destDir) {
       await startModelDownloadToPath(meta.url, meta.destDir, id, meta.expectedBytes, meta.sha256)
@@ -444,11 +451,11 @@ export const useDownloadStore = create<DownloadStoreState>()(persist((set, get) 
     if (get().downloads[id]?.status === 'error') {
       clearDownloadEntry(id).catch(() => { /* app restart clears it anyway */ })
     }
-    set(s => {
-      const updated = { ...s.downloads }
-      delete updated[id]
-      return { downloads: updated, orphans: withoutFilename(s.orphans, id) }
-    })
+    set(s => ({
+      downloads: without(s.downloads, id),
+      ownRows: without(s.ownRows, id),
+      orphans: withoutFilename(s.orphans, id),
+    }))
   },
 
   forgetCancelled: (ids: string[]) => {
@@ -588,6 +595,14 @@ function ensureMeta(get: () => DownloadStoreState, id: string): DownloadMeta | n
     sha256: meta.sha256,
   })
   return meta
+}
+
+/** `rows` without `id`; the same object when `id` is not in it. */
+function without<T>(rows: Record<string, T>, id: string): Record<string, T> {
+  if (!(id in rows)) return rows
+  const next = { ...rows }
+  delete next[id]
+  return next
 }
 
 /** Drop the orphan that resolved to `filename`, whatever its stem was. */

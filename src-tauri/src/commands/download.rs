@@ -1181,12 +1181,40 @@ const SPACE_RESERVE: u64 = 1024 * 1024 * 1024;
 /// download big enough to fill a disk, so the check belongs here, where every
 /// download passes through, not in the caller that happens to know the sizes.
 fn space_shortfall(total: u64, already_on_disk: u64, available: Option<u64>) -> Option<(u64, u64)> {
+    space_shortfall_keeping(total, already_on_disk, available, SPACE_RESERVE)
+}
+
+/// `space_shortfall` with the headroom named by the caller.
+fn space_shortfall_keeping(total: u64, already_on_disk: u64, available: Option<u64>, reserve: u64) -> Option<(u64, u64)> {
     let available = available?;
     if total == 0 {
         return None;
     }
-    let needed = total.saturating_sub(already_on_disk).saturating_add(SPACE_RESERVE);
+    let needed = total.saturating_sub(already_on_disk).saturating_add(reserve);
     if available >= needed { None } else { Some((needed, available)) }
+}
+
+/// Headroom a whole bundle leaves free. Twice the single file's: a bundle is
+/// tens of gigabytes in several transfers, and its plan is made from catalog
+/// sizes before any server has stated a length (the box, 03.10.2026: 27.1 GB
+/// started onto 29.6 GB free without a word).
+const BUNDLE_SPACE_RESERVE: u64 = 2 * 1024 * 1024 * 1024;
+
+/// What the user is told when a bundle does not fit: how much is missing
+/// first, then the three numbers it comes from.
+fn bundle_space_message(required: u64, reserved: u64, needed: u64, free: u64) -> String {
+    format!(
+        "Not enough free space: {} short. The download is {}, LU keeps {} of the drive free, and the drive has {} free.{} Free up some space and start it again.",
+        gib(needed.saturating_sub(free)),
+        gib(required),
+        gib(BUNDLE_SPACE_RESERVE),
+        gib(free),
+        if reserved > 0 {
+            format!(" Another {} is already promised to downloads that are still running.", gib(reserved))
+        } else {
+            String::new()
+        },
+    )
 }
 
 /// Free bytes on the drive that holds `dest`. The longest matching mount point
@@ -1874,7 +1902,7 @@ pub async fn check_download_space(
         .map(|dl| reserved_bytes(&dl))
         .unwrap_or(0);
     let available = available_space_for(&dir);
-    let shortfall = space_shortfall(requiredBytes.saturating_add(reserved), 0, available);
+    let shortfall = space_shortfall_keeping(requiredBytes.saturating_add(reserved), 0, available, BUNDLE_SPACE_RESERVE);
 
     Ok(match shortfall {
         None => serde_json::json!({
@@ -1888,16 +1916,7 @@ pub async fn check_download_space(
             "requiredBytes": requiredBytes,
             "reservedBytes": reserved,
             "availableBytes": available,
-            "message": format!(
-                "Not enough free space. This needs {} and the drive has {} free.{} Free up some space and start it again.",
-                gib(needed),
-                gib(free),
-                if reserved > 0 {
-                    format!(" {} of that is already promised to downloads that are still running.", gib(reserved))
-                } else {
-                    String::new()
-                },
-            ),
+            "message": bundle_space_message(requiredBytes, reserved, needed, free),
         }),
     })
 }
@@ -2784,6 +2803,30 @@ mod tests {
         assert!(space_shortfall(modell, 0, Some(modell + SPACE_RESERVE)).is_none());
         // Exakt die Reserve zu wenig: das ist der Fall, der Windows lahmlegt.
         assert!(space_shortfall(modell, 0, Some(modell)).is_some());
+    }
+
+    #[test]
+    fn a_bundle_keeps_two_gigabytes_free_and_says_how_much_is_missing() {
+        const GIB: u64 = 1024 * 1024 * 1024;
+        // The box, 03.10.2026: 27.1 GB to fetch, 29.6 GB free. That fits, and
+        // it still does with the larger reserve.
+        let ltx: u64 = 29_066_057_328;
+        assert!(space_shortfall_keeping(ltx, 0, Some(31_782_000_000), BUNDLE_SPACE_RESERVE).is_none());
+        // One gigabyte less free and the single file's reserve would still let
+        // it start; the bundle's does not.
+        let free = ltx + GIB + GIB / 2;
+        assert!(space_shortfall(ltx, 0, Some(free)).is_none());
+        let (needed, got) = space_shortfall_keeping(ltx, 0, Some(free), BUNDLE_SPACE_RESERVE).expect("too tight for a bundle");
+        assert_eq!(needed, ltx + 2 * GIB);
+        let message = bundle_space_message(ltx, 0, needed, got);
+        assert!(message.starts_with("Not enough free space: 0.5 GB short."), "{message}");
+        assert!(message.contains("The download is 27.1 GB"), "{message}");
+        assert!(message.contains("keeps 2.0 GB of the drive free"), "{message}");
+        assert!(!message.contains("promised"), "{message}");
+        // Transfers still running are named, because their bytes are why.
+        let busy = bundle_space_message(ltx, 4 * GIB, needed + 4 * GIB, got);
+        assert!(busy.contains("Another 4.0 GB is already promised"), "{busy}");
+        assert!(busy.starts_with("Not enough free space: 4.5 GB short."), "{busy}");
     }
 
     #[test]

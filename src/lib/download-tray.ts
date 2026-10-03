@@ -89,9 +89,13 @@ export interface TrayBundle<R extends TrayRow> {
  * three running files, the two finished rows were all that was left of it, and
  * "every row is complete" turned the group into "Complete (2 files)" with a
  * green check. A cancelled file has no row, so the group has to be told about
- * it. A file that has a row again (started once more) is not cancelled, and a
- * bundle with nothing but cancelled files is not listed: there is nothing to
- * show, and its card offers the download again.
+ * it. A file that has a row again (started once more) is not cancelled.
+ *
+ * A bundle with nothing but cancelled files is listed too. It used not to be
+ * ("there is nothing to show"), and that was the next thing the box found:
+ * after "Cancel all" the last row was gone, the tray shut itself the same
+ * moment and read "No active downloads" when opened again, without a word
+ * about the cancel. The summary stays until the user closes it.
  */
 export function trayBundles<R extends TrayRow>(
   rows: Record<string, R>,
@@ -106,7 +110,9 @@ export function trayBundles<R extends TrayRow>(
   }
   for (const id of cancelled) {
     if (rows[id]) continue
-    groups.get(bundleMap[id] || id)?.cancelled.push(id)
+    const name = bundleMap[id] || id
+    if (!groups.has(name)) groups.set(name, { name, files: [], cancelled: [] })
+    groups.get(name)!.cancelled.push(id)
   }
   return [...groups.values()]
 }
@@ -117,6 +123,7 @@ export function bundleVerdict(bundle: TrayBundle<TrayRow>): { state: 'complete' 
   const done = bundle.files.filter((f) => f.d.status === 'complete').length
   if (done < bundle.files.length) return { state: 'running', line: '' }
   if (bundle.cancelled.length === 0) return { state: 'complete', line: `Complete (${countLabel(done, 'file')})` }
+  if (done === 0) return { state: 'partial', line: `Cancelled, ${countLabel(bundle.cancelled.length, 'file')} not downloaded` }
   const total = done + bundle.cancelled.length
   return { state: 'partial', line: `${done} of ${countLabel(total, 'file')} downloaded, ${bundle.cancelled.length} cancelled` }
 }

@@ -50,8 +50,25 @@ describe('a bundle with cancelled files', () => {
     expect(bundleVerdict(group).state).toBe('running')
   })
 
-  it('a bundle with nothing left but cancelled files has no row at all', () => {
-    expect(trayBundles({}, bundleMap, FILES)).toEqual([])
+  // The box, 03.10.2026, second finding: with every running file cancelled
+  // the bundle had no row, so the tray shut itself and read "No active
+  // downloads" when opened again. The summary stays until it is cleared.
+  it('a bundle with nothing left but cancelled files is still listed, and says so', () => {
+    const [group] = trayBundles({}, bundleMap, FILES.slice(0, 3))
+    expect(group.name).toBe(LTX)
+    expect(group.files).toEqual([])
+    expect(group.cancelled).toEqual(FILES.slice(0, 3))
+    expect(bundleVerdict(group)).toEqual({ state: 'partial', line: 'Cancelled, 3 files not downloaded' })
+  })
+
+  it('a single cancelled file outside any bundle is listed under its own name', () => {
+    const [group] = trayBundles({}, {}, ['lora.safetensors'])
+    expect(group.name).toBe('lora.safetensors')
+    expect(bundleVerdict(group)).toEqual({ state: 'partial', line: 'Cancelled, 1 file not downloaded' })
+  })
+
+  it('nothing cancelled and no rows: nothing listed', () => {
+    expect(trayBundles({}, bundleMap, [])).toEqual([])
   })
 
   it('a single file outside any bundle keeps its own row', () => {

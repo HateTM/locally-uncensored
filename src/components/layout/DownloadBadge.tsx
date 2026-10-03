@@ -62,7 +62,12 @@ export function DownloadBadge() {
   }, [])
 
   const totalActive = textActiveCount + comfyActiveCount + mlxActiveCount
-  const hasAny = textEntries.length > 0 || comfyEntries.length > 0 || mlxEntries.length > 0
+  // A cancelled file has no row and still has something to say: its bundle is
+  // listed until the user closes it, so the tray does not shut itself (and
+  // then read "No active downloads") the moment the last transfer is stopped.
+  const cancelledShown = comfyBundles.reduce((n, b) => n + b.cancelled.length, 0)
+  const listed = textEntries.length + comfyEntries.length + mlxEntries.length + cancelledShown
+  const hasAny = listed > 0
 
   // Click outside to close
   useEffect(() => {
@@ -143,7 +148,7 @@ export function DownloadBadge() {
             {/* Header */}
             <div className="flex items-center justify-between px-3 pt-2.5 pb-1">
               <span className="text-[0.65rem] font-semibold uppercase tracking-widest text-gray-500">
-                Downloads {hasAny && `(${textEntries.length + comfyEntries.length + mlxEntries.length})`}
+                Downloads {hasAny && `(${listed})`}
               </span>
               {(textEntries.some(([, s]) => s.complete) || comfyEntries.some(([, d]) => d.status === 'complete') || mlxEntries.some(e => e.status === 'complete')) && (
                 <button
@@ -279,7 +284,7 @@ export function DownloadBadge() {
                       // missing, and its card offers the download again.
                       <>
                         <p className={`t-micro ${HINWEIS_TEXT.ruhig}`}>{verdict.line}</p>
-                        <div className="mt-1.5 space-y-0.5">
+                        {isBundle && <div className="mt-1.5 space-y-0.5">
                           {files.map(({ id, d }) => (
                             <div key={id} className="flex items-center justify-between t-micro text-gray-500">
                               <span className="truncate flex-1 font-mono">{d.filename || id}</span>
@@ -292,7 +297,7 @@ export function DownloadBadge() {
                               <span className="shrink-0 ml-2">Cancelled</span>
                             </div>
                           ))}
-                        </div>
+                        </div>}
                       </>
                     ) : (
                       <>

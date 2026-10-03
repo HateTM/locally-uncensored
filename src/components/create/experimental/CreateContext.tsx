@@ -5,7 +5,7 @@ import { useCloudSession } from '../../../hooks/useCloudSession'
 import { useCreateStore, type GalleryItem } from '../../../stores/createStore'
 import { listedLoras, getVAEModels, checkComfyConnection, refreshComfyModels, bundleForVideoIntent } from '../../../api/comfyui'
 import { getAllNodeInfo, clearNodeCache } from '../../../api/comfyui-nodes'
-import { installCustomNodes, getImageBundles, getVideoBundles, getAudioBundles, getLipsyncBundles, getMotionBundles, startModelDownload, getDownloadProgress, modelsNotVisibleInComfy, judgeableFolders } from '../../../api/discover'
+import { installCustomNodes, nodePacksNotLoaded, assertBundleFits, checkBundlesOnDisk, getImageBundles, getVideoBundles, getAudioBundles, getLipsyncBundles, getMotionBundles, startModelDownload, getDownloadProgress, modelsNotVisibleInComfy, judgeableFolders } from '../../../api/discover'
 import { CUSTOM_NODE_REGISTRY } from '../../../api/model-bundles'
 import { backendCall, isMacOS, isLinux } from '../../../api/backend'
 import { asComfyGpuMode, comfyCpuBannerText, type ComfyCpuBannerFacts } from '../../../lib/comfy-cpu-banner'
@@ -448,9 +448,15 @@ export function CreateExpProvider({ children }: { children: ReactNode }) {
         : getMotionBundles()
       )[0]
     if (!bundle) throw new Error('No starter bundle available for this intent.')
-    if (bundle.customNodes?.length) {
+    // Before anything is installed or restarted: does what is still missing
+    // fit on the drive at all.
+    await assertBundleFits(bundle, (await checkBundlesOnDisk([bundle])).files)
+    // Only the packs ComfyUI has not loaded. With all of them there this used
+    // to pull them again and restart ComfyUI for nothing.
+    const packs = await nodePacksNotLoaded(bundle.customNodes ?? [])
+    if (packs.length > 0) {
       onProgress?.('Installing the required node packs. This can take a minute…')
-      await installCustomNodes(bundle.customNodes)
+      await installCustomNodes(packs)
       onProgress?.('Restarting ComfyUI to register the new nodes…')
       await restartComfyForNewNodes()
       for (let i = 0; i < 20; i++) {
