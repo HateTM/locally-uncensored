@@ -31,6 +31,7 @@ const RUNTIME_ONLY_KEYS: readonly string[] = [
 ]
 import type { ModelType, ClassifiedModel } from '../api/comfyui'
 import { MAX_SHOTS, MAX_SHOT_CHARS } from '../lib/ltx-multishot'
+import { IMPROVE_WITH, type ImproveWith } from '../lib/render/qwen-enhancer'
 import { classifyModel, hidreamSampling } from '../api/comfyui'
 import type { HiresUpscaleMethod } from '../api/hires-fix'
 import { releaseVideoBlobUrl } from '../api/mlx-video'
@@ -398,6 +399,14 @@ interface CreateState {
   /** Advanced settings switch: a chat model rewrites the prompt before a run. Off by default, remembered. */
   improvePrompt: boolean
   setImprovePrompt: (on: boolean) => void
+  /** Who rewrites the prompt when a local Qwen-Image 2.1 run has a prompt
+   *  enhancer installed (lib/render/qwen-enhancer.ts). Remembered. */
+  improveWith: ImproveWith
+  setImproveWith: (who: ImproveWith) => void
+  /** Runtime-only: the text encoder files ComfyUI lists, read with the model
+   *  lists. The switch finds the installed prompt enhancers in it. */
+  textEncoderList: string[]
+  setTextEncoderList: (list: string[]) => void
   /** Runtime-only: the LOCAL model picked inside a specialized lane (ACE
    *  checkpoint / S2V UNet / Animate-VACE UNet). One slot for all lanes —
    *  resolveLocalOpPick coerces a stale cross-lane pick onto the lane's list
@@ -714,6 +723,8 @@ export const useCreateStore = create<CreateState>()(
       cloudStudioCredits: null as number | null,
       cloudImageCount: 1,
       improvePrompt: false,
+      improveWith: 'auto' as ImproveWith,
+      textEncoderList: [] as string[],
       transparentBackground: false,
       videoShots: [],
       localOpModel: '',
@@ -968,6 +979,8 @@ export const useCreateStore = create<CreateState>()(
       setCloudStudioCredits: (cloudStudioCredits) => set({ cloudStudioCredits }),
       setCloudImageCount: (count) => set({ cloudImageCount: clampImageCount(count) }),
       setImprovePrompt: (on) => set({ improvePrompt: on === true }),
+      setImproveWith: (who) => set({ improveWith: IMPROVE_WITH.includes(who) ? who : 'auto' }),
+      setTextEncoderList: (list) => set({ textEncoderList: list }),
       setVideoShotCount: (count) => set((st) => {
         const further = Math.max(1, Math.min(MAX_SHOTS, Math.floor(count) || 1)) - 1
         return { videoShots: Array.from({ length: further }, (_, i) => st.videoShots[i] ?? '') }
@@ -1231,6 +1244,7 @@ export const useCreateStore = create<CreateState>()(
         musicDuration: state.musicDuration,
         musicHowtoSeen: state.musicHowtoSeen,
         improvePrompt: state.improvePrompt,
+        improveWith: state.improveWith,
         transparentBackground: state.transparentBackground,
         triggerWord: state.triggerWord,
         trainSteps: state.trainSteps,

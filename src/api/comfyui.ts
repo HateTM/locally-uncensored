@@ -17,6 +17,7 @@ import { isRecord, asString, asRecordArray } from '../types/json-guards'
 // Bundle-Daten gehören weder hierher noch nach discover.ts — sie liegen
 // jetzt in model-bundles.ts, das beide Seiten statisch lesen.
 import { getImageBundles, getVideoBundles } from './model-bundles'
+import { isQwenEnhancerFile } from '../lib/render/qwen-enhancer'
 import { COMPONENT_REGISTRY, type ComponentSpec } from './component-registry'
 
 // ─── Control-plane fetch timeouts ───
@@ -1818,7 +1819,11 @@ export async function findMiniMaxAudioVAE(): Promise<string> {
  *   want.
  */
 export async function findMatchingCLIP(modelType: ModelType, activeModelName?: string): Promise<string> {
-  const clips = await getCLIPModels()
+  // The Qwen-Image 2.1 prompt enhancers sit in the same folder and carry
+  // "qwen" in their names, but they are text models, not encoders. Without
+  // this they answer the loose "qwen" searches below (HunyuanVideo, FramePack,
+  // FLUX 2) before the real encoder does.
+  const clips = (await getCLIPModels()).filter((c) => !isQwenEnhancerFile(c))
   if (clips.length === 0) throw nothingInstalled('text encoder', [COMPONENT_REGISTRY[modelType]?.clip])
   const lower = (s: string) => s.toLowerCase()
   const modelLc = activeModelName ? lower(activeModelName) : ''

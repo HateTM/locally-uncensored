@@ -8,6 +8,7 @@ import {
   getAudioModels,
   getLipsyncModels,
   getMotionModels,
+  getCLIPModels,
   resolveLocalOpPick,
   uploadMediaFile,
   getSamplers,
@@ -62,8 +63,11 @@ import { useComfyInstallStore } from '../stores/comfyInstallStore'
 import { checkPromptSafety, SAFETY_BLOCK_MESSAGE } from '../lib/render/safety'
 import { wantsTransparent } from '../lib/transparent-image'
 import { scenePromptFor } from '../lib/ltx-multishot'
-import { improveKindForIntent } from '../lib/render/improve-prompt'
+import { improveKindForIntent, type ImproveOutcome } from '../lib/render/improve-prompt'
 import { improvePrompt } from '../lib/render/improve-prompt-run'
+import { pickQwenEnhancer } from '../lib/render/qwen-enhancer'
+import { buildQwenEnhancerWorkflow, runQwenEnhancer } from '../api/qwen-enhancer'
+import { extraReferenceSlots } from '../lib/edit-references'
 import { resolveRunSeed } from '../lib/run-seed'
 import {
   clearTrainingSet, stageTrainingImage, startCharacterTraining,
@@ -297,6 +301,9 @@ export function useCreate() {
         getLipsyncModels().catch(() => [] as ClassifiedModel[]),
         getMotionModels().catch(() => [] as ClassifiedModel[]),
       ])
+      // The text encoder files, for the prompt enhancers among them
+      // ("Improve my prompt" on local Qwen-Image 2.1). Best effort.
+      const textEncoders = await getCLIPModels().catch(() => [] as string[])
       // MLX entries go first so one is the default on a fresh Apple-Silicon box.
       const imgModels = mlxImageModels.length
         ? mergeImageModels(comfyImgModels, mlxImageModels)
@@ -321,6 +328,7 @@ export function useCreate() {
       st.setAudioModelList(audModels)
       st.setLipsyncModelList(lipModels)
       st.setMotionModelList(motModels)
+      st.setTextEncoderList(textEncoders)
 
       // If ComfyUI is connected but returns 0 models, do NOT set modelsLoaded — keep retrying.
       // ComfyUI may still be scanning directories (race condition on startup).
@@ -658,14 +666,36 @@ export function useCreate() {
     // stops the run, it goes on with the user's own prompt.
     let prompt = scenePrompt
     let improveFields: { promptOriginal?: string; improveFailed?: true } = {}
-    const improveKind = state.improvePrompt ? improveKindForIntent(intent) : null
+    // The safety check covers the rewrite too: the user wrote an allowed
+    // prompt, the model must not turn it into a refusal.
+    const takeRewrite = (out: ImproveOutcome) => {
+      if (out.status === 'improved' && !checkPromptSafety(out.prompt).blocked) {
+        prompt = out.prompt
+        improveFields = { promptOriginal: scenePrompt }
+      } else if (out.status !== 'unchanged') {
+        improveFields = { improveFailed: true }
+      }
+    }
+    // A local Qwen-Image 2.1 run with a prompt enhancer installed: the
+    // enhancer writes instead of the chat model (GH #148), for a new picture
+    // and for an edit. It is a ComfyUI job, so it runs further down, once
+    // ComfyUI is up and the chat model is off the card.
+    const qwenEnhancer = state.improvePrompt && !localOp && scenePrompt.trim()
+      ? pickQwenEnhancer({
+          local: !isMlxImageHost(),
+          intent,
+          modelType: state.imageModelList.find((m) => m.name === effImageModel)?.type ?? classifyModel(effImageModel),
+          textEncoders: state.textEncoderList,
+        }, state.improveWith)
+      : null
+    const improveKind = state.improvePrompt && !qwenEnhancer ? improveKindForIntent(intent) : null
     if (improveKind && scenePrompt.trim()) {
       const own = new AbortController()
       abortRef.current = own
       setIsGenerating(true)
       setProgress(3, 'Improving your prompt…')
       const runModel = improveKind === 'music' ? state.localOpModel : improveKind === 'video' ? effVideoModel : effImageModel
-      let out: Awaited<ReturnType<typeof improvePrompt>> = { status: 'failed' }
+      let out: ImproveOutcome = { status: 'failed' }
       try {
         out = await improvePrompt(scenePrompt, {
           kind: improveKind,
@@ -679,14 +709,7 @@ export function useCreate() {
       }
       // Cancel pressed while the chat model was writing: the run does not start.
       if (own.signal.aborted) return
-      // The safety check covers the rewrite too: the user wrote an allowed
-      // prompt, the model must not turn it into a refusal.
-      if (out.status === 'improved' && !checkPromptSafety(out.prompt).blocked) {
-        prompt = out.prompt
-        improveFields = { promptOriginal: scenePrompt }
-      } else if (out.status !== 'unchanged') {
-        improveFields = { improveFailed: true }
-      }
+      takeRewrite(out)
     }
 
     // ── MLX image pipeline (Apple Silicon) — hard rule: Mac local image is the
@@ -1009,6 +1032,25 @@ export function useCreate() {
     } catch { /* VRAM housekeeping is best-effort */ }
 
     try {
+      // The Qwen prompt enhancer writes now: the chat model has left the card,
+      // and the enhancer leaves it again before the picture's models load
+      // (runQwenEnhancer unloads it). An edit shows it the same pictures, in
+      // the same order, that the picture's graph numbers as image 1, 2, 3.
+      // A ComfyUI too old for it is offered the update, like the model itself.
+      if (qwenEnhancer) {
+        setProgress(3, 'Improving your prompt…')
+        const signal = abortRef.current?.signal
+        const images = qwenEnhancer.mode === 'i2i' && effInputImage
+          ? [effInputImage, ...references.map((r) => r.filename).filter(Boolean).slice(0, extraReferenceSlots(imageModelType, activeModel))]
+          : []
+        const enhancerGraph = await buildWithFixups(
+          () => buildQwenEnhancerWorkflow({ file: qwenEnhancer.file, mode: qwenEnhancer.mode, prompt: scenePrompt, images, seed: runSeed }),
+          renderFixupDeps((line) => setProgress(3, line), signal),
+        )
+        const out = await runQwenEnhancer(enhancerGraph, scenePrompt, { clientId: CLIENT_ID, signal })
+        if (signal?.aborted) throw new Error('Cancelled')
+        takeRewrite(out)
+      }
       // GH #146: the stack is checked against what ComfyUI lists right now.
       // A deleted file or a Z-Image character on another model is left out
       // with a line, instead of ComfyUI refusing the whole graph.
