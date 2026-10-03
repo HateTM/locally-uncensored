@@ -916,14 +916,26 @@ pub(crate) fn requirements_failure_reason_for(f: &PipFailure) -> &'static str {
     }
 }
 
+/// Whether pip may be handed `--user` for this interpreter at all.
+///
+/// The one rule every `--user` in the installers goes through: the PEP 668
+/// escape (`venv::PythonSite::pip_escape_args`), the retry after a refused
+/// write below, and the custom node requirements. A venv REFUSES `--user`
+/// ("Can not perform a '--user' install. User site-packages are not visible
+/// in this virtualenv"), and it never needs it either, because its own
+/// site-packages belongs to the user who built it.
+pub(crate) fn user_site_allowed(in_venv: bool) -> bool {
+    !in_venv
+}
+
 /// Whether a failed pip run should be tried again into the per user site.
 ///
-/// Two conditions, and both matter. A venv REFUSES `--user` ("Can not perform
-/// a '--user' install"), so retrying there swaps one failure for another. And
-/// only a refused write is worth retrying at all: a network failure would just
-/// fail again, twice as slowly.
+/// Two conditions, and both matter. A venv refuses `--user` (see
+/// [`user_site_allowed`]), so retrying there swaps one failure for another.
+/// And only a refused write is worth retrying at all: a network failure would
+/// just fail again, twice as slowly.
 pub(crate) fn should_retry_in_user_site(in_venv: bool, stderr: &str) -> bool {
-    !in_venv && pip_failure_kind(stderr) == PipFailureKind::Permission
+    user_site_allowed(in_venv) && pip_failure_kind(stderr) == PipFailureKind::Permission
 }
 
 /// True iff a failed pip run died on filesystem permissions (admin-only
