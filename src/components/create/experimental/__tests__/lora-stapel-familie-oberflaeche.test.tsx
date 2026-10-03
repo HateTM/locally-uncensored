@@ -33,6 +33,8 @@ function setup(mode: 'image' | 'video', model: string, loras: string[], picks: s
   lists.loras = loras
   useCreateStore.setState({
     backend: 'local', isGenerating: false, cloudOp: null, utilityOp: null, removebg: false,
+    // The section remembers its state while the app runs; each case starts closed.
+    expertOpen: false,
     selectedLoras: picks.map((name) => ({ name, strength: 0.8 })),
     imageModel: mode === 'image' ? model : '', imageModelList: mode === 'image' ? [{ name: model, type: classifyModel(model) }] : [],
     videoModel: mode === 'video' ? model : '', videoModelList: mode === 'video' ? [{ name: model, type: classifyModel(model) }] : [],
