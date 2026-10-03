@@ -1,8 +1,8 @@
 import { expect, test } from '@playwright/test'
 import { DEFAULT_MODEL_NAME } from './support/tauri-mock'
 
-test('deleting through Memory Settings survives a late automatic extraction and reload', async ({ page }) => {
-  await page.route('**/*', route => new URL(route.request().url()).port === '5273' ? route.continue() : route.abort())
+test('deleting through Memory Settings survives a late automatic extraction and reload', async ({ page, baseURL }) => {
+  await page.route('**/*', route => new URL(route.request().url()).origin === new URL(baseURL ?? '').origin ? route.continue() : route.abort())
   await page.goto('/e2e/memory-sensitive-proof.html')
   await page.evaluate(async (modelName) => {
     const memoryPath = '/src/stores/memoryStore.ts'
