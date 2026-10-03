@@ -7,6 +7,7 @@ import { VoiceButton } from './VoiceButton'
 import { ApprovalDialog } from './ApprovalDialog'
 import { useVoiceStore } from '../../stores/voiceStore'
 import { useSettingsStore } from '../../stores/settingsStore'
+import { useUIStore } from '../../stores/uiStore'
 import { useModelStore } from '../../stores/modelStore'
 import { useChatStore } from '../../stores/chatStore'
 import { isThinkingCompatible, isVisionCompatible, declaredVision } from '../../lib/model-compatibility'
@@ -45,6 +46,13 @@ interface Props {
   onApprove?: () => void
   onReject?: () => void
   disabled?: boolean
+  /**
+   * Does a send have a chat model to run on right now? Asked at the moment of
+   * sending. Without one the send does not happen and nothing of the draft is
+   * touched: the model picker opens and says what is missing. Left out, the
+   * rule is simply "a model is picked".
+   */
+  modelReady?: () => boolean
   /**
    * Which commands this composer offers. Was a boolean meaning
    * "Coding-Agent-only"; since 2.6.8 it is the SCOPE, because the answer
@@ -98,7 +106,7 @@ function passSendLock(lock: { current: number }): boolean {
   return true
 }
 
-export function ChatInput({ onSend, onStop, isGenerating, waitingForLocalLane, pendingApproval, onApprove, onReject, disabled, slashCommands, composerModel, composerActions, composerAbove }: Props) {
+export function ChatInput({ onSend, onStop, isGenerating, waitingForLocalLane, pendingApproval, onApprove, onReject, disabled, modelReady, slashCommands, composerModel, composerActions, composerAbove }: Props) {
   const [input, setInput] = useState('')
   const [images, setImages] = useState<ImageAttachment[]>([])
   // Files of any other kind (3.0.5). Each entry is a description plus the
@@ -412,6 +420,15 @@ export function ChatInput({ onSend, onStop, isGenerating, waitingForLocalLane, p
   const handleSend = () => {
     const trimmed = input.trim()
     if (imageJob.current.busy || fileJob.current.busy || (!trimmed && images.length === 0 && files.length === 0) || isGenerating || waitingForLocalLane || disabled) return
+    // No chat model to answer: the send handlers return without a word in that
+    // case, and the lines below would then empty the field and the chips for a
+    // message that went nowhere (found in the Windows build of 3.0.5). The
+    // draft stays as it is, and the model picker opens with the reason. The
+    // Send button and Enter both come through here.
+    if (!(modelReady ? modelReady() : !!useModelStore.getState().activeModel)) {
+      useUIStore.getState().askForModel()
+      return
+    }
     if (!passSendLock(sendLockRef)) return
     const text = trimmed || (images.length > 0 ? '(image)' : FILE_ONLY_TEXT)
     const pictures = images.length > 0 ? images : undefined

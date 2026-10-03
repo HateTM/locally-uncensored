@@ -130,6 +130,12 @@ interface UIState {
   /** Read once by SettingsPage when it mounts, then cleared. Never persisted:
    *  it describes one navigation, not a preference. */
   settingsFocus: SettingsFocus | null
+  /** Counts the sends that were tried with no chat model picked. The model
+   *  picker of the composer watches it: each step opens the picker, which says
+   *  there what is missing. A counter and not a flag, so a second try opens it
+   *  again. Never persisted: it describes one click, not a preference. */
+  modelAskSeq: number
+  askForModel: () => void
   setView: (view: View) => void
   /** Open Settings on a given tab, optionally with one section unfolded. */
   openSettingsAt: (focus: SettingsFocus) => void
@@ -200,6 +206,8 @@ export const useUIStore = create<UIState>()(
       explorerWidth: EXPLORER_DEFAULT_WIDTH,
       explorerCollapsed: false,
       settingsFocus: null,
+      modelAskSeq: 0,
+      askForModel: () => set((s) => ({ modelAskSeq: s.modelAskSeq + 1 })),
 
       // Navigation no longer touches sidebarOpen. The conversation list only
       // makes sense in Chat, and that rule now lives in the Sidebar itself

@@ -731,6 +731,29 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
   useDismissOnEscape(open, () => setOpen(false))
 
   /**
+   * A send was tried without a chat model (ChatInput.handleSend). The message
+   * stays in the composer, and this picker is where the user learns why: it
+   * opens, and its first line says what is missing. Nothing is written in or
+   * above the prompt field. When the menu is closed without a pick, the dot
+   * on the button stays as the way back to the sentence, until a model is
+   * there.
+   *
+   * The counter is compared during render instead of in an effect: opening is
+   * a reaction to one click somewhere else, and an effect would open the menu
+   * one paint late.
+   */
+  const modelAskSeq = useUIStore((s) => s.modelAskSeq)
+  const [seenModelAsk, setSeenModelAsk] = useState(modelAskSeq)
+  const [modelAsked, setModelAsked] = useState(false)
+  if (seenModelAsk !== modelAskSeq) {
+    setSeenModelAsk(modelAskSeq)
+    setModelAsked(true)
+    setOpen(true)
+  }
+  if (modelAsked && activeModel) setModelAsked(false)
+  const sendNeedsModel = modelAsked && !activeModel
+
+  /**
    * Die Lesezeit beginnt, wenn der Satz wirklich zu lesen ist.
    *
    * Eine Info-Zeile steht zwoelf Sekunden. Solange sie im Chat nur als Punkt
@@ -1276,7 +1299,8 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
         title={
           answeredBy
             ? `The answers in this chat were written by ${answeredBy}. The next answer runs on the model picked here.`
-            : activeModel ? `Model: ${activeDisplayName}, click to switch` : 'Select a chat model'
+            : activeModel ? `Model: ${activeDisplayName}, click to switch`
+              : sendNeedsModel ? 'Your message needs a chat model. Pick one here to send it.' : 'Select a chat model'
         }
         aria-label="Select chat model"
         aria-expanded={open}
@@ -1345,6 +1369,16 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
         />
       )}
 
+      {/* A send is waiting for a model and the menu is closed: the same dot,
+          as the way back to the sentence in the menu. */}
+      {sendNeedsModel && !open && (
+        <span
+          data-testid="picker-send-needs-model-dot"
+          aria-hidden
+          className="absolute top-0 right-0 w-1.5 h-1.5 rounded-full bg-lu-accent pointer-events-none"
+        />
+      )}
+
       {/* ── Dropdown ── */}
       <AnimatePresence>
         {open && (
@@ -1360,6 +1394,18 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
             exit={{ opacity: 0, y: menue.nachOben ? 6 : -6, scale: 0.98 }}
             transition={{ duration: MOTION_S.fast, ease: 'easeOut' }}
           >
+            {/* First of all: why the menu opened by itself. The message the
+                user tried to send is still in the composer. */}
+            {sendNeedsModel && (
+              <div
+                data-testid="picker-send-needs-model"
+                className={`px-2.5 py-1.5 border-b border-black/5 dark:border-white/[0.06] t-micro leading-snug ${HINWEIS_TEXT.ruhig}`}
+              >
+                {textModels.length > 0
+                  ? 'Pick a model to send your message. Your text and attachments are kept.'
+                  : 'Your message needs a chat model, and none is listed yet. Your text and attachments are kept.'}
+              </div>
+            )}
             {/* Noch vor der Engine-Zeile: was sich am Modell selbst geaendert
                 hat, waehrend der Nutzer woanders hinsah. Begruendung des
                 Platzes oben an `engineSwitchNote`. */}

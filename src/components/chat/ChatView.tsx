@@ -38,6 +38,7 @@ import { SmallModelModeToggle } from './SmallModelModeToggle'
 import { ABCompare } from './ABCompare'
 import { RecentChats } from './RecentChats'
 import { useUIStore } from '../../stores/uiStore'
+import { chatModelReady } from '../../lib/chat-model-ready'
 import { useCompareStore } from '../../stores/compareStore'
 import { exportConversation, missingImagesNote } from '../../lib/chat-export'
 import { conversationMode } from '../../lib/conversation-mode'
@@ -788,6 +789,7 @@ export function ChatView() {
           {/* Code mode brings its own composer (CodexView above). */}
           <ChatInput
             onSend={sendMessage}
+            modelReady={chatModelReady}
             onStop={stopGeneration}
             isGenerating={busy.thisChat || queuedForLocalLane}
             waitingForLocalLane={queuedForLocalLane}
