@@ -106,15 +106,15 @@ test('Create: the tight model says so in the picker, and a load past a minute na
   await page.getByRole('radio', { name: 'Image', exact: true }).click()
 
   const picker = page.locator('button[aria-haspopup="listbox"]').first()
-  await expect(picker).toContainText('z image turbo bf16', { timeout: 20_000 })
+  await expect(picker).toContainText('Z-Image Turbo BF16', { timeout: 20_000 })
   // Closed: no word about the card anywhere, least of all at the prompt field.
   await expect(page.getByText(/your 12 GB card/)).toHaveCount(0)
 
   await picker.click()
   const list = page.locator('.lu-elevated')
   await expect(list).toBeVisible()
-  await expect(list.getByRole('option', { name: /z image turbo bf16/ })).toContainText('Tight on your 12 GB card')
-  const sdxlRow = list.getByRole('option', { name: /Juggernaut-XL v9/ })
+  await expect(list.getByRole('option', { name: /Z-Image Turbo BF16/ })).toContainText('Tight on your 12 GB card')
+  const sdxlRow = list.getByRole('option', { name: /Juggernaut XL V9 Photo v2/ })
   await expect(sdxlRow).toBeVisible()
   await expect(sdxlRow).not.toContainText(/card/)
   await expect(list.getByText(/your 12 GB card/)).toHaveCount(1)
