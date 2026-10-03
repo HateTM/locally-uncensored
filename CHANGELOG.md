@@ -66,6 +66,15 @@ image models in the cloud catalogue.
   model picker in Create and the Model Manager put the current models first
   with a Best mark and collect the ones a newer family has replaced under
   "Older models". No model was removed.
+- **Local image, video and music models say whether they fit your graphics
+  card.** With a detected graphics card, each download in the Model Manager
+  compares itself with it: "Fits your 12 GB card", "Tight on your 12 GB card:
+  runs, but loading takes minutes" or "Needs more than your 12 GB card". The
+  model picker in Create marks a model that is tight or needs more, and when
+  loading such a model takes longer than a minute, the waiting line says why.
+  The Z-Image Turbo description no longer promises 8 to 15 seconds per image,
+  which did not hold on smaller cards. Without a detected card, as on a Mac,
+  nothing changes.
 - **LU Cloud: 39 more models from open model families.** The cloud pickers in
   Create know 39 more models, 18 for images, 20 for video and one for music.
   Among them are Qwen Image 3.0 and 2.1, FLUX 3, Krea 2 Large, Cosmos 3 Super,

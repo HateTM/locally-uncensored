@@ -181,6 +181,10 @@ export const RELEASE_NOTES: ReleaseNote[] = [
             detail: 'The model picker in Create and the Model Manager put the current models first with a Best mark and collect the ones a newer family has replaced under "Older models". No model was removed.',
           },
           {
+            title: 'Local image, video and music models say whether they fit your graphics card.',
+            detail: 'With a detected graphics card, each download in the Model Manager compares itself with it: "Fits your 12 GB card", "Tight on your 12 GB card: runs, but loading takes minutes" or "Needs more than your 12 GB card". The model picker in Create marks a model that is tight or needs more, and when loading such a model takes longer than a minute, the waiting line says why. The Z-Image Turbo description no longer promises 8 to 15 seconds per image, which did not hold on smaller cards. Without a detected card, as on a Mac, nothing changes.',
+          },
+          {
             title: '"Save character" on a video keeps frames as a character.',
             detail: 'In the large view of a video, "Save character" lets you pick frames at the playback position and give the figure a name. It is stored on this device, up to 30 photos. From there, "Use as reference photos" loads it into the reference strip, and "Train in Character Studio" starts a training set with it.',
           },

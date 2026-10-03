@@ -406,6 +406,8 @@ describe('the notes table', () => {
       'transparent background', 'rewritten by', 'comfyui 0.37.2', 'issue 148',
       // Shots, LoRA-Staerke, Turbo-LoRA, Marken.
       'shots slider', 'from -10 to 10', 'ready to install', 'older models',
+      // Passt das Modell zur Grafikkarte: Model Manager, Waehler, Wartezeile.
+      'fits your 12 gb card', 'loading takes minutes', 'waiting line says why',
       // Mehrere Bilder in einem Zug, Figur aus einem Video, Prompt umschreiben.
       'up to 50 source images', 'save character', 'improve my prompt',
       // Cloud: neue Modelle, Anzahl, Referenzfotos, Edit ohne Maske.
