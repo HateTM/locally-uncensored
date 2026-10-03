@@ -19,10 +19,11 @@
  */
 import { describe, it, expect } from 'vitest'
 import {
-  bundleBytesToFetch, isPermanentDownloadError, lfsSha256, orphanFilename,
+  isPermanentDownloadError, lfsSha256, orphanFilename,
   planModelDownload, selectGgufFromTree, getVideoBundles, getImageBundles,
   type ModelBundle, type DiscoverModel,
 } from '../discover'
+import { bundleBytesToFetch } from '../../lib/bundle-state'
 
 const GIB = 1_073_741_824
 

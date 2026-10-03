@@ -61,7 +61,7 @@ describe('the list', () => {
     expect(screen.getByText('Ready to install')).toBeTruthy()
     expect(tile(TURBO)).toBeTruthy()
     expect(tile('Pixel Art XL · SDXL LoRA')).toBeTruthy()
-    expect(tile(TURBO).textContent).toMatch(/1\.82 GB/)
+    expect(tile(TURBO).textContent).toMatch(/1\.8 GB/)
     expect(tile(TURBO).textContent).toMatch(/LoRA stack/)
   })
 

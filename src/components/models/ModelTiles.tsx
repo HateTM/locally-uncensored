@@ -16,6 +16,7 @@ import { formatBytes, countLabel } from '../../lib/formatters'
 import { vramFit, vramFitLine, vramNeedTitle, type VramFit } from '../../lib/vram-fit'
 import { tierMarks } from '../../lib/render/model-tier'
 import { modelTileAction } from '../../lib/model-tile-action'
+import { bundleGetPlan } from '../../lib/bundle-state'
 import { ICON_SM } from '../ui/icon-size'
 
 // ─── Hardware fit ───────────────────────────────────────────────────
@@ -144,11 +145,11 @@ const TILE_STATE =
 /** ANZEIGE. Bleibt bewusst flach und ohne Hover: sie ist die Groesse, nicht
  *  die Wahl der Groesse. Wo es etwas zu waehlen gibt, steht an derselben
  *  Stelle das Control (siehe `ModelTile`). */
-export function SizePill({ sizeGB }: { sizeGB?: number }) {
-  if (!sizeGB) return null
+export function SizePill({ sizeGB, bytes }: { sizeGB?: number; bytes?: number }) {
+  if (!sizeGB && !bytes) return null
   return (
     <span className="t-micro px-1.5 py-0.5 rounded-md bg-gray-100 dark:bg-white/[0.06] text-gray-600 dark:text-gray-300 font-medium tabular-nums">
-      {sizeGB} GB
+      {bytes ? formatBytes(bytes) : `${sizeGB} GB`}
     </span>
   )
 }
@@ -546,6 +547,9 @@ export interface BundleTileProps {
    *  There is no card to name there, so the tile keeps the general hint. */
   sharedMemory?: boolean
   complete: boolean
+  /** The bundle's files that are on disk already (bundles share files). The
+   *  card announces only what Get will really fetch. */
+  filesOnDisk?: ReadonlySet<string>
   downloading: boolean
   hasErrors: boolean
   onInstall: () => void
@@ -554,7 +558,9 @@ export interface BundleTileProps {
   onOpenUrl: (url: string) => void
 }
 
-export function BundleTile({ bundle, lane, vramGb, sharedMemory = false, complete, downloading, hasErrors, onInstall, onRetry, onClear, onOpenUrl }: BundleTileProps) {
+const NO_FILES: ReadonlySet<string> = new Set()
+
+export function BundleTile({ bundle, lane, vramGb, sharedMemory = false, complete, filesOnDisk = NO_FILES, downloading, hasErrors, onInstall, onRetry, onClear, onOpenUrl }: BundleTileProps) {
   // No COMING SOON overlay any more (2026-07-24). It was driven by
   // `!bundle.verified && !complete`, a hand-set boolean, and it dimmed the tile
   // behind a full-cover "COMING SOON" pill while that tile's own working
@@ -576,6 +582,12 @@ export function BundleTile({ bundle, lane, vramGb, sharedMemory = false, complet
   // owner's 12 GB box sat five minutes in a load the old "10-16 GB" never
   // announced. Shared memory has no card to name and keeps the general hint.
   const cardLine = sharedMemory ? '' : vramFitLine(fit, vramGb)
+  // Sizes come from the files' own byte counts, and Get names what is still
+  // missing: the box, 03.10.2026, read "Get · 16.1 GB" on a card whose click
+  // fetched one file of 8.7 GB, the other two being shared and already there.
+  const plan = bundleGetPlan(bundle, filesOnDisk)
+  const fetchSize = formatBytes(plan.fetchBytes)
+  const alreadyHere = plan.present > 0 ? `, ${plan.present} already here` : ''
 
   return (
     <div
@@ -621,7 +633,7 @@ export function BundleTile({ bundle, lane, vramGb, sharedMemory = false, complet
       </div>
 
       <div className="flex items-center gap-2 mt-2.5 min-h-[var(--control-h-sm)]">
-        <SizePill sizeGB={bundle.totalSizeGB} />
+        <SizePill bytes={plan.totalBytes} />
         <span className="text-[0.55rem] text-gray-400 dark:text-gray-500">{countLabel(bundle.files.length, 'file')}</span>
         {!cardLine && <FitHint fit={fit} />}
 
@@ -659,9 +671,9 @@ export function BundleTile({ bundle, lane, vramGb, sharedMemory = false, complet
             <button
               onClick={onInstall}
               className={TILE_ACTION}
-              title={`Install ${countLabel(bundle.files.length, 'file')} (${bundle.totalSizeGB} GB)`}
+              title={`Install ${countLabel(plan.fetchFiles, 'file')} (${fetchSize})${alreadyHere}`}
             >
-              <Download size={ICON_SM} /> Get · {bundle.totalSizeGB} GB
+              <Download size={ICON_SM} /> Get · {fetchSize}
             </button>
           )}
         </div>

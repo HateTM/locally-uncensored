@@ -10,7 +10,7 @@ import {
   getUncensoredTextModels, getMainstreamTextModels,
   detectProviderModelPath, startModelDownloadToPath, luEngineDownloadDir,
   startModelDownload,
-  installBundleComplete, remoteBundleNotice, checkBundlesInstalled, resolveHfGgufFiles, planModelDownload,
+  installBundleComplete, remoteBundleNotice, checkBundlesOnDisk, resolveHfGgufFiles, planModelDownload,
   type DiscoverModel, type DownloadProgress, type ModelBundle, type HfGgufFile,
 } from '../../api/discover'
 import { sortByTier, tierGroup } from '../../lib/render/model-tier'
@@ -270,6 +270,9 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
 
   // Check which bundles are REALLY installed (file size validated, not just file existence)
   const [bundleStatuses, setBundleStatuses] = useState<Record<string, boolean>>({})
+  // Which bundle files are there already, so a card announces only what Get
+  // will really fetch (bundles share their text encoders and VAEs).
+  const [bundleFilesOnDisk, setBundleFilesOnDisk] = useState<ReadonlySet<string>>(() => new Set())
   // Memoised so the two effects below can name it as the dependency it is
   // instead of hiding it from the dep array. It only closes over `category`,
   // so its identity changes exactly when the effects had to re-run anyway —
@@ -277,7 +280,10 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
   const refreshBundleStatuses = useCallback(() => {
     if (category !== 'image' && category !== 'video') return
     const allBundles = [...getImageBundles(), ...getVideoBundles(), ...getAudioBundles(), ...getLipsyncBundles(), ...getMotionBundles()]
-    checkBundlesInstalled(allBundles).then(statuses => setBundleStatuses(statuses))
+    checkBundlesOnDisk(allBundles).then(({ installed, files }) => {
+      setBundleStatuses(installed)
+      setBundleFilesOnDisk(files)
+    })
   }, [category])
   useEffect(() => {
     refreshBundleStatuses()
@@ -982,6 +988,7 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
                 vramGb={systemVRAM}
                 sharedMemory={isMacOS()}
                 complete={isBundleComplete(bundle)}
+                filesOnDisk={bundleFilesOnDisk}
                 downloading={isBundleDownloading(bundle) || installingBundle === bundle.name}
                 hasErrors={hasBundleErrors(bundle)}
                 onInstall={() => handleBundleInstall(bundle)}

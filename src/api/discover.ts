@@ -7,6 +7,7 @@ import type { ProviderId } from "./providers/types"
 import { log } from "../lib/logger"
 import { useWorkflowStore } from "../stores/workflowStore"
 import { waitForModelsVisible } from "../lib/bundle-install"
+import { bundleBytesToFetch } from "../lib/bundle-state"
 import type { DownloadProgress } from "../types/downloads"
 import { asNumber, asRecordArray, asString, isRecord, prop, propPath } from "../types/json-guards"
 import type { DiscoverModel, ModelBundle } from "./model-bundles"
@@ -329,7 +330,17 @@ export async function checkBundleInstalled(bundle: ModelBundle): Promise<boolean
 
 /** Check multiple bundles at once, returns map of bundle name → installed status */
 export async function checkBundlesInstalled(bundles: ModelBundle[]): Promise<Record<string, boolean>> {
+  return (await checkBundlesOnDisk(bundles)).installed
+}
+
+/** What the disk says about a list of bundles: which bundles are installed, and
+ *  which of their files are there already. The second half is what a card needs
+ *  to announce only what it will really fetch: bundles share files, so "Get"
+ *  on a three file bundle is often one file (the box, 03.10.2026). A file
+ *  counts by the same rule `installBundleComplete` skips it by. */
+export async function checkBundlesOnDisk(bundles: ModelBundle[]): Promise<{ installed: Record<string, boolean>; files: Set<string> }> {
   const result: Record<string, boolean> = {}
+  const files = new Set<string>()
   // Collect ALL files from ALL bundles into a single batch request
   const allFiles: Array<{ subfolder: string; filename: string; expectedBytes: number; bundleName: string }> = []
   for (const bundle of bundles) {
@@ -343,7 +354,7 @@ export async function checkBundlesInstalled(bundles: ModelBundle[]): Promise<Rec
       })
     }
   }
-  if (allFiles.length === 0) return result
+  if (allFiles.length === 0) return { installed: result, files }
 
   try {
     const checkFiles = allFiles.map(f => ({ subfolder: f.subfolder, filename: f.filename, expectedBytes: f.expectedBytes }))
@@ -354,6 +365,9 @@ export async function checkBundlesInstalled(bundles: ModelBundle[]): Promise<Rec
     const fileStatus = new Map(results.map(r => [r.filename, r]))
     for (const bundle of bundles) {
       const bundleFiles = bundle.files.filter(f => f.filename)
+      for (const f of bundleFiles) {
+        if (onDiskMatchesCatalog(f, fileStatus.get(f.filename!))) files.add(f.filename!)
+      }
       result[bundle.name] = bundleFiles.length > 0 && bundleFiles.every(f => onDiskMatchesCatalog(f, fileStatus.get(f.filename!)))
     }
   } catch {
@@ -442,7 +456,7 @@ export async function checkBundlesInstalled(bundles: ModelBundle[]): Promise<Rec
     }
   }
 
-  return result
+  return { installed: result, files }
 }
 
 /** Base identity of a model file: basename only (ComfyUI enums can carry
@@ -672,33 +686,6 @@ async function runVisibilityConfirmation(filename: string): Promise<void> {
   } catch (err) {
     log.warn('[discover] visibility confirmation failed', { filename, err })
   }
-}
-
-/** One gibibyte, the unit the catalog's `sizeGB` and every size message use. */
-const GIB = 1_073_741_824
-
-/**
- * How many bytes this bundle still has to fetch, and where they land.
- *
- * Pure, so the sum can be tested without a drive. Files already on disk are
- * left out — re-checking space for a file that is not going to be fetched would
- * refuse installs that fit perfectly well. `totalSizeGB` is the fallback when
- * the per-file sizes are missing: a rough number is a far better plan than
- * planning for nothing, and it is only ever used to refuse, never to promise.
- */
-export function bundleBytesToFetch(
-  bundle: ModelBundle,
-  installed: Set<string>,
-): { bytes: number; subfolder?: string; files: number } {
-  const pending = bundle.files.filter(
-    f => f.downloadUrl && f.filename && f.subfolder && !installed.has(f.filename),
-  )
-  if (pending.length === 0) return { bytes: 0, files: 0 }
-  const known = pending.reduce((sum, f) => sum + (f.sizeGB ? f.sizeGB * GIB : 0), 0)
-  // Not one file states a size: fall back to the bundle total, minus nothing,
-  // because we cannot tell which part of it is already there.
-  const bytes = known > 0 ? known : (bundle.totalSizeGB || 0) * GIB
-  return { bytes: Math.round(bytes), subfolder: pending[0].subfolder, files: pending.length }
 }
 
 export async function installBundleComplete(bundle: ModelBundle): Promise<{ remote?: RemoteBundleReport }> {
@@ -1660,7 +1647,7 @@ export function lookupFileMeta(filename: string): FileMeta | null {
       return {
         url: m.downloadUrl,
         subfolder: m.subfolder,
-        expectedBytes: m.sizeGB ? Math.round(m.sizeGB * GIB) : undefined,
+        expectedBytes: m.sizeGB ? Math.round(m.sizeGB * 1_073_741_824) : undefined,
         sha256: m.sha256,
       }
     }

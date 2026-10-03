@@ -228,7 +228,7 @@ describe('D-S24 · der Schatten, den niemand je gesehen hat', () => {
       onInstall: () => {}, onRetry: () => {}, onClear: () => {}, onOpenUrl: () => {},
     }))
     expect(html).not.toContain('shadow')
-    expect(html).toContain('Get · 6 GB')
+    expect(html).toContain('Get · 6.0 GB')
     // EIN Rezept, zwei Call-Sites — nicht zwei handgeschriebene Ketten.
     expect((TILES.match(/className=\{TILE_ACTION\}/g) ?? []).length).toBe(2)
   })
