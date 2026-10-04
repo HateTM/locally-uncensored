@@ -171,11 +171,19 @@ export function vramFitLine(fit: VramFit, vramGb: number | null | undefined): st
   return fit === 'tight' && label ? `${label}: runs, loading can be slow` : label
 }
 
-/** What the card's verdict rests on, for the tooltip. */
+/**
+ * What the card's verdict rests on, for the tooltip. Always both halves: from
+ * where it runs, and from where it loads fully. A catalogue text without a
+ * floor ("16 GB best, offloads on less", "any") says the first half in words.
+ * It used to drop it, and a card reading "Tight: runs" had a tooltip that did
+ * not say it runs (the box, 04.10.2026: Wan 2.2 S2V FP8, the Qwen cards).
+ */
 export function vramNeedTitle(need: Partial<VramNeedFields>): string {
   if (typeof need.vramMinGB !== 'number' || typeof need.vramComfortGB !== 'number') return ''
-  const comfort = `Loads fully into graphics memory from ${need.vramComfortGB} GB.`
-  return need.vramMinGB > 0 ? `Runs from ${need.vramMinGB} GB. ${comfort}` : comfort
+  const runs = need.vramMinGB > 0
+    ? `Runs from ${need.vramMinGB} GB.`
+    : 'Runs on smaller cards too, with part of the model kept outside graphics memory.'
+  return `${runs} Loads fully into graphics memory from ${need.vramComfortGB} GB.`
 }
 
 /**

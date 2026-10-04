@@ -1,13 +1,13 @@
 import { describe, it, expect } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { BundleTile } from '../ModelTiles'
-import { getImageBundles, getVideoBundles } from '../../../api/model-bundles'
+import { getImageBundles, getVideoBundles, getLipsyncBundles } from '../../../api/model-bundles'
 
 // October 2026, the owner's 12 GB box: the catalogue said "10-16 GB" about
 // Z-Image and the card stood five minutes in the load. The tile now compares
 // the bundle with the detected card, in the place the fit hint always had.
 
-const bundle = (name: string) => [...getImageBundles(), ...getVideoBundles()].find((b) => b.name === name)!
+const bundle = (name: string) => [...getImageBundles(), ...getVideoBundles(), ...getLipsyncBundles()].find((b) => b.name === name)!
 
 function tile(name: string, vramGb: number | null, sharedMemory = false): string {
   return renderToStaticMarkup(
@@ -70,10 +70,33 @@ describe('a bundle tile compares itself with the detected card', () => {
     expect(html).toContain('Runs on your PC')
   })
 
-  it('a bundle whose text names no number claims nothing', () => {
+  // The box, 04.10.2026: this card had no line at all under its description,
+  // neither a verdict nor what it is for.
+  it('a bundle whose text names no number claims nothing and says what it is for', () => {
     const html = tile('Krea 2 Companion Files (Text Encoder + VAE)', 12)
     expect(html).not.toContain('data-bundle-fit')
     expect(html).not.toMatch(/your 12 GB card/)
+    expect(html).toContain('>For Krea 2 checkpoints<')
+  })
+
+  // The same run: the tooltip of a card without a stated floor left out that
+  // the model runs at all, under a verdict reading "Tight ...: runs".
+  it('the tooltip of every verdict says from where it runs', () => {
+    expect(tile('Wan 2.2 S2V FP8 (Talking Character)', 12)).toContain(
+      'title="Runs on smaller cards too, with part of the model kept outside graphics memory. Loads fully into graphics memory from 16.8 GB."',
+    )
+    expect(tile('Qwen-Image 2.1 (Generate and Edit)', 12)).toContain(
+      'title="Runs on smaller cards too, with part of the model kept outside graphics memory. Loads fully into graphics memory from 12 GB."',
+    )
+    expect(tile('Z-Image Turbo (Unfiltered, Fast)', 12)).toContain('title="Runs from 10 GB. Loads fully into graphics memory from 16 GB."')
+  })
+
+  // The same run: Pixel Art XL read 174.1 MB on its card and 162.6 MB under
+  // Installed. The file has 170 543 052 bytes (Hugging Face, 03.10.2026).
+  it('Pixel Art XL shows the size the file has', () => {
+    const html = tile('Pixel Art XL · SDXL LoRA', 12)
+    expect(html).toContain('162.6 MB')
+    expect(html).not.toContain('174.1 MB')
   })
 
   // The box, 03.10.2026: the 1.82 GB turbo LoRA read "Needs more than your

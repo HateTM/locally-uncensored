@@ -127,7 +127,10 @@ describe('the words', () => {
 
   it('the tooltip states the two numbers the verdict rests on', () => {
     expect(vramNeedTitle({ vramMinGB: 10, vramComfortGB: 16 })).toBe('Runs from 10 GB. Loads fully into graphics memory from 16 GB.')
-    expect(vramNeedTitle({ vramMinGB: 0, vramComfortGB: 1.7 })).toBe('Loads fully into graphics memory from 1.7 GB.')
+    // The box, 04.10.2026: Wan 2.2 S2V FP8 and the Qwen cards ("16 GB best,
+    // offloads on less") had a tooltip without the half that says they run.
+    expect(vramNeedTitle({ vramMinGB: 0, vramComfortGB: 16.8 })).toBe('Runs on smaller cards too, with part of the model kept outside graphics memory. Loads fully into graphics memory from 16.8 GB.')
+    for (const b of allBundles().filter((x) => typeof x.vramMinGB === 'number')) expect(vramNeedTitle(b), b.name).toMatch(/^Runs /)
     expect(vramNeedTitle({ vramMinGB: null, vramComfortGB: null })).toBe('')
   })
 
@@ -144,7 +147,7 @@ describe('the words', () => {
   it('no line carries a dash', () => {
     const lines = [
       vramFitLine('fits', 12), vramFitLine('tight', 12), vramFitLine('big', 12),
-      vramNeedTitle({ vramMinGB: 10, vramComfortGB: 16 }), slowLoadHint('tight', 60_000), slowLoadHint('big', 60_000),
+      vramNeedTitle({ vramMinGB: 10, vramComfortGB: 16 }), vramNeedTitle({ vramMinGB: 0, vramComfortGB: 16 }), slowLoadHint('tight', 60_000), slowLoadHint('big', 60_000),
     ]
     for (const line of lines) expect(line).not.toMatch(/[\u2013\u2014]/)
   })
@@ -230,10 +233,14 @@ describe('every bundle in the catalogue carries the two numbers', () => {
   // and size filters), the card shows what the add-on is for (ModelTiles).
   it('the add-ons name what they belong to', () => {
     expect(allBundles().filter((b) => b.addonFor).map((b) => [b.name, b.addonFor])).toEqual([
+      ['Krea 2 Companion Files (Text Encoder + VAE)', 'Krea 2 checkpoints'],
       ['SDXL VAE (fp16-fix) · addon', 'SDXL models'],
       ['Pixel Art XL · SDXL LoRA', 'SDXL models'],
       ['MiniMax H3 Turbo LoRA · 8 Steps', 'MiniMax H3'],
     ])
+    // The box, 04.10.2026: the Krea 2 companion files had neither a verdict
+    // nor a "For ..." line. Every entry without a number says what it is for.
+    for (const b of allBundles().filter((x) => typeof x.vramMinGB !== 'number')) expect(b.addonFor, b.name).toBeTruthy()
     // Every LoRA add-on of the catalogue is one of them.
     for (const b of getLoraAddonBundles()) expect(b.addonFor, b.name).toBeTruthy()
   })

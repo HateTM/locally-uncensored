@@ -300,6 +300,9 @@ export function getImageBundles(): ModelBundle[] {
       verified: true,
       totalSizeGB: 5.5,
       vramRequired: 'depends on the checkpoint',
+      // A text encoder and a VAE for a checkpoint from elsewhere: an add-on,
+      // so the card says what it is for where the others carry a verdict.
+      addonFor: 'Krea 2 checkpoints',
       workflow: 'krea2',
       tier: 'best',
       url: 'https://huggingface.co/Comfy-Org/Krea-2',
@@ -713,7 +716,11 @@ export function getImageBundles(): ModelBundle[] {
       description: 'nerijs Pixel Art XL · turns any SDXL model into crisp pixel art. A clearly visible style LoRA. After download, pick it under Advanced → LoRA and raise the strength.',
       tags: ['SDXL', 'LoRA', 'Style'],
       verified: true,
-      totalSizeGB: 0.17,
+      // 170 543 052 bytes on Hugging Face (read 03.10.2026), which is 162.6 MB
+      // the way the app counts (sizeGB is in gibibytes, see Qwen-Image 2.1
+      // above). 0.17 was the decimal figure and showed as 174.1 MB on the
+      // card beside 162.6 MB under Installed.
+      totalSizeGB: 0.1588,
       vramRequired: 'any',
       addonFor: 'SDXL models',
       workflow: 'sdxl',
@@ -723,9 +730,10 @@ export function getImageBundles(): ModelBundle[] {
         {
           name: 'Pixel Art XL LoRA',
           description: 'SDXL pixel art style LoRA → models/loras.',
-          pulls: '', tags: ['LoRA', '170 MB'], updated: '',
+          pulls: '', tags: ['LoRA', '163 MB'], updated: '',
           downloadUrl: 'https://huggingface.co/nerijs/pixel-art-xl/resolve/main/pixel-art-xl.safetensors',
-          filename: 'pixel-art-xl.safetensors', subfolder: 'loras', sizeGB: 0.17,
+          filename: 'pixel-art-xl.safetensors', subfolder: 'loras', sizeGB: 0.1588,
+          sha256: '4234637cb80c998f41e348e6a6cb6bc20d8d038b2b0f256b6129b3b5e353eef7',
         },
       ],
     },
