@@ -1365,7 +1365,7 @@
   },
   "flux-3-edit": {
     "label": "FLUX 3",
-    "endpoint": "black-forest-labs/flux-3/edit",
+    "endpoint": "black-forest-labs/flux-3/image-edit",
     "kind": "image",
     "adult": false,
     "tier": "best",

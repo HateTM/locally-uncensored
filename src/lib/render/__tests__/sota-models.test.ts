@@ -35,7 +35,7 @@ const NEU: Record<string, string> = {
   'qwen-image-2.1': 'wavespeed-ai/qwen-image-2.1/text-to-image',
   'qwen-image-2.1-edit': 'wavespeed-ai/qwen-image-2.1/edit',
   'flux-3': 'black-forest-labs/flux-3/text-to-image',
-  'flux-3-edit': 'black-forest-labs/flux-3/edit',
+  'flux-3-edit': 'black-forest-labs/flux-3/image-edit',
   'flux-2-klein-9b': 'wavespeed-ai/flux-2-klein-9b/text-to-image',
   'krea-2-large': 'wavespeed-ai/krea-v2-large/text-to-image',
   'cosmos-3-super': 'nvidia/cosmos-3-super/text-to-image',
