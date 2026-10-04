@@ -74,6 +74,6 @@ describe('cutoutDownloadLine', () => {
     expect(await cutoutDownloadLine('RMBG-2.0')).toBeNull()
   })
   it('carries no dash', () => {
-    expect(LINE).not.toMatch(/[–—]/)
+    expect(LINE).not.toMatch(/[\u2013\u2014]/)
   })
 })
