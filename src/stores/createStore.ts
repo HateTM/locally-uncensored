@@ -244,6 +244,9 @@ export interface GalleryItem {
   intent?: CreateIntent
   /** Several source images, one edit: the file this result was made from. */
   sourceName?: string
+  /** A tool that runs on its own model (Cutout on RMBG-2.0): that model.
+   *  `model` is then only the picker's choice, which had no part in the run. */
+  toolModel?: string
   /** Kurze Ueberschrift, wenn der Prompt nicht sagt, was dabei herauskam: der
    *  Titel des Presets, die Beschreibung des Schrittes. Siehe gallery-label.ts. */
   label?: string

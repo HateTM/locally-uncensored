@@ -28,6 +28,7 @@ import { ReferenceStrip } from './ReferenceStrip'
 import { BatchStrip, useBatchPickers } from './BatchStrip'
 import { addBatchFiles, useBatchOffered } from './batchRun'
 import { filesFromDrop } from './batchFiles'
+import { DEFAULT_CUTOUT_MODEL_SIZE } from '../../../api/cutout-model'
 import { useReferenceSlots } from './referenceSlots'
 import { SavedCharacterChips } from './SavedCharacters'
 import { loadPhotosAsReferences, sendPhotosToStudio } from './characterPhotos'
@@ -143,6 +144,7 @@ export function Stage({ displayed, onOpenMaskEditor, onEditResult, onAnimateResu
         onSendToEditor={displayed.type === 'image' && onEditResult ? () => onEditResult(displayed) : undefined}
         onAnimate={displayed.type === 'image' && onAnimateResult ? () => onAnimateResult(displayed) : undefined}
         onSaveCharacter={displayed.type === 'video' && onSaveCharacter ? () => onSaveCharacter(displayed) : undefined}
+        footer={meta.needsSource && source ? <ResultSourceActions /> : undefined}
       />
     )
   } else {
@@ -442,6 +444,25 @@ function SourcePreview({ onOpenMaskEditor }: { onOpenMaskEditor: () => void }) {
   )
 }
 
+/**
+ * Under a finished result on a tool that works from a source image: the same
+ * way to the next image that the source preview offers before the run. The
+ * box, 04.10.2026: after a cutout the only way to load another image was to
+ * leave the tool and come back. "Change image" puts the new image on the
+ * Stage; the list under it adds more for one run over all of them.
+ */
+function ResultSourceActions() {
+  const setSource = useCreateStore((s) => s.setSource)
+  const batchCount = useCreateStore((s) => s.batchSources.length)
+  const batchOn = useBatchOffered() && batchCount > 1
+  return (
+    <div className="flex flex-col items-center mt-3" data-testid="result-source-actions">
+      {!batchOn && <ChangeImageButton onChange={(r) => setSource(r)} />}
+      <BatchStrip />
+    </div>
+  )
+}
+
 function ChangeImageButton({ onChange }: { onChange: (r: Awaited<ReturnType<typeof loadImageRef>>) => void }) {
   const setError = useCreateStore((s) => s.setError)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -520,7 +541,7 @@ const CAP_COPY = {
   rmbg: {
     icon: Scissors,
     title: 'Background removal needs a one-time download',
-    description: 'The AI cutout runs fully locally (ComfyUI-RMBG). This installs the node now. The ~300 MB cutout model downloads automatically on your first cutout.',
+    description: `The AI cutout runs fully locally (ComfyUI-RMBG). This installs the node now. The ${DEFAULT_CUTOUT_MODEL_SIZE} cutout model downloads automatically on your first cutout.`,
   },
   'inpaint-nodes': {
     icon: Wand2,

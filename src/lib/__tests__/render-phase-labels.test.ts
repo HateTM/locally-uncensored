@@ -103,7 +103,7 @@ describe('the Create tab uses this module and holds no labels of its own', () =>
   it('useCreate asks for the phase instead of writing one', () => {
     const src = read('src/hooks/useCreate.ts')
     expect(src).toMatch(/import \{ phaseForExecutingNode, phaseForProgressStep \} from '\.\.\/lib\/render-phase-labels'/)
-    expect(src).toMatch(/phaseForExecutingNode\(classType, mode === 'video' \? 'video' : 'image'\)/)
+    expect(src).toMatch(/phaseForExecutingNode\(classType, mode === 'video' \? 'video' : 'image', cutoutDownload\)/)
     expect(src).toMatch(/phaseForProgressStep\(value, max, st\.progressPhase\)/)
   })
 
@@ -111,5 +111,21 @@ describe('the Create tab uses this module and holds no labels of its own', () =>
     const src = read('src/hooks/useCreate.ts')
     expect(src).not.toContain('Decoding frames, the last long stretch')
     expect(src).not.toContain("setPhase(35, 'Sampling...')")
+  })
+})
+
+describe('the cutout node', () => {
+  // The box, 04.10.2026: the RMBG node fetched its 885 MB model for 160 s and
+  // the waiting area said "Queued..." throughout, the node had no label.
+  it('has its own line instead of leaving "Queued..." up', () => {
+    expect(phaseForExecutingNode('RMBG', 'image')).toEqual({ phase: 'sampling', pct: 40, label: 'Removing the background...' })
+    expect(phaseForExecutingNode('RMBG', 'image', null)?.label).toBe('Removing the background...')
+  })
+  it('says the model download when the run was told the model is not on the drive', () => {
+    const line = 'Downloading the cutout model (885 MB), first run only...'
+    expect(phaseForExecutingNode('RMBG', 'image', line)?.label).toBe(line)
+  })
+  it('the download line belongs to that node alone', () => {
+    expect(phaseForExecutingNode('SaveImage', 'image', 'Downloading the cutout model (885 MB), first run only...')).toBeNull()
   })
 })

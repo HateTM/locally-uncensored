@@ -54,6 +54,7 @@ import {
 import { phaseForExecutingNode, phaseForProgressStep } from '../lib/render-phase-labels'
 import { buildDynamicWorkflow, buildLocalOpWorkflow, checkVideoOutputCapability } from '../api/dynamic-workflow'
 import { getAllNodeInfo, clearNodeCache } from '../api/comfyui-nodes'
+import { cutoutModelOf, cutoutDownloadLine } from '../api/cutout-model'
 import { apiNodes, type ComfyApiGraph, type ComfyExecutionMessage, type ComfyHistoryEntry } from '../types/comfy-graph'
 import { restartComfyForNewNodes } from '../api/comfy-restart'
 import { installCustomNodes } from '../api/discover'
@@ -1310,6 +1311,12 @@ export function useCreate() {
         console.warn('[useCreate] WebSocket unavailable, using polling fallback')
       }
 
+      // A cutout runs on the node's own model, which the node fetches inside
+      // its first run. Asked before the submit, so the wait can say so.
+      const cutoutModel = isRemoveBg ? cutoutModelOf(workflow) : undefined
+      const cutoutDownload = cutoutModel ? await cutoutDownloadLine(cutoutModel) : null
+      const toolFields = cutoutModel ? { toolModel: cutoutModel } : {}
+
       setProgress(10, 'Submitting to ComfyUI...')
       let promptId: string
       try {
@@ -1420,7 +1427,7 @@ export function useCreate() {
                       modelType: mode === 'image' ? imageModelType : (videoModelsList.find(m => m.name === activeModel)?.type ?? 'wan'),
                       seed: runSeed,
                       steps, cfgScale, sampler, scheduler, width: outputWidth, height: outputHeight, batchSize,
-                      createdAt: Date.now(), builderUsed, intent, ...(skippedNote ? { runNote: skippedNote } : {}),
+                      createdAt: Date.now(), builderUsed, intent, ...toolFields, ...(skippedNote ? { runNote: skippedNote } : {}),
                     })
                   }
                 }
@@ -1465,7 +1472,7 @@ export function useCreate() {
                   break
                 }
                 const classType = nodeClassMap.get(nodeId) || ''
-                const step = phaseForExecutingNode(classType, mode === 'video' ? 'video' : 'image')
+                const step = phaseForExecutingNode(classType, mode === 'video' ? 'video' : 'image', cutoutDownload)
                 if (step) {
                   st.setProgressPhase(step.phase)
                   setPhase(step.pct, step.label)
@@ -1511,7 +1518,7 @@ export function useCreate() {
                         modelType: mode === 'image' ? imageModelType : (videoModelsList.find(m => m.name === activeModel)?.type ?? 'wan'),
                         seed: runSeed,
                         steps, cfgScale, sampler, scheduler, width: outputWidth, height: outputHeight, batchSize,
-                        createdAt: Date.now(), builderUsed, ...(skippedNote ? { runNote: skippedNote } : {}),
+                        createdAt: Date.now(), builderUsed, intent, ...toolFields, ...(skippedNote ? { runNote: skippedNote } : {}),
                       })
                     }
                   }
@@ -1618,7 +1625,7 @@ export function useCreate() {
                       modelType: mode === 'image' ? imageModelType : (videoModelsList.find(m => m.name === activeModel)?.type ?? 'wan'),
                       seed: runSeed,
                       steps, cfgScale, sampler, scheduler, width: outputWidth, height: outputHeight, batchSize,
-                      createdAt: Date.now(), builderUsed, intent, ...(skippedNote ? { runNote: skippedNote } : {}),
+                      createdAt: Date.now(), builderUsed, intent, ...toolFields, ...(skippedNote ? { runNote: skippedNote } : {}),
                     })
                   }
                 }

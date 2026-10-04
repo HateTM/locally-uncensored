@@ -1,5 +1,5 @@
 import { itemHasAlpha } from '../../../lib/transparent-image'
-import { useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { motion } from 'framer-motion'
 import { Cpu, Sparkles, ImageDown, Maximize2, Download, Wand2, MonitorOff, AudioLines, Film, Trash2, UserRoundPlus } from 'lucide-react'
 import { coldLoadHint } from '../../../lib/cold-load-notice'
@@ -13,6 +13,7 @@ import { PromptDetails } from './PromptDetails'
 import { markGalleryItemAvailable } from './galleryUrl'
 import { downloadGalleryItem } from './galleryDownload'
 import { galleryLabel } from '../../../lib/render/gallery-label'
+import { resultFacts } from '../../../lib/render/result-facts'
 import { useComfyMedia } from './useComfyMedia'
 import { BatchQueue } from './BatchStrip'
 import { cn } from '../ui/cn'
@@ -143,6 +144,9 @@ interface ResultProps {
   onAnimate?: () => void
   /** Pick frames of this finished video and save them as a character. */
   onSaveCharacter?: () => void
+  /** Under the result, in the same column: on a tool that works from a source
+   *  image, the way to the next image (Stage's ResultSourceActions). */
+  footer?: ReactNode
 }
 
 
@@ -159,7 +163,7 @@ function reconcileDims(item: GalleryItem, w: number, h: number) {
   }
 }
 
-export function ResultView({ item, onFullscreen, onSendToEditor, onAnimate, onSaveCharacter }: ResultProps) {
+export function ResultView({ item, onFullscreen, onSendToEditor, onAnimate, onSaveCharacter, footer }: ResultProps) {
   const { src: url, onError } = useComfyMedia(item)
   const download = () => void downloadGalleryItem(item)
   const isVideo = item.type === 'video'
@@ -232,16 +236,13 @@ export function ResultView({ item, onFullscreen, onSendToEditor, onAnimate, onSa
           </IconBtn>
         </div>
       </div>
-      <div className="flex items-center gap-3 mt-3 t-mono text-gray-600">
-        {!isAudio && (
-          <>
-            <span>{item.width}×{item.height}</span>
-            <span>·</span>
-            <span>seed {item.seed}</span>
-            <span>·</span>
-          </>
-        )}
-        <span className="truncate max-w-[280px]">{prettyModel(item.model)}</span>
+      <div className="flex items-center gap-3 mt-3 t-mono text-gray-600" data-testid="result-facts">
+        {resultFacts(item).map((fact, i, all) => (
+          <Fragment key={fact}>
+            <span className={i === all.length - 1 ? 'truncate max-w-[280px]' : undefined}>{fact}</span>
+            {i < all.length - 1 && <span>·</span>}
+          </Fragment>
+        ))}
       </div>
       {item.sourceName && (
         <div className="mt-1 t-mono text-gray-500 truncate max-w-[420px]" data-testid="source-name">from {item.sourceName}</div>
@@ -250,6 +251,7 @@ export function ResultView({ item, onFullscreen, onSendToEditor, onAnimate, onSa
         <div className="mt-1 t-mono text-gray-500" data-testid="run-note">{item.runNote}</div>
       )}
       <PromptDetails item={item} className="mt-2" />
+      {footer}
      </div>
     </div>
   )
@@ -271,4 +273,3 @@ function IconBtn({ children, title, onClick, disabled }: { children: React.React
   )
 }
 
-function prettyModel(f: string): string { return f.replace(/\.(safetensors|ckpt|pt)$/i, '').replace(/[_]+/g, ' ') }

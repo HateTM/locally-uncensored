@@ -1,4 +1,4 @@
-import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { AlertTriangle, Cloud, Cpu } from 'lucide-react'
 import { useCreateStore, type GalleryItem } from '../../../stores/createStore'
@@ -7,6 +7,8 @@ import { useComfyNoticeStore } from '../../../stores/comfyNoticeStore'
 import { loadComfyCorsSignature, shouldShowCorsNotice } from '../../../lib/comfy-cors-notice'
 import { comfyIdleNotice, shouldWatchComfyIdle, IDLE_WATCH_INTERVAL_MS, IDLE_STARTING } from '../../../lib/comfy-idle-watch'
 import type { ComfyGuardStatus } from '../../../lib/comfy-restart-guard'
+import { anyInstallRunning, subscribeInstallRuns } from '../../../lib/model-install-runs'
+import { useComfyInstallStore } from '../../../stores/comfyInstallStore'
 import { useWorkflowStore } from '../../../stores/workflowStore'
 import { CreateExpProvider, useCreateExp } from './CreateContext'
 import { IntentBar } from './IntentBar'
@@ -161,6 +163,12 @@ function CreateExperimentalInner() {
   // A glance every 30s while this tab is open and idle, no restart of its own:
   // holding an engine warm for work nobody asked for costs RAM and VRAM, and
   // the render path already fixes it on demand. Wording in lib/comfy-idle-watch.
+  //
+  // Silent while LU restarts ComfyUI itself: the setup card or the update line
+  // is already saying what happens, and the look comes back when it is done.
+  const setupRunning = useSyncExternalStore(subscribeInstallRuns, anyInstallRunning)
+  const comfyUpdating = useComfyInstallStore((s) => s.phase !== 'idle' && s.phase !== 'error')
+  const luIsRestartingComfy = setupRunning || comfyUpdating || corsFixing
   const [idleNotice, setIdleNotice] = useState('')
   const idleTimerRef = useRef<(() => void) | null>(null)
   useEffect(() => {
@@ -169,7 +177,7 @@ function CreateExperimentalInner() {
     void (async () => {
       const { isMacOS } = await import('../../../api/backend')
       if (cancelled) return
-      if (!shouldWatchComfyIdle(backend === 'local', isMacOS(), isGenerating)) { clear(); return }
+      if (!shouldWatchComfyIdle(backend === 'local', isMacOS(), isGenerating, luIsRestartingComfy)) { clear(); return }
       const { backendCall } = await import('../../../api/backend')
       const look = async () => {
         const st = await backendCall<ComfyGuardStatus>('comfyui_status').catch(() => null)
@@ -180,7 +188,7 @@ function CreateExperimentalInner() {
       idleTimerRef.current = () => clearInterval(timer)
     })()
     return () => { cancelled = true; idleTimerRef.current?.(); idleTimerRef.current = null }
-  }, [backend, isGenerating])
+  }, [backend, isGenerating, luIsRestartingComfy])
 
   const fixCorsForMe = useCallback(async () => {
     setCorsFixing(true)
