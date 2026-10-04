@@ -25,6 +25,7 @@ import { repairJson } from '../../lib/tool-call-repair'
 import { signalCreditsExhausted } from '../../lib/credits-exhausted'
 import { parseRetryAfter } from '../../lib/http-status'
 import { localFetch, localFetchStream, isPrivateOrLanHost, isDirectFetchAllowed, hostnameOf, ensureProxyAllowsHost, backendCall } from '../backend'
+import { chatBackendsBack } from '../../lib/chat-backends-gate'
 import { ensureBuiltinEngineAlive, explainDeadEngine, explainEngineTransportMessage, isManagedBuiltinSlot } from '../builtin-ensure'
 import { isLocalTransportFailure, localBackendUnreachableMessage, remoteBackendUnreachableMessage } from '../../lib/local-backend-transport'
 import { applyTemplateContract } from './normalize-system'
@@ -855,6 +856,8 @@ export class OpenAIProvider implements ProviderClient {
     // child to free VRAM ("reloads lazily on the next message"), this is that
     // lazy reload. Restart-before-send instead of letting the fetch hit a dead
     // 127.0.0.1:8127 and look like a crashed backend.
+    // A Create render may have moved this backend's model out (vram-handoff).
+    if (this.isLanBackend) await chatBackendsBack()
     if (this.config.managed === true) await ensureBuiltinEngineAlive(model)
 
     if (this.useLocalProxy) await ensureProxyAllowsHost(this.baseUrl)
@@ -1065,6 +1068,8 @@ export class OpenAIProvider implements ProviderClient {
 
     // Same self-heal as chatStream: agent/tool turns after a Create render
     // must revive the offloaded built-in engine before hitting its port.
+    // A Create render may have moved this backend's model out (vram-handoff).
+    if (this.isLanBackend) await chatBackendsBack()
     if (this.config.managed === true) await ensureBuiltinEngineAlive(model)
 
     if (this.useLocalProxy) await ensureProxyAllowsHost(this.baseUrl)

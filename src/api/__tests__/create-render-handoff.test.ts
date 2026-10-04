@@ -6,7 +6,8 @@
  * give that path the agent hand-off's manners: capture, KV-save, evict,
  * restore. These tests pin the capture list, the save-before-kill order, the
  * restore calls, the exclusiveVramMode 'never' opt-out (negative control)
- * and the grace-window takeover for back-to-back renders.
+ * and the takeover of a parked haul by back-to-back renders. Since 3.0.5 the
+ * restore waits for a need while Create is open (last describe blocks).
  *
  * Run: npx vitest run src/api/__tests__/create-render-handoff.test.ts
  */
@@ -57,10 +58,15 @@ vi.mock('../comfyui-ws', () => ({
 import {
   evictChatBackendsForRender,
   restoreChatBackendsAfterRender,
+  restoreChatBackendsNow,
+  setRenderSurfaceOpen,
   holdRenderRestore,
   __resetRenderJuggleForTests,
+  RENDER_RESTORE_GRACE_MS,
+  RENDER_RESTORE_IDLE_MS,
   type RenderEviction,
 } from '../vram-handoff'
+import { chatBackendsBack } from '../../lib/chat-backends-gate'
 import { useSettingsStore } from '../../stores/settingsStore'
 
 const GB = 1024 * 1024 * 1024
@@ -344,6 +350,138 @@ describe('the eviction says what the wait is spent on', () => {
   })
 })
 
+// The box, 04.10.2026 (LM Studio, a 6 GB chat model, about 7 s to load): the
+// chat model was read back in 2 s after every render. A second render started
+// shortly after waited up to 30 s for that load to finish and then unloaded
+// the model again. While Create is open the haul now stays parked until the
+// chat model is needed.
+describe('while Create is open the chat model comes back when it is needed', () => {
+  const LMS = { id: 'qwen/qwen2.5-vl-7b', contextLength: 8192 }
+  const haul = (): RenderEviction => ({
+    ollamaModel: 'qwen:14b',
+    lms: LMS,
+    bundled: { port: 8127, modelPath: 'C:/models/qwen3-8b.gguf', modelBytes: 5 * GB, slotSaved: true },
+  })
+  const nothingLoaded = () => {
+    expect(freeMemory).not.toHaveBeenCalled()
+    expect(loadModel).not.toHaveBeenCalled()
+    expect(callsTo('lmstudio_load_model')).toHaveLength(0)
+    expect(callsTo('start_bundled_engine')).toHaveLength(0)
+  }
+  const allLoaded = () => {
+    expect(freeMemory).toHaveBeenCalledTimes(1)
+    expect(loadModel).toHaveBeenCalledTimes(1)
+    expect(loadModel).toHaveBeenCalledWith('qwen:14b')
+    expect(callsTo('lmstudio_load_model')).toHaveLength(1)
+    expect(callsTo('lmstudio_load_model')[0][1]).toMatchObject({ model: LMS.id, contextLength: 8192 })
+    expect(callsTo('start_bundled_engine')).toHaveLength(1)
+    expect(callIndex('kv_slot_action', (a) => (a as { action?: string })?.action === 'restore')).toBeGreaterThanOrEqual(0)
+  }
+  /** Everything is still evicted from the render before. */
+  const stillEvicted = () => {
+    mockBackends({ engineRunning: false })
+    localFetch.mockResolvedValue({ ok: true, json: async () => ({ models: [] }) })
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+    setRenderSurfaceOpen(true)
+  })
+
+  it('two renders in a row: nothing is loaded in between, and the second does not wait', async () => {
+    await restoreChatBackendsAfterRender(haul())
+    // The user looks at the picture and writes the next prompt: far longer
+    // than the old 2 s, long enough for the old reload to be in full swing.
+    await vi.advanceTimersByTimeAsync(45_000)
+    nothingLoaded()
+
+    stillEvicted()
+    const phases: string[] = []
+    const second = await evictChatBackendsForRender((p) => phases.push(p))
+    expect(phases).toEqual(['freeing'])
+    nothingLoaded()
+    // The second render carries the duty to bring the first one's haul back.
+    expect(second.lms).toEqual(LMS)
+    expect(second.ollamaModel).toBe('qwen:14b')
+    expect(second.bundled?.modelPath).toBe('C:/models/qwen3-8b.gguf')
+
+    // And nothing fires behind its back while it renders.
+    await vi.advanceTimersByTimeAsync(RENDER_RESTORE_IDLE_MS * 2)
+    nothingLoaded()
+  })
+
+  it('a chat request after the render brings everything back before it is sent', async () => {
+    await restoreChatBackendsAfterRender(haul())
+    await vi.advanceTimersByTimeAsync(10_000)
+    nothingLoaded()
+    await chatBackendsBack()
+    allLoaded()
+    // Once. The next message has nothing to wait for, and the idle time
+    // brings nothing back a second time.
+    await chatBackendsBack()
+    await vi.advanceTimersByTimeAsync(RENDER_RESTORE_IDLE_MS * 2)
+    allLoaded()
+  })
+
+  it('leaving Create brings everything back', async () => {
+    await restoreChatBackendsAfterRender(haul())
+    await vi.advanceTimersByTimeAsync(10_000)
+    nothingLoaded()
+    setRenderSurfaceOpen(false)
+    await restoreChatBackendsNow()
+    allLoaded()
+  })
+
+  it('nobody asks: after the idle time everything comes back by itself', async () => {
+    expect(RENDER_RESTORE_IDLE_MS).toBeGreaterThanOrEqual(120_000)
+    await restoreChatBackendsAfterRender(haul())
+    await vi.advanceTimersByTimeAsync(RENDER_RESTORE_IDLE_MS - 1_000)
+    nothingLoaded()
+    await vi.advanceTimersByTimeAsync(2_000)
+    await restoreChatBackendsNow()
+    allLoaded()
+  })
+
+  it('a render that ends after Create was left restores after the short grace window', async () => {
+    setRenderSurfaceOpen(false)
+    await restoreChatBackendsNow()
+    await restoreChatBackendsAfterRender(haul())
+    nothingLoaded()
+    await vi.advanceTimersByTimeAsync(RENDER_RESTORE_GRACE_MS + 500)
+    await restoreChatBackendsNow()
+    allLoaded()
+  })
+
+  it('a chat request with nothing parked waits for nothing and touches nothing', async () => {
+    await chatBackendsBack()
+    expect(backendCall).not.toHaveBeenCalled()
+    nothingLoaded()
+  })
+
+  it('a chat request between two pictures of a batch does not take the card from the batch', async () => {
+    const release = holdRenderRestore()
+    await evictChatBackendsForRender()
+    backendCall.mockClear()
+    await restoreChatBackendsAfterRender(haul())
+    await chatBackendsBack()
+    nothingLoaded()
+    release()
+    await chatBackendsBack()
+    allLoaded()
+  })
+
+  it('a render that fails or is cancelled parks its haul the same way: a chat request gets the model', async () => {
+    stillEvicted()
+    const taken = await evictChatBackendsForRender()
+    expect(taken.ollamaModel).toBeNull()
+    // useCreate's finally hands back what the run held, here the haul of the
+    // render before it.
+    await restoreChatBackendsAfterRender(haul())
+    await chatBackendsBack()
+    expect(loadModel).toHaveBeenCalledWith('qwen:14b')
+  })
+})
+
 describe('wiring: useCreate uses the hand-off helpers', () => {
   const read = (rel: string) => fs.readFileSync(path.resolve(__dirname, rel), 'utf8')
 
@@ -355,5 +493,15 @@ describe('wiring: useCreate uses the hand-off helpers', () => {
     // The exact uncaptured kill Z36 flagged must not come back.
     expect(src).not.toContain("backendCall('offload_local_models'")
     expect(src).not.toContain("backendCall('lmstudio_unload_model'")
+  })
+
+  it('Create says when it is on screen, and the local providers ask for the chat model before they send', () => {
+    const create = read('../../components/create/experimental/CreateExperimental.tsx')
+    expect(create).toContain('setRenderSurfaceOpen(true)')
+    expect(create).toContain('return () => setRenderSurfaceOpen(false)')
+    const ollama = read('../providers/ollama-provider.ts')
+    expect(ollama.split('await chatBackendsBack()').length - 1).toBe(2)
+    const openai = read('../providers/openai-provider.ts')
+    expect(openai.split('if (this.isLanBackend) await chatBackendsBack()').length - 1).toBe(2)
   })
 })

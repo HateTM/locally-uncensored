@@ -44,6 +44,7 @@
  * of call #2 and re-trigger the exact OOM we are avoiding.
  */
 
+import { setChatBackendsRestore } from '../lib/chat-backends-gate'
 import { backendCall, ollamaUrl, localFetch, isOllamaLocal, isWindows } from './backend'
 import type { ComfyApiGraph } from '../types/comfy-graph'
 import { asNumber, asRecordArray, asString, prop } from '../types/json-guards'
@@ -2200,17 +2201,38 @@ function evictionEmpty(e: RenderEviction): boolean {
 }
 
 // Evict/restore pairs run serialised through one chain so they never overlap.
-// A finished render parks its haul in _pendingRestore for a short grace
-// window; a NEW eviction inside that window inherits the haul instead of
-// letting it load, so back-to-back renders skip the pointless reload cycle.
+// A finished render parks its haul in _pendingRestore and the chat backends
+// stay out until somebody needs them (see restoreChatBackendsAfterRender); a
+// NEW eviction inherits the parked haul instead of letting it load, so
+// back-to-back renders skip the pointless reload cycle.
 let _renderJuggle: Promise<unknown> = Promise.resolve()
-let _renderEpoch = 0
 let _pendingRestore: RenderEviction | null = null
 let _restoreHolds = 0
-/** True while a restore is past its grace window and is reloading the chat
- *  backends. An eviction that arrives now has to wait for that reload. */
+let _restoreTimer: ReturnType<typeof setTimeout> | null = null
+/** True while the Create view is on screen: the next thing the user does is
+ *  most likely another render. */
+let _renderSurfaceOpen = false
+/** True while a restore is reloading the chat backends. An eviction that
+ *  arrives now has to wait for that reload. */
 let _restoreInFlight = false
+/** How long a parked haul waits when no render surface is open (a render that
+ *  finished after the user left Create, the trainer). */
 export const RENDER_RESTORE_GRACE_MS = 2_000
+/** How long it waits while Create is open and nobody asks for the chat model.
+ *  After that the machine is put back the way it was found. */
+export const RENDER_RESTORE_IDLE_MS = 180_000
+
+function park(haul: RenderEviction | null): void {
+  _pendingRestore = haul
+  // A chat request that arrives while the haul is parked brings it back first
+  // (lib/chat-backends-gate, asked by the local providers).
+  setChatBackendsRestore(haul ? restoreChatBackendsNow : null)
+}
+
+function clearRestoreTimer(): void {
+  if (_restoreTimer) clearTimeout(_restoreTimer)
+  _restoreTimer = null
+}
 
 /**
  * What the eviction is doing, for the waiting line of the run.
@@ -2228,9 +2250,10 @@ export type RenderEvictionPhase = 'waiting-for-chat-model' | 'freeing'
 /** Test-only: reset the render-juggle chain state between unit tests. */
 export function __resetRenderJuggleForTests(): void {
   _renderJuggle = Promise.resolve()
-  _renderEpoch = 0
-  _pendingRestore = null
+  clearRestoreTimer()
+  park(null)
   _restoreHolds = 0
+  _renderSurfaceOpen = false
   _restoreInFlight = false
 }
 
@@ -2250,7 +2273,9 @@ function mergeEvictions(base: RenderEviction | null, add: RenderEviction): Rende
  * the wait is spent on (RenderEvictionPhase).
  */
 export function evictChatBackendsForRender(onPhase?: (phase: RenderEvictionPhase) => void): Promise<RenderEviction> {
-  _renderEpoch++
+  // A restore that is only planned is called off here and now: this render
+  // inherits its haul (evictBody) instead of waiting for a reload.
+  clearRestoreTimer()
   if (_restoreInFlight) onPhase?.('waiting-for-chat-model')
   const run = _renderJuggle.catch(() => {}).then(() => {
     onPhase?.('freeing')
@@ -2264,7 +2289,7 @@ async function evictBody(): Promise<RenderEviction> {
   // A restore that has not run yet is inherited wholesale: whatever it wanted
   // to bring back stays evicted and becomes THIS render's restore duty.
   const inherited = _pendingRestore
-  _pendingRestore = null
+  park(null)
 
   if (getExclusiveVramMode() === 'never') {
     // The user opted out of VRAM juggling; do not touch the resident chat
@@ -2326,29 +2351,63 @@ async function evictBody(): Promise<RenderEviction> {
 }
 
 /**
- * Bring the evicted chat backends back after a render (success, failure or
- * cancel). Waits a short grace window first so a follow-up render can take
- * over the haul instead of paying reload-then-evict. Never throws.
+ * A render is over (success, failure or cancel): park what it evicted. The
+ * chat backends do NOT come straight back. The box, 04.10.2026 (LM Studio,
+ * a 6 GB chat model): the reload started 2 s after every render, and a second
+ * render started shortly after it waited up to 30 s for a model to finish
+ * loading that it then unloaded again. They come back when they are needed:
+ *
+ *   - a chat request to a local backend (restoreChatBackendsNow through
+ *     lib/chat-backends-gate), which covers the chat, the agents and
+ *     "Improve my prompt" written by the chat model,
+ *   - Create is left (setRenderSurfaceOpen),
+ *   - or nobody asked for RENDER_RESTORE_IDLE_MS.
+ *
+ * With no render surface open the wait is the short grace window, as before.
+ * A new render calls a planned restore off and inherits the haul. `delayMs`
+ * of 0 restores at once. Never throws.
  */
-export function restoreChatBackendsAfterRender(
-  evicted: RenderEviction,
-  graceMs: number = RENDER_RESTORE_GRACE_MS,
-): Promise<void> {
-  // Snapshot the epoch AT CALL TIME, not when the body gets its turn on the
-  // chain: an eviction that lands in between must count as "newer render".
-  const myEpoch = _renderEpoch
-  const run = _renderJuggle.catch(() => {}).then(() => restoreBody(evicted, graceMs, myEpoch))
+export function restoreChatBackendsAfterRender(evicted: RenderEviction, delayMs?: number): Promise<void> {
+  const run = _renderJuggle.catch(() => {}).then(() => {
+    if (!evictionEmpty(evicted)) park(mergeEvictions(_pendingRestore, evicted))
+    if (!_pendingRestore) return
+    if (_restoreHolds > 0) return // the run restores once, at its end
+    const wait = delayMs ?? (_renderSurfaceOpen ? RENDER_RESTORE_IDLE_MS : RENDER_RESTORE_GRACE_MS)
+    if (wait <= 0) return restoreParked()
+    clearRestoreTimer()
+    _restoreTimer = setTimeout(() => { void restoreChatBackendsNow() }, wait)
+  })
   _renderJuggle = run.catch(() => {})
   return run.catch(() => {})
 }
 
 /**
+ * Bring the parked chat backends back now, because somebody needs them.
+ * Resolves when they are loaded. Nothing parked, or a batch holding the
+ * restore: resolves at once and touches nothing. Never throws.
+ */
+export function restoreChatBackendsNow(): Promise<void> {
+  const run = _renderJuggle.catch(() => {}).then(() => (_restoreHolds > 0 ? undefined : restoreParked()))
+  _renderJuggle = run.catch(() => {})
+  return run.catch(() => {})
+}
+
+/**
+ * Create came on screen or left it. While it is open a finished render keeps
+ * the card for the next one; leaving it brings the chat backends back.
+ */
+export function setRenderSurfaceOpen(open: boolean): void {
+  _renderSurfaceOpen = open
+  if (!open) void restoreChatBackendsNow()
+}
+
+/**
  * A run of several renders in a row (batch edit) holds the restore: each
  * render still parks its haul, but nothing is freed or reloaded until the
- * returned release is called. Then the chat backends come back once, after
- * the usual grace window. Without the hold a picture that took longer than
- * that window to start paid `/free` plus a chat model reload, and ComfyUI
- * read the image model back in before every picture.
+ * returned release is called. Then the haul waits like the one of a single
+ * render. Without the hold a picture of the batch could meet a restore that
+ * the idle time or a chat request had started, and ComfyUI read the image
+ * model back in before the next picture.
  */
 export function holdRenderRestore(): () => void {
   _restoreHolds++
@@ -2361,15 +2420,10 @@ export function holdRenderRestore(): () => void {
   }
 }
 
-async function restoreBody(evicted: RenderEviction, graceMs: number, myEpoch: number): Promise<void> {
-  if (!evictionEmpty(evicted)) _pendingRestore = mergeEvictions(_pendingRestore, evicted)
-  if (!_pendingRestore) return
-  if (_restoreHolds > 0) return // the run restores once, at its end
-  if (_renderEpoch !== myEpoch) return // a newer render inherits the haul
-  if (graceMs > 0) await sleep(graceMs)
-  if (_renderEpoch !== myEpoch) return // a newer render inherits the haul
+async function restoreParked(): Promise<void> {
+  clearRestoreTimer()
   const todo = _pendingRestore
-  _pendingRestore = null
+  park(null)
   if (!todo || evictionEmpty(todo)) return
 
   // Give the chat backends their VRAM back. freeMemory drops ComfyUI's

@@ -969,8 +969,10 @@ export function useCreate() {
     // that killed both llama processes with no KV save and no reload, costing
     // the next chat turn a 62 s cold start. The hand-off helper captures what
     // is resident, saves the built-in engine's KV slot, then evicts; the
-    // finally below brings everything back. exclusiveVramMode 'never' skips
-    // the eviction. Best-effort, never blocks a render.
+    // finally below hands the haul back, and the chat backends return when a
+    // chat needs them, Create is left, or nobody asked for a while (see
+    // restoreChatBackendsAfterRender). exclusiveVramMode 'never' skips the
+    // eviction. Best-effort, never blocks a render.
     //
     // The box, 03.10.2026: this wait stood for 25 to 30 s under "Preparing
     // workflow..." with no counter. No workflow is prepared in it: the card is

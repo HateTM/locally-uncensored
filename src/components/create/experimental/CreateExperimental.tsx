@@ -9,6 +9,7 @@ import { comfyIdleNotice, shouldWatchComfyIdle, IDLE_WATCH_INTERVAL_MS, IDLE_STA
 import type { ComfyGuardStatus } from '../../../lib/comfy-restart-guard'
 import { anyInstallRunning, subscribeInstallRuns } from '../../../lib/model-install-runs'
 import { useComfyInstallStore } from '../../../stores/comfyInstallStore'
+import { setRenderSurfaceOpen } from '../../../api/vram-handoff'
 import { useWorkflowStore } from '../../../stores/workflowStore'
 import { CreateExpProvider, useCreateExp } from './CreateContext'
 import { IntentBar } from './IntentBar'
@@ -169,6 +170,12 @@ function CreateExperimentalInner() {
   const setupRunning = useSyncExternalStore(subscribeInstallRuns, anyInstallRunning)
   const comfyUpdating = useComfyInstallStore((s) => s.phase !== 'idle' && s.phase !== 'error')
   const luIsRestartingComfy = setupRunning || comfyUpdating || corsFixing
+  // While this view is open a finished render keeps the graphics card for the
+  // next one; leaving it brings the chat model back (api/vram-handoff).
+  useEffect(() => {
+    setRenderSurfaceOpen(true)
+    return () => setRenderSurfaceOpen(false)
+  }, [])
   const [idleNotice, setIdleNotice] = useState('')
   const idleTimerRef = useRef<(() => void) | null>(null)
   useEffect(() => {
