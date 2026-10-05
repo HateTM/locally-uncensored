@@ -7,11 +7,12 @@
 
 import type { CloudMe } from '../api/cloud/jobs'
 
-/** Plan names as the Cloud gate writes them on its plan buttons. */
-const PLAN_NAMES: Record<string, string> = {
+/** Plan names as the web writes them (TIERS in apps/web/lib/pricing.ts), which
+ *  is also how they stand on the invoice. */
+export const PLAN_NAMES: Record<string, string> = {
   hosted: 'Hosted',
-  'hosted-pro': 'Pro',
-  'hosted-max': 'Max',
+  'hosted-pro': 'Hosted Pro',
+  'hosted-max': 'Hosted Max',
 }
 
 /** The sentence that replaces "No active plan" while a renewal is unpaid. */

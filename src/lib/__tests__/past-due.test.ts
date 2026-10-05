@@ -12,6 +12,7 @@ import { describe, it, expect } from 'vitest'
 import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import {
+  PLAN_NAMES,
   PAST_DUE_ACTION,
   PAST_DUE_BADGE,
   PAST_DUE_WALLET_LINE,
@@ -52,12 +53,12 @@ describe('reading the fields off /api/me', () => {
 })
 
 describe('the sentence', () => {
-  it('names the plan the way the Cloud gate names it', () => {
+  it('names the plan the way the web and the invoice name it', () => {
     expect(pastDueLine('hosted')).toBe(
       'The last payment for your Hosted plan failed, so the plan is paused. Pay the open invoice to bring it back.',
     )
-    expect(pastDueLine('hosted-pro')).toContain('your Pro plan')
-    expect(pastDueLine('hosted-max')).toContain('your Max plan')
+    expect(pastDueLine('hosted-pro')).toContain('your Hosted Pro plan')
+    expect(pastDueLine('hosted-max')).toContain('your Hosted Max plan')
   })
 
   it('says "your plan" when the plan is unknown', () => {
@@ -70,11 +71,15 @@ describe('the sentence', () => {
 })
 
 const REL_PATH = 'apps/web/lib/billing/past-due.ts'
+const PRICING_PATH = 'apps/web/lib/pricing.ts'
 const WEB = process.env.LU_WEB_REPO?.trim() ? resolve(process.env.LU_WEB_REPO.trim()) : undefined
 const WEB_FILE = WEB ? resolve(WEB, REL_PATH) : ''
-const HAS_WEB = WEB_FILE !== '' && existsSync(WEB_FILE)
+const PRICING_FILE = WEB ? resolve(WEB, PRICING_PATH) : ''
+const HAS_WEB = WEB_FILE !== '' && existsSync(WEB_FILE) && existsSync(PRICING_FILE)
 if (!HAS_WEB) {
-  process.stderr.write('[past-due] wording parity skipped: set LU_WEB_REPO to a web checkout that has ' + REL_PATH + '.\n')
+  process.stderr.write(
+    '[past-due] wording parity skipped: set LU_WEB_REPO to a web checkout that has ' + REL_PATH + ' and ' + PRICING_PATH + '.\n',
+  )
 }
 
 describe.skipIf(!HAS_WEB)('the wording is the web wording', () => {
@@ -90,5 +95,21 @@ describe.skipIf(!HAS_WEB)('the wording is the web wording', () => {
     const [head, tail] = pastDueLine(null).split('your plan')
     expect(web).toContain("'your plan'")
     expect(web).toContain('`' + head + '${plan}' + tail + '`')
+  })
+
+  it('the plan in the sentence carries the name the web gives that tier', () => {
+    // The web builds the name with tierDisplayName, which reads TIERS.
+    expect(web).toContain('`your ${tierDisplayName(tier)} plan`')
+    const pricing = readFileSync(PRICING_FILE, 'utf8')
+    const webNames: Record<string, string> = {}
+    for (const m of pricing.matchAll(/\bid: '([a-z-]+)',\s*name: '([^']+)',\s*monthlyEUR: \d/g)) {
+      webNames[m[1]] = m[2]
+    }
+    // Every tier a subscription pays for, and no other.
+    expect(Object.keys(webNames).sort()).toEqual(['hosted', 'hosted-max', 'hosted-pro'])
+    expect(PLAN_NAMES).toEqual(webNames)
+    for (const [tier, name] of Object.entries(webNames)) {
+      expect(pastDueLine(tier)).toContain(`your ${name} plan`)
+    }
   })
 })

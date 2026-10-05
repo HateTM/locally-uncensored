@@ -23,7 +23,7 @@ vi.mock('../../../api/backend', () => ({ openExternal }))
 const { AccountPanel } = await import('../AccountPanel')
 const { useCloudAuthStore } = await import('../../../stores/cloudAuthStore')
 
-const SENTENCE = 'The last payment for your Pro plan failed, so the plan is paused. Pay the open invoice to bring it back.'
+const SENTENCE = 'The last payment for your Hosted Pro plan failed, so the plan is paused. Pay the open invoice to bring it back.'
 const WALLET = 'Credits you bought stay usable in the meantime.'
 
 const walletQuota: CloudQuota = {
