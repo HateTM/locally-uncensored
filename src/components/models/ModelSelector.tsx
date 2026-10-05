@@ -186,7 +186,11 @@ const LMSTUDIO_START_WAIT_MS = 30_000
 // One line with a state dot, a short sentence and a text button (David,
 // 05.10.2026). It used to be a box of three text blocks and a full-width
 // button, about as tall as five model rows. What the click does is unchanged.
-function LmStudioStatusLine({ onStarted }: { onStarted: () => void }) {
+//
+// `onServerOff` tells the list below what the line knows: with the server off
+// its rows cannot be picked, so they leave the list for as long as the line
+// stands and come back with the server.
+function LmStudioStatusLine({ onStarted, onServerOff }: { onStarted: () => void; onServerOff: (off: boolean) => void }) {
   const [status, setStatus] = useState<LmStudioServerStatus | null>(null)
   const [starting, setStarting] = useState(false)
   const [startError, setStartError] = useState('')
@@ -203,7 +207,8 @@ function LmStudioStatusLine({ onStarted }: { onStarted: () => void }) {
   const refreshRef = useRef<() => Promise<void>>(async () => {})
   const startAsked = useRef(false)
   const onStartedRef = useRef(onStarted)
-  useEffect(() => { onStartedRef.current = onStarted }, [onStarted])
+  const onServerOffRef = useRef(onServerOff)
+  useEffect(() => { onStartedRef.current = onStarted; onServerOffRef.current = onServerOff }, [onStarted, onServerOff])
   useEffect(() => {
     let cancelled = false
     let timer: ReturnType<typeof setTimeout> | undefined
@@ -223,6 +228,9 @@ function LmStudioStatusLine({ onStarted }: { onStarted: () => void }) {
       // last knew and asks again.
       const detected = !!fresh && (fresh.lms_present || fresh.models_detected)
       if (!fresh && following) timer = setTimeout(() => void refresh(), LMSTUDIO_STATUS_POLL_MS)
+      // Only an answer moves the list. A reopened menu keeps what the last
+      // answer said until the next one is in.
+      if (fresh) onServerOffRef.current(detected && !fresh.running)
       if (!fresh || !detected) return
       following = true
       const cameUp = fresh.running && wasRunning === false
@@ -1243,6 +1251,8 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
   // with nothing installed. Asked only while the dropdown is open and the list
   // is empty, and never repairs, because opening a dropdown must not boot a server.
   const [emptyReason, setEmptyReason] = useState('')
+  // What the LM Studio line last heard from the server, see `allTextModels`.
+  const [lmStudioServerOff, setLmStudioServerOff] = useState(false)
   useEffect(() => {
     if (!open || textModelsEmptyRef.current === false) return
     let cancelled = false
@@ -1315,7 +1325,12 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
   // FAMILY (Qwen/Gemma/Llama/…), not by provider, because users pick
   // models by lineage first and the backend that serves them is a
   // per-row badge.
-  const allTextModels = models.filter(m => m.type === 'text')
+  // Minus the rows of an LM Studio whose server is off (Windows box,
+  // 05.10.2026: "server off" stood above seven of its models for 160 s, and a
+  // click on one could only fail). The pick itself is not touched.
+  const allTextModels = models
+    .filter((m) => m.type === 'text')
+    .filter((m) => !(lmStudioServerOff && isLmStudioProvider(m.providerName)))
   // Code needs tools to do literally anything. A hosted model that has told us
   // it cannot call them is not a degraded choice there, it is a dead one, so it
   // does not get listed. Keep the ACTIVE model visible even if it fails the
@@ -1599,7 +1614,7 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
                 symptom. One line with a "Start" button. Local mode only: in
                 Cloud the list shows hosted models, and what the line promises
                 (pick LM Studio models here) would not come true there. */}
-            <LmStudioStatusLine onStarted={fetchModels} />
+            <LmStudioStatusLine onStarted={fetchModels} onServerOff={setLmStudioServerOff} />
 
             {/* K6: grouping threw and was caught above instead of crashing the
                 whole chat view. Says so, in the dropdown itself, with a way

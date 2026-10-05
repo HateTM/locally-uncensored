@@ -11,18 +11,24 @@
  * Run: npx vitest run src/components/models/__tests__/lmstudio-status-line.test.tsx
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createElement } from 'react'
+import { createElement, type ReactNode } from 'react'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import type { AIModel } from '../../../types/models'
 import type { ProviderConfig } from '../../../api/providers/types'
 
-const MODELS: AIModel[] = [{
+const OLLAMA_ROW = {
   name: 'qwen3:8b', model: 'qwen3:8b', size: 0, type: 'text', provider: 'ollama', providerName: 'Ollama',
-} as AIModel]
+} as AIModel
+const lmStudioRow = (id: string) => ({
+  name: `openai::${id}`, model: id, displayName: id, size: 0, type: 'text', provider: 'openai', providerName: 'LM Studio',
+} as AIModel)
+const LMS_ROWS = [lmStudioRow('qwen3-4b'), lmStudioRow('gemma-3-4b-it')]
+let MODELS: AIModel[] = [OLLAMA_ROW]
+let ACTIVE = 'qwen3:8b'
 
 const fetchModels = vi.fn(async () => {})
 vi.mock('../../../hooks/useModels', () => ({
-  useModels: () => ({ models: MODELS, activeModel: 'qwen3:8b', setActiveModel: vi.fn(), fetchModels }),
+  useModels: () => ({ models: MODELS, activeModel: ACTIVE, setActiveModel: vi.fn(), fetchModels }),
 }))
 vi.mock('../../../api/lmstudio', () => ({
   loadLmStudioModel: vi.fn(async () => {}),
@@ -38,6 +44,12 @@ vi.mock('../../../api/ollama', () => ({
 const backendCall = vi.fn(async (_cmd: string): Promise<unknown> => null)
 vi.mock('../../../api/backend', () => ({ backendCall: (cmd: string) => backendCall(cmd), isTauri: () => false }))
 vi.mock('../../../api/builtin-ensure', () => ({ diagnoseBuiltinEngine: vi.fn(async () => null) }))
+// A closed menu is gone at once. The exit animation never ends in jsdom, and
+// the menu would stay mounted, with the line in it.
+vi.mock('framer-motion', async (actual) => ({
+  ...(await actual<typeof import('framer-motion')>()),
+  AnimatePresence: ({ children }: { children?: ReactNode }) => children,
+}))
 
 const { ModelSelector, lmStudioLineText, lmStudioStartTitle } = await import('../ModelSelector')
 const { useProviderStore } = await import('../../../stores/providerStore')
@@ -75,6 +87,8 @@ beforeEach(() => {
   cleanup()
   backendCall.mockReset()
   fetchModels.mockClear()
+  MODELS = [OLLAMA_ROW]
+  ACTIVE = 'qwen3:8b'
   useModelStore.setState({ foldedRows: null, inventoryLoaded: true } as never)
   setSlot(slot({}))
   useProviderStore.setState({ engineOptedOut: false })
@@ -276,5 +290,71 @@ describe('the line follows the server while the menu is open', () => {
     cleanup()
     await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
     expect(statusCalls()).toBe(before)
+  })
+})
+
+// Windows box, 05.10.2026 (probe 7): the server was stopped from outside, the
+// line came back after 2 to 3 s, and the seven LM Studio models stood under
+// "server off" for 160 s, also after closing and reopening the menu.
+describe('the models of a stopped server leave the list', () => {
+  const rowNames = () => Array.from(
+    screen.getByTestId('model-picker-menu').querySelectorAll('[role="button"]'),
+  ).map((row) => row.textContent ?? '')
+  const lmsRows = () => rowNames().filter((text) => text.includes('LM Studio'))
+  const trigger = () => screen.getByLabelText('Select chat model')
+
+  beforeEach(() => { MODELS = [OLLAMA_ROW, ...LMS_ROWS] })
+
+  it('lists them while the server runs', async () => {
+    await open(RUNNING)
+    expect(lmsRows()).toHaveLength(2)
+    expect(rowNames()).toHaveLength(3)
+  })
+
+  it('takes them out as soon as the line says "server off", and leaves the other rows', async () => {
+    vi.useFakeTimers()
+    const probe = await open(RUNNING)
+    probe.setStatus(OFF)
+    await act(async () => { await vi.advanceTimersByTimeAsync(1600) })
+    expect(line()!.getAttribute('data-state')).toBe('off')
+    expect(lmsRows()).toHaveLength(0)
+    expect(rowNames()).toHaveLength(1)
+    expect(rowNames()[0]).toContain('qwen3:8b')
+  })
+
+  it('keeps them out when the menu is closed and opened again', async () => {
+    await open(OFF)
+    expect(lmsRows()).toHaveLength(0)
+    await act(async () => { fireEvent.click(trigger()) })
+    expect(screen.queryByTestId('model-picker-menu')).toBeNull()
+    // A new line, which knows nothing yet: the list keeps the last answer.
+    await act(async () => { fireEvent.click(trigger()) })
+    expect(lmsRows()).toHaveLength(0)
+    expect(rowNames()).toHaveLength(1)
+  })
+
+  it('keeps the pick: the button still names the chosen LM Studio model', async () => {
+    ACTIVE = LMS_ROWS[0].name
+    await open(OFF)
+    expect(lmsRows()).toHaveLength(0)
+    expect(trigger().textContent).toContain('qwen3-4b')
+  })
+
+  it('brings them back once the server is up after Start', async () => {
+    vi.useFakeTimers()
+    const probe = await open(OFF)
+    await act(async () => { fireEvent.click(startButton()) })
+    expect(lmsRows()).toHaveLength(0)
+    probe.setStatus(RUNNING)
+    await act(async () => { await vi.advanceTimersByTimeAsync(1600) })
+    expect(line()).toBeNull()
+    expect(lmsRows()).toHaveLength(2)
+  })
+
+  it('says the list is empty when LM Studio had the only models', async () => {
+    MODELS = [...LMS_ROWS]
+    await open(OFF)
+    expect(rowNames()).toHaveLength(0)
+    expect(screen.getByTestId('model-picker-menu').textContent).toContain('No models available')
   })
 })
