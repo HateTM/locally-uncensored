@@ -42,6 +42,8 @@ vi.mock('../../run-slot', () => ({
 }))
 
 import { useModelStore } from '../../../stores/modelStore'
+import { useSettingsStore } from '../../../stores/settingsStore'
+import { CLOUD_HELPER_MODEL, helperModelFor } from '../../cloud-helper-model'
 import { improveAvailabilityFor, improvePrompt } from '../improve-prompt-run'
 import { IMPROVE_TIMEOUT_MS } from '../improve-prompt'
 
@@ -58,6 +60,7 @@ beforeEach(() => {
   plan.queued = false
   plan.thinkCompatible = true
   useModelStore.setState({ activeModel: 'lu-cloud::chat-model', models: [] })
+  useSettingsStore.setState((st) => ({ settings: { ...st.settings, appMode: 'local' } }))
 })
 
 describe('Improve my prompt: Lauf (Desktop)', () => {
@@ -178,5 +181,61 @@ describe('Improve my prompt: Verfuegbarkeit (Desktop)', () => {
     expect(a.available).toBe(true)
     expect(a.hint).toMatch(/your machine/i)
     expect(a.hint).not.toMatch(/billed/i)
+  })
+})
+
+/**
+ * 3.0.5: in Cloud mode the app picks no chat model by itself any more, so a
+ * new account can have the switch on and no chat model. The rewrite then runs
+ * on the fixed helper model instead of being a dead end. Local mode is as it
+ * was: no chat model, no rewrite.
+ */
+describe('Improve my prompt without a picked chat model', () => {
+  const cloudMode = () => useSettingsStore.setState((st) => ({ settings: { ...st.settings, appMode: 'cloud' } }))
+
+  it('the helper model is written down once, with the id the web app uses', () => {
+    expect(CLOUD_HELPER_MODEL).toBe('lu-cloud::mistralai/Mistral-Small-3.2-24B-Instruct-2506')
+  })
+
+  it('helperModelFor: the pick wins, Cloud falls back to the helper, Local to nothing', () => {
+    expect(helperModelFor('lu-cloud::chat-model', 'cloud')).toBe('lu-cloud::chat-model')
+    expect(helperModelFor('qwen3:8b', 'local')).toBe('qwen3:8b')
+    expect(helperModelFor(null, 'cloud')).toBe(CLOUD_HELPER_MODEL)
+    expect(helperModelFor(null, 'local')).toBeNull()
+    expect(helperModelFor(null, undefined)).toBeNull()
+  })
+
+  it('Cloud: the switch is usable and says who writes and what it costs', () => {
+    const a = improveAvailabilityFor(null, 'cloud')
+    expect(a.available).toBe(true)
+    expect(a.hint).toBe('A small LU Cloud model rewrites your prompt for the model you picked. Billed like a short chat message.')
+  })
+
+  it('NEGATIVE CONTROL, Local: still needs a chat model', () => {
+    const a = improveAvailabilityFor(null, 'local')
+    expect(a.available).toBe(false)
+    expect(a.hint).toMatch(/chat model/i)
+  })
+
+  it('THE FIX, Cloud: the rewrite runs on the helper model', async () => {
+    useModelStore.setState({ activeModel: null, models: [] })
+    cloudMode()
+    const out = await improvePrompt('a fox', { kind: 'image', modelLabel: 'FLUX 3' })
+    expect(out).toEqual({ status: 'improved', prompt: 'A red fox in deep snow.' })
+    expect(calls.list).toHaveLength(1)
+    expect(calls.list[0].model).toBe('mistralai/Mistral-Small-3.2-24B-Instruct-2506')
+  })
+
+  it('Cloud with a pick: the picked chat model writes, not the helper', async () => {
+    cloudMode()
+    await improvePrompt('a fox', { kind: 'image', modelLabel: 'FLUX 3' })
+    expect(calls.list[0].model).toBe('chat-model')
+  })
+
+  it('NEGATIVE CONTROL, Local without a chat model: nothing is called', async () => {
+    useModelStore.setState({ activeModel: null, models: [] })
+    const out = await improvePrompt('a fox', { kind: 'image', modelLabel: 'FLUX 3' })
+    expect(out).toEqual({ status: 'failed' })
+    expect(calls.list).toHaveLength(0)
   })
 })

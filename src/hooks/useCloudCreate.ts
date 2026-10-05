@@ -44,9 +44,9 @@ import { STUDIO_MODELS, studioFields } from '../lib/render/studio-contract'
 import { modelLabel } from '../lib/render/preset-models'
 import { improveKindForIntent, IMPROVING_PROMPT } from '../lib/render/improve-prompt'
 import { rewrittenByName } from '../lib/render/qwen-enhancer'
-import { useModelStore } from '../stores/modelStore'
 import { elapsedLine } from '../lib/elapsed-line'
 import { improvePrompt } from '../lib/render/improve-prompt-run'
+import { currentHelperModel } from '../lib/cloud-helper-model'
 import { bookedVideoSeconds } from '../lib/render/video-duration'
 import { studioQuote, StudioQuoteChangedError } from '../api/cloud/studio'
 import { MIN_TRAIN_IMAGES, maxTrainImages } from '../lib/train-image-cap'
@@ -588,7 +588,7 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
         if (out.status === 'improved' && !clientSafety(out.prompt).blocked) {
           runPrompt = out.prompt
           promptOriginal = s.prompt
-          rewrittenBy = rewrittenByName('chat', useModelStore.getState().activeModel)
+          rewrittenBy = rewrittenByName('chat', currentHelperModel())
         } else if (out.status !== 'unchanged' && !ac.signal.aborted) {
           improveFailed = true
         }

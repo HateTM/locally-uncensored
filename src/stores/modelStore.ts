@@ -10,6 +10,7 @@ import { activateBuiltinModel } from '../api/engine'
 import { isLmStudioProvider } from '../lib/hf-to-provider'
 import { isTauri, backendCall } from '../api/backend'
 import { useChatStore } from './chatStore'
+import { useSettingsStore } from './settingsStore'
 import { useGenerationStore } from './generationStore'
 import { log } from '../lib/logger'
 import { isLuEngineName } from '../lib/engine-name'
@@ -89,6 +90,15 @@ export interface PullState {
   complete: boolean
 }
 
+/**
+ * The hosted model the app picked by itself until 3.0.5: the head of the
+ * catalogue and the first row that passed the 7B rule (setModels and
+ * lib/active-model-mode). It declines adult fiction, and a refusal in the
+ * history is copied by better models in the same chat (measured 2026-10-05).
+ * No other hosted model was ever handed out that way.
+ */
+export const RETIRED_AUTO_CLOUD_PICK = 'lu-cloud::meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo'
+
 interface ModelState {
   models: AIModel[]
   activeModel: string | null
@@ -115,6 +125,12 @@ interface ModelState {
    * des anderen.
    */
   lastCloudModel: string | null
+  /**
+   * The one-time clearing of the old automatic Cloud pick has run (see
+   * `RETIRED_AUTO_CLOUD_PICK`). Stored, so that a later deliberate pick of
+   * that same model stays.
+   */
+  autoCloudPickCleared: boolean
   activePulls: Record<string, PullState>
   isModelLoading: boolean
   categoryFilter: ModelCategory
@@ -213,6 +229,7 @@ export const useModelStore = create<ModelState>()(
       activeModel: null,
       lastLocalModel: null,
       lastCloudModel: null,
+      autoCloudPickCleared: false,
       activePulls: {},
       isModelLoading: false,
       categoryFilter: 'all',
@@ -260,7 +277,18 @@ export const useModelStore = create<ModelState>()(
           // Automatic choices need a known size of at least 7B. Image/video,
           // small models and opaque aliases require no implicit chat pick.
           // The valid persisted choice above remains the user's decision.
-          const firstChat = models.find(canAutoSelectChat)
+          //
+          // A hosted model is never an automatic choice, and in Cloud mode
+          // nothing is. The head of the hosted catalogue is Llama 3.1 8B
+          // Turbo, it passes the 7B rule, and a new account chatted on it
+          // without ever having picked it (measured 2026-10-05: it declines
+          // adult fiction, and a refusal in the history is then copied by
+          // every better model in the same chat). In Cloud the user names the
+          // model. Locally the rule stays: those are the user's own files.
+          const inCloud = useSettingsStore.getState().settings.appMode === 'cloud'
+          const firstChat = inCloud
+            ? undefined
+            : models.find((m) => m.provider !== 'lu-cloud' && canAutoSelectChat(m))
           return {
             models,
             inventoryLoaded: true,
@@ -580,6 +608,7 @@ export const useModelStore = create<ModelState>()(
         activeModel: state.activeModel,
         lastLocalModel: state.lastLocalModel,
         lastCloudModel: state.lastCloudModel,
+        autoCloudPickCleared: state.autoCloudPickCleared,
         categoryFilter: state.categoryFilter,
       }),
       /**
@@ -595,7 +624,17 @@ export const useModelStore = create<ModelState>()(
        * gespeicherter Wert ist immer die bessere Auskunft.
        */
       onRehydrateStorage: () => (state) => {
-        if (!state?.activeModel) return
+        if (!state) return
+        // Once, before anything else reads the pick: a stored Cloud pick that
+        // is exactly the model the app used to hand out by itself is not a
+        // pick. Nobody can tell it from a deliberate one, so it is cleared one
+        // time and the marker keeps a later pick of the same model.
+        if (!state.autoCloudPickCleared) {
+          if (state.activeModel === RETIRED_AUTO_CLOUD_PICK) state.activeModel = null
+          if (state.lastCloudModel === RETIRED_AUTO_CLOUD_PICK) state.lastCloudModel = null
+          state.autoCloudPickCleared = true
+        }
+        if (!state.activeModel) return
         const istCloud = state.activeModel.startsWith('lu-cloud::')
         if (istCloud) {
           if (!state.lastCloudModel) state.lastCloudModel = state.activeModel

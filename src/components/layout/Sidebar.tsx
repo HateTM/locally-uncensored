@@ -156,9 +156,15 @@ export function Sidebar() {
       // when no model is installed/selected, or the model list hasn't
       // populated yet. Send the user to the Models page where they can
       // install or pick one, instead of a dead click with no feedback.
-      // Cloud mode hides that local-hardware view entirely (the hosted
-      // catalog is just still loading/failed) — stay in chat there.
-      if (useSettingsStore.getState().settings.appMode === 'cloud') return
+      // Cloud mode hides that local-hardware view entirely, so the click
+      // lands on the chat landing page there: its composer holds the model
+      // picker, and in Cloud the user names the model himself (the app picks
+      // none, lib/active-model-mode).
+      if (useSettingsStore.getState().settings.appMode === 'cloud') {
+        setActiveConversation(null)
+        setView('chat')
+        return
+      }
       setView('models')
       return
     }

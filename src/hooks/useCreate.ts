@@ -66,7 +66,7 @@ import { scenePromptFor } from '../lib/ltx-multishot'
 import { improveKindForIntent, IMPROVING_PROMPT, type ImproveOutcome } from '../lib/render/improve-prompt'
 import { elapsedLine } from '../lib/elapsed-line'
 import { improvePrompt } from '../lib/render/improve-prompt-run'
-import { useModelStore } from '../stores/modelStore'
+import { currentHelperModel } from '../lib/cloud-helper-model'
 import { pickQwenEnhancer, rewrittenByName, type ImproveWriter } from '../lib/render/qwen-enhancer'
 import { buildQwenEnhancerWorkflow, runQwenEnhancer } from '../api/qwen-enhancer'
 import { extraReferenceSlots } from '../lib/edit-references'
@@ -616,7 +616,7 @@ export function useCreate() {
     const takeRewrite = (out: ImproveOutcome, writer: ImproveWriter['id']) => {
       if (out.status === 'improved' && !checkPromptSafety(out.prompt).blocked) {
         prompt = out.prompt
-        improveFields = { promptOriginal: scenePrompt, rewrittenBy: rewrittenByName(writer, useModelStore.getState().activeModel) }
+        improveFields = { promptOriginal: scenePrompt, rewrittenBy: rewrittenByName(writer, currentHelperModel()) }
       } else if (out.status !== 'unchanged') {
         improveFields = { improveFailed: true }
       }

@@ -6,7 +6,7 @@ import { seedOnboardingDone } from './support/cloud-mock'
  * Sending without a chat model must not lose the message.
  *
  * Found in the real Windows build of 3.0.5: with no chat model picked (the
- * picker reads "Select Model") the Send button was live, and a click with
+ * picker reads "Choose a model") the Send button was live, and a click with
  * text, with or without attachments, emptied the field and the chips. No
  * conversation appeared and nothing was said: the message was gone.
  *
@@ -36,7 +36,7 @@ const LANDING = 'Choose a model below. Automatic picks require a known size of a
 for (const how of ['the Send button', 'Enter'] as const) {
   test(`Chat, ${how}: text and attachment stay, and the model picker opens with the reason`, async ({ page }) => {
     await boot(page)
-    await expect(picker(page)).toContainText('Select Model')
+    await expect(picker(page)).toContainText('Choose a model')
     const box = page.locator('textarea').first()
     await box.fill(TEXT)
     await page.locator('input[type="file"]').first().setInputFiles(NOTE)
@@ -85,7 +85,7 @@ test('Chat: closing the picker without a pick leaves a mark on the model button,
 test('Code: the instruction stays and the model picker opens with the reason', async ({ page }) => {
   await boot(page)
   await page.getByRole('button', { name: 'Code', exact: true }).click()
-  await expect(picker(page)).toContainText('Select Model')
+  await expect(picker(page)).toContainText('Choose a model')
   const box = page.locator('textarea').first()
   await box.fill(TEXT)
   await box.focus()

@@ -34,7 +34,8 @@ test('flash metadata and paid fallback reach the actual desktop composer', async
   await expect(cloudSwitch(page)).toBeVisible()
   await signInViaGate(page)
   await expect(cloudSwitch(page)).toBeChecked()
-  await page.getByRole('button', { name: /New Chat/i }).first().click()
+  // The model first, then the chat: in Cloud the app picks no model by
+  // itself (3.0.5), and "New Chat" without one stays on the landing page.
   await page.getByRole('button', { name: 'Select chat model', exact: true }).click()
   const row = page.getByRole('button', { name: /Llama 3.1 8B Turbo/ })
   // Der Aufdruck der Marke ist zweimal gewandert: "Flash", dann "No credits",
@@ -48,6 +49,7 @@ test('flash metadata and paid fallback reach the actual desktop composer', async
   await expect(marke).toBeVisible()
   await expect(marke).toHaveAttribute('title', 'No credits on your plan, up to 50,000 tokens per day.')
   await row.click()
+  await page.getByRole('button', { name: /New Chat/i }).first().click()
 
   // Runde 3 (Abnahme 19.09.2026, Blocker A2): kein Dauerband mehr ueber der
   // Eingabe. Der Hinweis ist ein Etikett neben dem Agent-Schalter, das ein

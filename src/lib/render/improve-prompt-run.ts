@@ -1,5 +1,7 @@
 // "Improve my prompt": the runner. One small chat call on the chat model the
 // user has picked, local or cloud, through the same provider a chat turn uses.
+// In Cloud mode without a picked chat model it runs on the fixed helper model
+// (lib/cloud-helper-model), so the switch is never a dead end there.
 // On LU Cloud it is metered and billed like chat; on a local model it costs
 // nothing. It never throws: any failure answers `failed`, and the run goes on
 // with the user's own prompt.
@@ -14,6 +16,8 @@ import { useSettingsStore } from '../../stores/settingsStore'
 import { isThinkingCompatible } from '../model-compatibility'
 import { resolveAgentNumCtx } from '../agent-num-ctx'
 import { runInLane } from '../run-slot'
+import { helperModelFor, currentHelperModel } from '../cloud-helper-model'
+import type { AppMode } from '../../types/settings'
 import { laneOf, currentLaneFacts } from '../run-lane-of-model'
 import {
   IMPROVE_MAX_TOKENS, IMPROVE_TIMEOUT_MS, buildImproveMessages, cleanImproved,
@@ -28,17 +32,25 @@ export interface ImproveAvailability {
 
 const HINT_LOCAL = 'Your chat model rewrites your prompt for the model you picked. It runs on your machine.'
 const HINT_CLOUD = 'Your chat model rewrites your prompt for the model you picked. Billed like a short chat message.'
+const HINT_CLOUD_HELPER = 'A small LU Cloud model rewrites your prompt for the model you picked. Billed like a short chat message.'
 
-/** Can a rewrite run with this chat model? It needs one to write with. */
-export function improveAvailabilityFor(activeModel: string | null): ImproveAvailability {
-  if (!activeModel) return { available: false, hint: 'Pick a chat model in Chat first.' }
-  const cloud = getProviderIdFromModel(activeModel) === 'lu-cloud'
+/** Can a rewrite run with this chat model? It needs one to write with: the
+ *  picked one, or in Cloud mode the helper model. */
+export function improveAvailabilityFor(activeModel: string | null, appMode?: AppMode): ImproveAvailability {
+  const writer = helperModelFor(activeModel, appMode)
+  if (!writer) return { available: false, hint: 'Pick a chat model in Chat first.' }
+  if (!activeModel) return { available: true, hint: HINT_CLOUD_HELPER }
+  const cloud = getProviderIdFromModel(writer) === 'lu-cloud'
   return { available: true, hint: cloud ? HINT_CLOUD : HINT_LOCAL }
 }
 
-/** The same answer, kept current while the user picks another chat model. */
+/** The same answer, kept current while the user picks another chat model or
+ *  flips the Cloud switch. */
 export function useImproveAvailability(): ImproveAvailability {
-  return improveAvailabilityFor(useModelStore((s) => s.activeModel))
+  return improveAvailabilityFor(
+    useModelStore((s) => s.activeModel),
+    useSettingsStore((s) => s.settings.appMode),
+  )
 }
 
 /** The turn id the rewrite books its place under. Its own, so it queues behind
@@ -51,7 +63,8 @@ export async function improvePrompt(
   target: ImproveTarget,
   signal?: AbortSignal,
 ): Promise<ImproveOutcome> {
-  const { activeModel, models } = useModelStore.getState()
+  const { models } = useModelStore.getState()
+  const activeModel = currentHelperModel()
   if (!activeModel || signal?.aborted) return { status: 'failed' }
   try {
     const { provider, modelId } = getProviderForModel(activeModel)

@@ -276,7 +276,14 @@ export function ChatView() {
     : !activeModel
       // Der Waehler steht IM Composer und oeffnet nach oben. Der alte Satz
       // hier hiess „Select a model above." und zeigte in die falsche Richtung.
-      ? { subline: 'Choose a model below. Automatic picks require a known size of at least 7B.', cta: null }
+      // In der Cloud waehlt die App nie selbst (lib/active-model-mode), der
+      // Satz ueber die 7B-Regel waere dort eine Auskunft ueber nichts.
+      ? {
+          subline: appMode === 'cloud'
+            ? 'Choose a model below.'
+            : 'Choose a model below. Automatic picks require a known size of at least 7B.',
+          cta: null,
+        }
       // Der Modellname steht auf einer EIGENEN Zeile und wird gekuerzt: er ist
       // haeufig 50+ Zeichen lang (`hf.co/DevQuasar/huihui-ai_Qwen3-4B-abliterated-GGUF`),
       // und im Fliesstext liess er die Zeile dreimal umbrechen.

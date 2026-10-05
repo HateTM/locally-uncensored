@@ -654,6 +654,13 @@ export interface ModelSelectorProps {
   answeredBy?: string | null
 }
 
+/** What the picker button reads while no chat model is picked. In Cloud mode
+ *  that is the normal state of a new account: the app never picks a hosted
+ *  model by itself (lib/active-model-mode). */
+const NO_MODEL_LABEL = 'Choose a model'
+/** The first line of the menu in Cloud mode while nothing is picked. */
+const CHOOSE_TO_SEND = 'Choose a model to send your message.'
+
 // `openUpward` flips the dropdown to open above the trigger, right-aligned, // used when the picker lives in the composer action bar (bottom of the screen)
 // instead of the header. Header usage keeps the default downward/centered menu.
 export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy = null }: ModelSelectorProps = {}) {
@@ -1256,7 +1263,7 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
   const wechselLaeuft = isModelLoading || imWechselZu !== null
     || (swapLaeuft && getProviderIdFromModel(gezeigtesModell ?? '') === 'openai')
   const gezeigtesObj = models.find((m) => m.name === gezeigtesModell)
-  const activeDisplayName = gezeigtesModell ? modelDisplayLabel(models, gezeigtesModell) : 'Select Model'
+  const activeDisplayName = gezeigtesModell ? modelDisplayLabel(models, gezeigtesModell) : NO_MODEL_LABEL
   // Der Punkt folgt demselben Modell wie der Name daneben, sonst haette der
   // Knopf waehrend eines Wechsels zwei Aussagen in sich.
   const activeType = gezeigtesObj?.type || 'text'
@@ -1396,7 +1403,7 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
           >
             {/* First of all: why the menu opened by itself. The message the
                 user tried to send is still in the composer. */}
-            {sendNeedsModel && (
+            {sendNeedsModel ? (
               <div
                 data-testid="picker-send-needs-model"
                 className={`px-2.5 py-1.5 border-b border-black/5 dark:border-white/[0.06] t-micro leading-snug ${HINWEIS_TEXT.ruhig}`}
@@ -1404,6 +1411,16 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
                 {textModels.length > 0
                   ? 'Pick a model to send your message. Your text and attachments are kept.'
                   : 'Your message needs a chat model, and none is listed yet. Your text and attachments are kept.'}
+              </div>
+            ) : appMode === 'cloud' && !activeModel && textModels.length > 0 && (
+              // In Cloud the app picks no model by itself, so a menu without
+              // a pick is the normal state of a new account there. The line
+              // says what the pick is for, in the words of the web app.
+              <div
+                data-testid="picker-choose-a-model"
+                className={`px-2.5 py-1.5 border-b border-black/5 dark:border-white/[0.06] t-micro leading-snug ${HINWEIS_TEXT.ruhig}`}
+              >
+                {CHOOSE_TO_SEND}
               </div>
             )}
             {/* Noch vor der Engine-Zeile: was sich am Modell selbst geaendert
