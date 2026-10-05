@@ -137,9 +137,10 @@ image models in the cloud catalogue.
   paragraph of text. It is now a single line with a status dot, the number of
   models on disk and a small Start button. What Start does to your local chat
   backend is in the tooltip of the button. While the menu is open the line
-  follows the server, so it turns to running once the server is up. The number
-  counts chat models only, without embedding models and vision projectors, so
-  it matches the list after Start.
+  follows the server: it goes away once the server is up and its models are in
+  the list, and it comes back when the server stops, and the models leave the
+  list with it. The number counts chat models only, without embedding models
+  and vision projectors, so it matches the list after Start.
 
 ### Changed
 
