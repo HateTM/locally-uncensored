@@ -136,7 +136,8 @@ export const CLOUD_MODEL_SEED: CloudModel[] = [
   // note — a future t2v-only or i2v-only model MUST set the flag it lacks to
   // false. Server truth is /api/jobs/catalog; keep in sync with uselu.
   { id: 'wan-2.2-720p', label: 'Wan 2.2 720p', kind: 'video', t2v: true, i2v: true, negative_prompt: true, clip: CLIP, tier: 'older', weights: 'open' },
-  { id: 'wan-2.2-fast', label: 'Wan 2.2 Fast', kind: 'video', t2v: true, i2v: true, negative_prompt: true, clip: CLIP, tier: 'older', weights: 'open' },
+  // One clip length: its endpoints take no duration field (video-durations.json).
+  { id: 'wan-2.2-fast', label: 'Wan 2.2 Fast', kind: 'video', t2v: true, i2v: true, negative_prompt: true, clip: { short: 5 }, tier: 'older', weights: 'open' },
   { id: 'ltx-2', label: 'LTX-2 (with audio)', kind: 'video', t2v: true, i2v: true, clip: CLIP, credits: { base: 8000, lora: 10000 }, tier: 'older', weights: 'open' },
   { id: 'hunyuan-video', label: 'HunyuanVideo 1.5', kind: 'video', t2v: true, i2v: true, negative_prompt: true, clip: CLIP, tier: 'older', weights: 'open' },
   { id: 'ltx-2.3', label: 'LTX 2.3', kind: 'video', t2v: true, i2v: true, clip: CLIP, tier: 'older', weights: 'open' },
