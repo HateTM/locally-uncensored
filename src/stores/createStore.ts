@@ -29,6 +29,8 @@ const RUNTIME_ONLY_KEYS: readonly string[] = [
   // own fields since this bugfix. Session-scratch like source/mask, not a
   // preference worth remembering across restarts.
   'cloudFrames', 'cloudFps',
+  // Belongs to the tab switch that put it aside, not to a later session.
+  'imageLaneKept',
   // A scene from yesterday must not ride along into today's run.
   'videoShots',
 ]
@@ -334,6 +336,9 @@ interface CreateState {
   // other by backend switch or model switch alone.
   cloudFrames: number
   cloudFps: number
+  /** The image lane's sampling values while a video tab or Music has the
+   *  shared fields, with the model they were tuned for. Runtime only. */
+  imageLaneKept: ({ model: string } & Pick<CreateState, 'steps' | 'cfgScale' | 'sampler' | 'scheduler' | 'width' | 'height'>) | null
   denoise: number  // Denoise strength for I2I (0.0–1.0)
   /** Native text-to-image latent upscale + refinement pass (local ComfyUI). */
   hiresFixEnabled: boolean
@@ -694,6 +699,49 @@ function imageModelParams(state: { imageModel: string; imageModelType: ModelType
   }
 }
 
+type ImageLaneParams = ReturnType<typeof imageModelParams>
+
+/** True while the tab in this state runs the image model. Music keeps mode
+ *  'image' (see setIntent) and still writes its own sampling values. */
+function onImageLane(s: Pick<CreateState, 'mode' | 'cloudOp'>): boolean {
+  return s.mode === 'image' && s.cloudOp !== 'music'
+}
+
+/** What the image lane gets back: the values it was left with, as long as
+ *  they were tuned for the model that is still picked, else the model's own. */
+function imageLaneParams(s: Pick<CreateState, 'imageModel' | 'imageModelType' | 'imageLaneKept'>): ImageLaneParams {
+  if (s.imageLaneKept?.model !== s.imageModel) return imageModelParams(s)
+  const { model: _model, ...params } = s.imageLaneKept
+  return params
+}
+
+/** The video model's own sampling values, for picking it and for every tab
+ *  that runs it. Lightning/rapid merges are distilled to few steps at cfg 1,
+ *  the architecture defaults (30 steps, cfg 5+) render them to mush. */
+function videoModelParams(model: string) {
+  const defaults = MODEL_TYPE_DEFAULTS[classifyModel(model)] || MODEL_TYPE_DEFAULTS.unknown
+  const lightning = /rapid|lightning|lightx2v/i.test(model)
+  return {
+    steps: lightning ? 6 : defaults.steps, cfgScale: lightning ? 1.0 : defaults.cfgScale,
+    sampler: defaults.sampler, scheduler: defaults.scheduler,
+    width: defaults.width, height: defaults.height,
+    ...(defaults.frames ? { frames: defaults.frames } : {}),
+    ...(defaults.fps ? { fps: defaults.fps } : {}),
+  }
+}
+
+/**
+ * The sampling values a restart may find. cloudOp is runtime-only, so the app
+ * reopens on the base tab of the stored mode, and that tab must not start with
+ * what Music, Lip sync or Motion wrote: closed on Music, Image came back at
+ * ACE's 50 steps.
+ */
+function restartSampling(s: CreateState): Partial<CreateState> {
+  if (s.cloudOp === 'music') return imageLaneParams(s)
+  if (s.cloudOp === 'lipsync' || s.cloudOp === 'motion') return videoModelParams(s.videoModel)
+  return {}
+}
+
 export const useCreateStore = create<CreateState>()(
   persist(
     // Explicit param/return types: LU compiles with `strict: true` (the web
@@ -728,6 +776,7 @@ export const useCreateStore = create<CreateState>()(
       fps: 8,
       cloudFrames: 24,
       cloudFps: 8,
+      imageLaneKept: null,
       denoise: 0.7,
       hiresFixEnabled: false,
       hiresScale: 1.5,
@@ -811,18 +860,7 @@ export const useCreateStore = create<CreateState>()(
       setMode: (mode) => set((state) => {
         // Reset parameters to the correct defaults when switching modes
         // This prevents image resolution (1024x1024) leaking into video mode (causes HTTP 500)
-        if (mode === 'video' && state.videoModel) {
-          const type = classifyModel(state.videoModel)
-          const defaults = MODEL_TYPE_DEFAULTS[type] || MODEL_TYPE_DEFAULTS.unknown
-          return {
-            mode,
-            steps: defaults.steps, cfgScale: defaults.cfgScale,
-            sampler: defaults.sampler, scheduler: defaults.scheduler,
-            width: defaults.width, height: defaults.height,
-            ...(defaults.frames ? { frames: defaults.frames } : {}),
-            ...(defaults.fps ? { fps: defaults.fps } : {}),
-          }
-        }
+        if (mode === 'video' && state.videoModel) return { mode, ...videoModelParams(state.videoModel) }
         if (mode === 'image' && state.imageModel) return { mode, ...imageModelParams(state) }
         return { mode }
       }),
@@ -839,21 +877,7 @@ export const useCreateStore = create<CreateState>()(
           width: defaults.width, height: defaults.height,
         })
       },
-      setVideoModel: (model) => {
-        const type = classifyModel(model)
-        const defaults = MODEL_TYPE_DEFAULTS[type] || MODEL_TYPE_DEFAULTS.unknown
-        // Lightning/rapid merges are distilled to few steps at cfg 1 — the
-        // architecture defaults (30 steps, cfg 5+) render them to mush.
-        const lightning = /rapid|lightning|lightx2v/i.test(model)
-        set({
-          videoModel: model,
-          steps: lightning ? 6 : defaults.steps, cfgScale: lightning ? 1.0 : defaults.cfgScale,
-          sampler: defaults.sampler, scheduler: defaults.scheduler,
-          width: defaults.width, height: defaults.height,
-          ...(defaults.frames ? { frames: defaults.frames } : {}),
-          ...(defaults.fps ? { fps: defaults.fps } : {}),
-        })
-      },
+      setVideoModel: (model) => set({ videoModel: model, ...videoModelParams(model) }),
       setSampler: (sampler) => set({ sampler }),
       setScheduler: (scheduler) => set({ scheduler }),
       setSteps: (steps) => set({ steps: Math.max(1, Math.min(200, Math.floor(steps))) }),
@@ -899,14 +923,18 @@ export const useCreateStore = create<CreateState>()(
       setIntent: (intent) => {
         const changed = get().intent() !== intent
         set((s) => withOwnStudioOptions(s, ((): Partial<CreateState> => {
+        const patch = ((): Partial<CreateState> => {
         // Clear intent-incompatible inputs: intents without a source drop both;
         // removebg/animate keep the source but drop a stale mask. Video/animate
         // mirror setMode's reset so image resolution never leaks into video.
         // A stale error from the previous intent never carries over.
         const dropAll = { source: null, mask: null, sourceSetAt: 0, references: [] }
-        // Back from video, the image model gets its own values again; inside
-        // the image lane a switch keeps what the user tuned.
-        const back = s.mode === 'video' && s.imageModel ? imageModelParams(s) : {}
+        // Back from a tab that runs another model (the video tabs, Music), the
+        // image lane gets its own values again; inside the image lane a switch
+        // keeps what the user tuned. Music has mode 'image', so asking the mode
+        // alone left ACE's 50 steps on Image (seen on the Windows box as
+        // Quality "High" after a visit to Music).
+        const back = onImageLane(s) ? {} : imageLaneParams(s)
         // The number of images belongs to the tab it was chosen on: four picked
         // for Image must not start four runs of the first Edit.
         const base = {
@@ -938,10 +966,8 @@ export const useCreateStore = create<CreateState>()(
           case 'extend': {
             // The local lane continues from the picked clip's last frame —
             // regular I2V models, regular video defaults.
-            const d = MODEL_TYPE_DEFAULTS[classifyModel(s.videoModel)] || MODEL_TYPE_DEFAULTS.unknown
             return { ...base, cloudOp: 'extend' as const, mode: 'video' as const, videoSubMode: 't2v' as const, ...dropAll,
-              steps: d.steps, cfgScale: d.cfgScale, sampler: d.sampler, scheduler: d.scheduler,
-              width: d.width, height: d.height, ...(d.frames ? { frames: d.frames } : {}), ...(d.fps ? { fps: d.fps } : {}) }
+              ...videoModelParams(s.videoModel) }
           }
           case 'motion': {
             // Keeps the source slot (the character image the video drives).
@@ -957,19 +983,27 @@ export const useCreateStore = create<CreateState>()(
           // no prompt); eraser keeps source + mask (paint what to remove).
           case 'upscale':  return { ...base, utilityOp: 'upscale' as const, mode: 'image' as const, imageSubMode: 'img2img' as const, mask: null }
           case 'eraser':   return { ...base, utilityOp: 'eraser' as const, mode: 'image' as const, imageSubMode: 'img2img' as const }
-          case 'video': {
-            const d = MODEL_TYPE_DEFAULTS[classifyModel(s.videoModel)] || MODEL_TYPE_DEFAULTS.unknown
+          case 'video':
             return { ...base, mode: 'video' as const, videoSubMode: 't2v' as const, ...dropAll,
-              steps: d.steps, cfgScale: d.cfgScale, sampler: d.sampler, scheduler: d.scheduler,
-              width: d.width, height: d.height, ...(d.frames ? { frames: d.frames } : {}), ...(d.fps ? { fps: d.fps } : {}) }
-          }
-          case 'animate': {
-            const d = MODEL_TYPE_DEFAULTS[classifyModel(s.videoModel)] || MODEL_TYPE_DEFAULTS.unknown
+              ...videoModelParams(s.videoModel) }
+          case 'animate':
             return { ...base, mode: 'video' as const, videoSubMode: 'i2v' as const, mask: null,
-              steps: d.steps, cfgScale: d.cfgScale, sampler: d.sampler, scheduler: d.scheduler,
-              width: d.width, height: d.height, ...(d.frames ? { frames: d.frames } : {}), ...(d.fps ? { fps: d.fps } : {}) }
+              ...videoModelParams(s.videoModel) }
+        }
+        })()
+        // Leaving the image lane, its values are put aside under the model
+        // they were tuned for, so the way back finds the user's own choice.
+        const next = { ...s, ...patch }
+        if (onImageLane(s) && !onImageLane(next)) {
+          return {
+            ...patch,
+            imageLaneKept: {
+              model: s.imageModel, steps: s.steps, cfgScale: s.cfgScale, sampler: s.sampler,
+              scheduler: s.scheduler, width: s.width, height: s.height,
+            },
           }
         }
+        return onImageLane(next) ? { ...patch, imageLaneKept: null } : patch
         })()))
         // The list of further source images stays only where it can run.
         if (get().batchSources.length && (!get().source || !BATCH_INTENTS.has(intent))) get().setBatchSources([])
@@ -1306,6 +1340,7 @@ export const useCreateStore = create<CreateState>()(
         batchSize: state.batchSize,
         frames: state.frames,
         fps: state.fps,
+        ...restartSampling(state),
         denoise: state.denoise,
         hiresFixEnabled: state.hiresFixEnabled,
         hiresScale: state.hiresScale,
