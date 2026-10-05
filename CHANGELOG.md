@@ -2,7 +2,7 @@
 
 All notable changes to Locally Uncensored are documented here.
 
-## [3.0.5] - unreleased
+## [3.0.5] - 2026-10-05
 
 Create runs LTX 2.5, FastH3 and YuE2 on your own machine, edits several images
 in one go and has five new models on LU Cloud. Chat takes any file, and each

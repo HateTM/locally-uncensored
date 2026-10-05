@@ -130,7 +130,7 @@ export interface ReleaseNote {
 }
 
 export const RELEASE_NOTES: ReleaseNote[] = [
-  // 3.0.5, vorbereitet 03.10.2026 auf feat/create-sota: der Create-Umbau
+  // 3.0.5, released 05.10.2026: der Create-Umbau
   // (neue lokale Modelle, Qwen-Image 2.1, mehrere Bilder in einem Zug), Dateien
   // im Chat, Persona je Gruppenmodell und die Fehler aus GitHub 148 und 149.
   // package.json, package-lock, Cargo.toml/.lock und tauri.conf.json stehen im
