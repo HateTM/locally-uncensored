@@ -17,8 +17,8 @@ import type { CreateIntent } from '../createStore'
 const IMAGE_TABS: CreateIntent[] = ['image', 'edit', 'removebg', 'upscale', 'eraser', 'character']
 const OTHER_TABS: CreateIntent[] = ['music', 'video', 'animate', 'extend', 'lipsync', 'motion']
 
-// What the Quality control writes for "Draft" on an SD 1.5 checkpoint
-// (Composer: 0.6 of the family's 25 steps), plus values tuned by hand.
+// What the Quality control wrote for "Draft" on an SD 1.5 checkpoint at the
+// time (0.6 of the family's 25 steps), plus values tuned by hand.
 const TUNED = { steps: 15, cfgScale: 2.5, sampler: 'dpmpp_2m', scheduler: 'karras', width: 640, height: 768 }
 
 const stored = () =>

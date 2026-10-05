@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Sparkles, X, SlidersHorizontal, Square, Workflow } from 'lucide-react'
-import { useCreateStore, MODEL_TYPE_DEFAULTS, EDIT_MAX_DENOISE } from '../../../stores/createStore'
+import { useCreateStore, MODEL_TYPE_DEFAULTS, EDIT_MAX_DENOISE, imageQualityLadder, type ImageQuality } from '../../../stores/createStore'
 import { classifyModel } from '../../../api/comfyui'
 import { useCreateExp } from './CreateContext'
 import { intentToJob } from '../../../lib/render/cloud-jobs'
@@ -499,6 +499,8 @@ function LaneControls() {
   const denoise = useCreateStore((s) => s.denoise)
   const setDenoise = useCreateStore((s) => s.setDenoise)
   const imageModelType = useCreateStore((s) => s.imageModelType)
+  const imageModel = useCreateStore((s) => s.imageModel)
+  const setImageQuality = useCreateStore((s) => s.setImageQuality)
   const width = useCreateStore((s) => s.width)
   const height = useCreateStore((s) => s.height)
   const setSize = useCreateStore((s) => s.setSize)
@@ -521,8 +523,9 @@ function LaneControls() {
   const cloudImageModel = useCreateStore((s) => s.cloudImageModel)
 
   const base = MODEL_TYPE_DEFAULTS[imageModelType]?.steps ?? 25
-  const qSteps = { Draft: Math.round(base * 0.6), Standard: base, High: Math.round(base * 1.5) }
-  const activeQ = nearestKey(qSteps, steps)
+  // The button shown as picked is the one whose step count is nearest to the
+  // current one, measured on the ladder of the picked model.
+  const activeQ = nearestKey(imageQualityLadder({ backend, imageModel, imageModelType }).steps, steps)
 
   // Character-Studio forks: the Train surface owns its own step control
   // (trainSteps in SpecialControls); Use is a plain image generate with the
@@ -593,7 +596,7 @@ function LaneControls() {
               size="sm"
               layoutId="quality"
               value={activeQ}
-              onChange={(k) => setSteps(qSteps[k as keyof typeof qSteps])}
+              onChange={(k) => setImageQuality(k as ImageQuality)}
               options={[{ value: 'Draft', label: 'Draft' }, { value: 'Standard', label: 'Standard' }, { value: 'High', label: 'High' }]}
             />
           </LabeledControl>

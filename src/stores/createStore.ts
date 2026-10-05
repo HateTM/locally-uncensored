@@ -516,6 +516,8 @@ interface CreateState {
   setSampler: (sampler: string) => void
   setScheduler: (scheduler: string) => void
   setSteps: (steps: number) => void
+  /** A click on Draft, Standard or High in the image tabs, see `imageQualityLadder`. */
+  setImageQuality: (quality: ImageQuality) => void
   setCfgScale: (cfgScale: number) => void
   setSize: (width: number, height: number) => void
   setSeed: (seed: number) => void
@@ -685,12 +687,15 @@ export function distilledImageCheckpoint(model: string, type: ModelType): boolea
   return /(^|[^a-z])(turbo|lightning|hyper|lcm)([^a-z]|$)/i.test(model.replace(/^.*[\\/]/, ''))
 }
 
-/** The image model's own sampling values. Leaving the video lane has to put
- *  them back: Image, Edit and the other image intents only flipped the mode,
- *  so sd_turbo rendered with MiniMax H3's 20 steps, res_multistep and
- *  1344x768 (3.0.4 Gegenprobe 9). */
+/** The image model's own sampling values, for picking it and for everything
+ *  that measures from them. Leaving the video lane has to put them back:
+ *  Image, Edit and the other image intents only flipped the mode, so sd_turbo
+ *  rendered with MiniMax H3's 20 steps, res_multistep and 1344x768 (3.0.4
+ *  Gegenprobe 9). */
 function imageModelParams(state: { imageModel: string; imageModelType: ModelType }) {
-  const defaults = MODEL_TYPE_DEFAULTS[state.imageModelType] || MODEL_TYPE_DEFAULTS.unknown
+  const defaults = state.imageModelType === 'hidream'
+    ? hidreamDefaults(state.imageModel)
+    : MODEL_TYPE_DEFAULTS[state.imageModelType] || MODEL_TYPE_DEFAULTS.unknown
   const distilled = distilledImageCheckpoint(state.imageModel, state.imageModelType)
   return {
     steps: distilled ? 4 : defaults.steps, cfgScale: distilled ? 1.0 : defaults.cfgScale,
@@ -700,6 +705,36 @@ function imageModelParams(state: { imageModel: string; imageModelType: ModelType
 }
 
 type ImageLaneParams = ReturnType<typeof imageModelParams>
+
+export type ImageQuality = 'Draft' | 'Standard' | 'High'
+
+/**
+ * What the Quality buttons of the image tabs stand for: "Standard" is the
+ * picked model's own step count, Draft and High scale from it.
+ *
+ * They used to measure from the model FAMILY, 15 / 25 / 38 for every SD
+ * checkpoint. sd_turbo starts at 4 steps and CFG 1, so a click on "Draft"
+ * raised it to 15 steps, and at a CFG left over from elsewhere the image came
+ * out overcooked (Windows box, 05.10.2026). For a distilled checkpoint the
+ * buttons therefore also hold CFG at the model's value.
+ *
+ * LU Cloud renders with its own model, not the local file, so there the
+ * family's number stays the measure.
+ */
+export function imageQualityLadder(
+  s: Pick<CreateState, 'backend' | 'imageModel' | 'imageModelType'>,
+): { steps: Record<ImageQuality, number>; cfgScale?: number } {
+  const local = s.backend !== 'cloud'
+  const own = local ? imageModelParams(s) : MODEL_TYPE_DEFAULTS[s.imageModelType] || MODEL_TYPE_DEFAULTS.unknown
+  return {
+    steps: {
+      Draft: Math.max(1, Math.round(own.steps * 0.6)),
+      Standard: own.steps,
+      High: Math.round(own.steps * 1.5),
+    },
+    ...(local && distilledImageCheckpoint(s.imageModel, s.imageModelType) ? { cfgScale: own.cfgScale } : {}),
+  }
+}
 
 /** True while the tab in this state runs the image model. Music keeps mode
  *  'image' (see setIntent) and still writes its own sampling values. */
@@ -867,20 +902,21 @@ export const useCreateStore = create<CreateState>()(
       setImageSubMode: (subMode) => set({ imageSubMode: subMode }),
       setPrompt: (prompt) => set({ prompt }),
       setNegativePrompt: (negativePrompt) => set({ negativePrompt }),
-      setImageModel: (model, type) => {
-        const defaults = type === 'hidream' ? hidreamDefaults(model) : MODEL_TYPE_DEFAULTS[type]
-        const distilled = distilledImageCheckpoint(model, type)
-        set({
-          imageModel: model, imageModelType: type,
-          steps: distilled ? 4 : defaults.steps, cfgScale: distilled ? 1.0 : defaults.cfgScale,
-          sampler: defaults.sampler, scheduler: defaults.scheduler,
-          width: defaults.width, height: defaults.height,
-        })
-      },
+      setImageModel: (model, type) => set({
+        imageModel: model, imageModelType: type,
+        ...imageModelParams({ imageModel: model, imageModelType: type }),
+      }),
       setVideoModel: (model) => set({ videoModel: model, ...videoModelParams(model) }),
       setSampler: (sampler) => set({ sampler }),
       setScheduler: (scheduler) => set({ scheduler }),
       setSteps: (steps) => set({ steps: Math.max(1, Math.min(200, Math.floor(steps))) }),
+      setImageQuality: (quality) => set((s) => {
+        const ladder = imageQualityLadder(s)
+        return {
+          steps: ladder.steps[quality],
+          ...(ladder.cfgScale === undefined ? {} : { cfgScale: ladder.cfgScale }),
+        }
+      }),
       setCfgScale: (cfgScale) => set({ cfgScale: Math.max(0, Math.min(30, cfgScale)) }),
       setSize: (width, height) => set({
         width: Math.max(64, Math.min(4096, Math.floor(width))),
