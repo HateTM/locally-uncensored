@@ -27,6 +27,9 @@ const ACE = 'ace_step_1.5_turbo_aio.safetensors'
 const NODES: Record<string, object> = Object.fromEntries([
   'YuE2GenerateMusic', 'EmptyYuE2LatentAudio', 'ConditioningZeroOut', 'KSampler', 'VAEDecodeAudio', 'SaveAudioMP3',
   'TextEncodeAceStepAudio1.5', 'EmptyAceStep1.5LatentAudio', 'ModelSamplingSD3',
+  // ACE-Step 1.5 samples on its own template's ModelSamplingAuraFlow (FINDINGS 23),
+  // and the merged builder requires it like every node it emits.
+  'ModelSamplingAuraFlow',
 ].map((n) => [n, {}]))
 
 const params = (extra: Partial<LocalOpParams> = {}): LocalOpParams => ({

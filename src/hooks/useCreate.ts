@@ -560,8 +560,10 @@ export function useCreate() {
       const verdict = checkPromptSafety(
         `${typedPrompt} ${state.negativePrompt} ${state.musicLyrics} ${state.triggerWord} ${state.videoShots.join(' ')}`,
       )
-      // The saved LoRA prompts are part of what renders, so they are checked too.
-      const withLoras = applyLoraPrompts(state.prompt, state.negativePrompt, state.selectedLoras.map((l) => l.name))
+      // The saved LoRA prompts are part of what renders, so they are checked
+      // too — on the TYPED prompt: a view without a prompt field sends none,
+      // and text left over from another tab must not stop this run.
+      const withLoras = applyLoraPrompts(typedPrompt, state.negativePrompt, state.selectedLoras.map((l) => l.name))
       if (verdict.blocked || checkPromptSafety(withLoras.prompt + ' ' + withLoras.negative).blocked) {
         state.setError(SAFETY_BLOCK_MESSAGE)
         return
@@ -1574,11 +1576,11 @@ export function useCreate() {
                   addToGallery({
                     id: uuid(), type: galleryTypeForFile(file.filename, mode),
                     filename: file.filename, subfolder: file.subfolder ?? '', comfyType: file.type ?? 'output',
-                    prompt, negativePrompt, model: activeModel,
+                    prompt, ...improveFields, ...transparentFields(), negativePrompt, model: activeModel,
                     modelType: mode === 'image' ? imageModelType : (videoModelsList.find(m => m.name === activeModel)?.type ?? 'wan'),
                     seed: runSeed,
                     steps, cfgScale, sampler, scheduler, width: outputWidth, height: outputHeight, batchSize,
-                    createdAt: Date.now(), builderUsed,
+                    createdAt: Date.now(), builderUsed, intent, ...toolFields, ...(skippedNote ? { runNote: skippedNote } : {}),
                   })
                 }
               }

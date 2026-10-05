@@ -197,7 +197,12 @@ test('cloud code: a long run that outgrew its window keeps a ledger for "continu
   await expect.poll(() => bodies.length, { timeout: 30_000 }).toBeGreaterThan(beforeContinue)
   const first = JSON.stringify(JSON.parse(bodies[beforeContinue]).messages)
   expect(first, 'the persisted chain lost the ledger').toContain('[Run ledger]')
-  expect(first).toContain('src/file-0.ts')
+  // This fork's coding prompt is larger, so the 32K window trims deeper while
+  // the run is still going: by the time "continue" runs, the oldest steps of
+  // the FIRST half are already gone and the ledger names the steps that were
+  // dropped on this send. Upstream's smaller prompt keeps file-0 long enough
+  // to name it; here the ledger must still name real files, whichever they are.
+  expect(first).toMatch(/file_read: src\/file-\d+\.ts/)
   // The newest steps are there as real calls, not only as ledger lines.
   const calls = (JSON.parse(bodies[beforeContinue]).messages as Array<{ tool_calls?: Array<{ function: { arguments: string } }> }>)
     .flatMap((m) => m.tool_calls ?? []).map((c) => c.function.arguments)

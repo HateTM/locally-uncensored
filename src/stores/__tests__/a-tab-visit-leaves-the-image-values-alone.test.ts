@@ -98,7 +98,10 @@ describe('a restart on a tab that is not stored', () => {
   })
 
   it('closed on Lip sync or Motion, the stored values are the video model\'s', () => {
-    const d = MODEL_TYPE_DEFAULTS.wan22
+    // In this fork a Wan 2.2 14B checkpoint is Wan 2.1 architecture
+    // (isWan22Big) and classifies as 'wan', so the family defaults its lane
+    // resets to are 'wan's, not the TI2V-5B 'wan22' row upstream expects.
+    const d = MODEL_TYPE_DEFAULTS.wan
     for (const tab of ['lipsync', 'motion'] as const) {
       useCreateStore.getState().setIntent(tab)
       expect(stored(), tab).toMatchObject({
