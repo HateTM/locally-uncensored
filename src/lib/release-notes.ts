@@ -221,6 +221,10 @@ export const RELEASE_NOTES: ReleaseNote[] = [
             title: 'Edit starts without a mask on models that need none.',
             detail: 'With a model that edits from the instruction alone, the Edit stage still showed "Paint mask" and the Create button waited for one. The stage now says the model needs no mask, and Create starts with the source image and your prompt.',
           },
+          {
+            title: 'Settings stay with the model and the tool they were chosen for.',
+            detail: 'The Images slider is in the advanced settings for every Image and Edit model and goes back to 1 when you change the tool. Settings chosen for one model no longer carry over to the next one. In Music, the length slider and the Lyrics or Style field show only where the model reads them, and a tool without a prompt field sends no leftover prompt.',
+          },
         ],
       },
       {
