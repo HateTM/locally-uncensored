@@ -10,7 +10,7 @@
 // per Bauart dieselbe Menge, und der Vertragstest in preset-models.test.ts
 // deckt beide Oberflaechen ab.
 
-import { STUDIO_MODELS, studioBaseCredits, studioPreviewCredits, studioSchema } from './studio-contract'
+import { STUDIO_MODELS, studioBaseCredits, studioFields, studioPreviewCredits, studioSchema } from './studio-contract'
 import { presetModels, requiredRoleInputs, type PresetModel, type StepRole } from './preset-models'
 import { defaultCloudModel, modelForOp, opPickerModels, resolveCharacterModel, resolveOpPick } from '../../stores/cloudCatalogStore'
 import { intentToJob, type CreateIntentLike } from './cloud-jobs'
@@ -166,6 +166,18 @@ export function createStudioCost(
   imageCount = 1,
 ): number {
   return studioPreviewCredits(model, options, seconds, imageCount, promptLength) ?? studioBaseCredits(model)
+}
+
+/** What a control of this model shows: the customer's own value, else the
+ *  value the run sends when he sets nothing. The server fills an unset field
+ *  with the model's own default first and the schema's second (studioOptions);
+ *  every surface reads the same order here, so the control never names 720p
+ *  while the run renders the model's 480p. */
+export function studioShownValue(model: string, options: Record<string, unknown>, key: string): unknown {
+  const studio = STUDIO_MODELS[model]
+  // A classic model has no schema of its own: its control shows what was set.
+  if (!studio) return options[key]
+  return options[key] ?? studio.defaults[key] ?? studioFields(model)[key]?.default
 }
 
 /** Mehr als so viele eigene Fotos nimmt die Oberflaeche in einem Lauf nicht an,

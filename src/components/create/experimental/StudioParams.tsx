@@ -9,6 +9,7 @@ import { SlidersHorizontal } from 'lucide-react'
 import { useCreateStore } from '../../../stores/createStore'
 import { SchemaControl, isCompactField, studioFieldsInOrder } from './SchemaControl'
 import { modelHint, modelLabel } from '../../../lib/render/preset-models'
+import { studioShownValue } from '../../../lib/render/create-studio'
 
 export function StudioParams({ model }: { model: string }) {
   const options = useCreateStore((s) => s.cloudStudioOptions)
@@ -33,7 +34,7 @@ export function StudioParams({ model }: { model: string }) {
             <SchemaControl
               name={key}
               schema={schema}
-              value={options[key]}
+              value={studioShownValue(model, options, key)}
               disabled={isGenerating}
               onChange={(v) => setOptions({ ...options, [key]: v })}
             />
