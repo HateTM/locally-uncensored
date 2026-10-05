@@ -43,6 +43,7 @@ import { bumpSeed, runImageCount } from '../lib/render/image-count'
 import { STUDIO_MODELS, studioFields } from '../lib/render/studio-contract'
 import { modelLabel } from '../lib/render/preset-models'
 import { improveKindForIntent, IMPROVING_PROMPT } from '../lib/render/improve-prompt'
+import { intentTakesPrompt } from '../components/create/experimental/intents'
 import { rewrittenByName } from '../lib/render/qwen-enhancer'
 import { elapsedLine } from '../lib/elapsed-line'
 import { improvePrompt } from '../lib/render/improve-prompt-run'
@@ -261,6 +262,11 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
 
     // Bilder in diesem Lauf: nur Bild und Bearbeiten kennen mehr als eins.
     const count = runImageCount(intent, s.cloudImageCount, characterUse)
+    // The prompt of this run. A view without a prompt field (Talking Character,
+    // Motion Control, the utility ops, training) sends none: the store holds one
+    // prompt for every tab, and the text left from another tab would steer the
+    // run unseen or fail the content check for words nobody sees here.
+    const prompt = intentTakesPrompt(intent, characterUse) ? s.prompt : ''
     s.setError(null)
     if (!cloudMediaLive()) {
       // Server MEDIA_LIVE switch is off — the GPU fleet isn't up, a submit
@@ -268,7 +274,7 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
       s.setError('Cloud rendering is coming soon, the GPU fleet is not live yet.')
       return
     }
-    if ((op === 'generate' || op === 'music' || op === 'tts') && s.prompt.trim().length === 0) {
+    if ((op === 'generate' || op === 'music' || op === 'tts') && prompt.trim().length === 0) {
       s.setError('Please enter a prompt.')
       return
     }
@@ -278,7 +284,7 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
     // below either way; this only saves the round trip when the client
     // already knows the verdict (B3).
     {
-      const verdict = clientSafety(`${s.prompt} ${s.negativePrompt} ${s.musicLyrics} ${s.triggerWord}`)
+      const verdict = clientSafety(`${prompt} ${s.negativePrompt} ${s.musicLyrics} ${s.triggerWord}`)
       if (verdict.blocked) {
         s.setError(blockMessageFor(verdict.reason))
         return
@@ -543,19 +549,19 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
       // for this model before the run. On LU Cloud that is a small chat call,
       // billed like chat. The run sends the rewrite and the gallery keeps both.
       // A rewrite that fails never stops the run.
-      let runPrompt = s.prompt
+      let runPrompt = prompt
       let promptOriginal: string | undefined
       let rewrittenBy: string | undefined
       let improveFailed = false
       const improveKind = s.improvePrompt && !characterUse ? improveKindForIntent(intent) : null
-      if (improveKind && s.prompt.trim() && !ac.signal.aborted) {
+      if (improveKind && prompt.trim() && !ac.signal.aborted) {
         const improving = elapsedLine((text) => s.setProgress(8, text), IMPROVING_PROMPT)
-        const out = await improvePrompt(s.prompt, { kind: improveKind, modelLabel: modelLabel(model) }, ac.signal).finally(improving.stop)
+        const out = await improvePrompt(prompt, { kind: improveKind, modelLabel: modelLabel(model) }, ac.signal).finally(improving.stop)
         // The safety check covers the rewrite too: the user wrote an allowed
         // prompt, the model must not turn it into a refusal.
         if (out.status === 'improved' && !clientSafety(out.prompt).blocked) {
           runPrompt = out.prompt
-          promptOriginal = s.prompt
+          promptOriginal = prompt
           rewrittenBy = rewrittenByName('chat', currentHelperModel())
         } else if (out.status !== 'unchanged' && !ac.signal.aborted) {
           improveFailed = true
@@ -636,7 +642,7 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
       // list view (GET /api/jobs), not the only source of the gallery name.
       let label: string | undefined
       if (studioModel) {
-        label = s.prompt.trim() ? undefined : modelLabel(studioModel)
+        label = prompt.trim() ? undefined : modelLabel(studioModel)
         if (label) params.label = label
       } else if (OP_GALLERY_LABEL[op]) {
         label = OP_GALLERY_LABEL[op]
@@ -663,7 +669,7 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
       activeJobId = id
       activeJobIds = ids
       onQuotaChange?.()
-      if (s.prompt.trim()) s.addToPromptHistory(s.prompt.trim())
+      if (prompt.trim()) s.addToPromptHistory(prompt.trim())
 
       const startedAt = Date.now()
       // Video renders and character training routinely run several minutes

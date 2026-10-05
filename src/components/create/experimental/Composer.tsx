@@ -20,7 +20,7 @@ import { STUDIO_MODELS } from '../../../lib/render/studio-contract'
 import { effectiveVideoDurations, snapToVideoDuration } from '../../../lib/render/video-duration'
 import { mediaSeconds, useStudioPrice } from './useStudioPrice'
 import { getJob } from '../../../api/cloud/jobs'
-import { INTENT_MAP } from './intents'
+import { INTENT_MAP, intentTakesPrompt } from './intents'
 import { subscribeInstallRuns, getInstallRun } from '../../../lib/model-install-runs'
 import { useWorkflowStore, shouldShowManagerNotice } from '../../../stores/workflowStore'
 import { noPromptHint, shouldShowLaneHint } from './laneHint'
@@ -109,7 +109,7 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
   }
   // The prompt field shows wherever the run consumes one — that's the meta
   // flag, plus Character-Studio's use-surface (train has no prompt).
-  const needPrompt = meta.needsPrompt || characterUse
+  const needPrompt = intentTakesPrompt(intent, characterUse)
   // Gate on the exact run's cost (model + op + clip length), the same figure
   // the CreditsMeter shows — quota.costs[kind] is only the tier's
   // representative per-kind number and would mis-gate utility ops / pricier

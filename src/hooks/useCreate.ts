@@ -63,6 +63,7 @@ import { renderFixupDeps } from '../api/render-fixup-deps'
 import { checkPromptSafety, SAFETY_BLOCK_MESSAGE } from '../lib/render/safety'
 import { wantsTransparent } from '../lib/transparent-image'
 import { scenePromptFor } from '../lib/ltx-multishot'
+import { intentTakesPrompt } from '../components/create/experimental/intents'
 import { improveKindForIntent, IMPROVING_PROMPT, type ImproveOutcome } from '../lib/render/improve-prompt'
 import { elapsedLine } from '../lib/elapsed-line'
 import { improvePrompt } from '../lib/render/improve-prompt-run'
@@ -524,9 +525,17 @@ export function useCreate() {
     // lines below. Every field that carries user text to a render is gated on
     // both paths, and the two lists have to stay identical (review
     // 2026-08-14).
+    //
+    // The prompt of this run. A view without a prompt field (Talking Character,
+    // Motion Control, Remove Background, training) sends none: the store holds
+    // one prompt for every tab, and the text left from another tab would steer
+    // the run unseen or fail this check for words nobody sees here.
+    const typedPrompt = intentTakesPrompt(state.intent(), state.cloudOp === 'character' && state.characterTab === 'use')
+      ? state.prompt
+      : ''
     {
       const verdict = checkPromptSafety(
-        `${state.prompt} ${state.negativePrompt} ${state.musicLyrics} ${state.triggerWord} ${state.videoShots.join(' ')}`,
+        `${typedPrompt} ${state.negativePrompt} ${state.musicLyrics} ${state.triggerWord} ${state.videoShots.join(' ')}`,
       )
       if (verdict.blocked) {
         state.setError(SAFETY_BLOCK_MESSAGE)
@@ -541,7 +550,7 @@ export function useCreate() {
       return
     }
     const {
-      mode, prompt: typedPrompt, negativePrompt, imageModel, videoModel,
+      mode, negativePrompt, imageModel, videoModel,
       sampler, scheduler, steps, cfgScale, width, height, seed, batchSize, frames, fps, denoise,
       hiresFixEnabled, hiresScale, hiresDenoise, hiresSteps, hiresUpscaleMethod, i2iImage, i2vImage,
       source, references, mask, growMaskBy, removebg, selectedLoras, selectedVae, clipSkip,

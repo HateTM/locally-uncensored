@@ -170,6 +170,15 @@ export const INTENTS: IntentMeta[] = [
 export const INTENT_MAP: Record<CreateIntent, IntentMeta> =
   Object.fromEntries(INTENTS.map((i) => [i.id, i])) as Record<CreateIntent, IntentMeta>
 
+/** Does the view on screen show a prompt field? Composer draws the field under
+ *  this rule and both starts (cloud and local) send a prompt under the same
+ *  one: a view without the field must never send the text left over from
+ *  another tab. Character Studio's use surface is a plain image generate and
+ *  has one. */
+export function intentTakesPrompt(intent: CreateIntent, characterUse = false): boolean {
+  return INTENT_MAP[intent].needsPrompt || characterUse
+}
+
 /**
  * The intents that have a REAL local pipeline on an MLX host (Apple Silicon
  * Mac). Every local lane above is a ComfyUI graph, and the Mac has no ComfyUI
