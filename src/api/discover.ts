@@ -1909,13 +1909,12 @@ function civitaiItemToResult(
   if (type === 'Checkpoint' && (name.includes('flux') || name.includes('wan') || name.includes('hunyuan'))) {
     subfolder = 'diffusion_models'
   }
+  const filename = asString(prop(file, 'name'))
+    || `${(itemName ?? '').replace(/[^a-zA-Z0-9._-]/g, '_')}.safetensors`
   // A GGUF quant is a bare diffusion model whatever its name says, and the
   // only loader that lists .gguf (ComfyUI-GGUF's UnetLoaderGGUF) reads
   // diffusion_models/unet. In checkpoints/ nothing ever saw it.
   if (type === 'Checkpoint' && isGgufFile(filename)) subfolder = 'diffusion_models'
-
-  const filename = asString(prop(file, 'name'))
-    || `${(itemName ?? '').replace(/[^a-zA-Z0-9._-]/g, '_')}.safetensors`
 
   const descParts: string[] = []
   const rawDesc = civitaiDescriptionToText(asString(prop(item, 'description')) ?? '')

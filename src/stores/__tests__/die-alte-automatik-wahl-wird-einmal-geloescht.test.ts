@@ -1,5 +1,5 @@
-// @vitest-environment jsdom
 /**
+ * @vitest-environment jsdom
  * The old automatic Cloud pick is cleared once (3.0.5, 2026-10-05).
  *
  * Until 3.0.5 the app put the head of the hosted catalogue into the picker by

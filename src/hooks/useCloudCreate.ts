@@ -53,7 +53,6 @@ import { bookedVideoSeconds } from '../lib/render/video-duration'
 import { studioQuote, StudioQuoteChangedError } from '../api/cloud/studio'
 import { dataUrlToBlob } from '../lib/data-url'
 import { MIN_TRAIN_IMAGES, maxTrainImages } from '../lib/train-image-cap'
->>>>>>> upstream/master
 
 // B3 (review-w2ui.md, 18.09.2026): the CSAM floor above runs regardless of
 // tier, but the adult half of safety.ts (ADULT_SOFT_TERMS/ADULT_HARD_TERMS)

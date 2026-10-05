@@ -154,7 +154,6 @@ const EDIT_ATTACHED_RE = new RegExp(
   + String.raw`|(?<![а-я])(измени(те)?|отредактируй(те)?|убери(те)?|удали(те)?|замени(те)?|поменяй(те)?|добавь(те)?|вырежи(те)?|сотри(те)?)(?![а-я])[^.?!]*` + EDIT_VISUAL_OBJECT_RU,
   'i',
 )
-=======
 // A file name the user only MENTIONS as text is not a file to write. The 3.0.4
 // box run sent "Write two short sentences. Put the file name `notes.md` in
 // backticks and the word **important** in bold." with Agent off and got a

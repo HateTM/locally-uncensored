@@ -13,7 +13,7 @@ import {
 import type { LucideIcon } from 'lucide-react'
 import type { DiscoverModel, DownloadProgress, ModelBundle } from '../../api/discover'
 import { formatBytes, countLabel } from '../../lib/formatters'
-import { vramFit, vramFitLine, vramNeedTitle, type VramFit } from '../../lib/vram-fit'
+import { vramFit, vramFitLine, vramNeedTitle } from '../../lib/vram-fit'
 import { tierMarks } from '../../lib/render/model-tier'
 import { modelTileAction } from '../../lib/model-tile-action'
 import { bundleGetPlan } from '../../lib/bundle-state'
