@@ -887,7 +887,12 @@ export const useCreateStore = create<CreateState>()(
         // Back from video, the image model gets its own values again; inside
         // the image lane a switch keeps what the user tuned.
         const back = s.mode === 'video' && s.imageModel ? imageModelParams(s) : {}
-        const base = { removebg: false, utilityOp: null, cloudOp: null, error: null, ...back }
+        // The number of images belongs to the tab it was chosen on: four picked
+        // for Image must not start four runs of the first Edit.
+        const base = {
+          removebg: false, utilityOp: null, cloudOp: null, error: null, ...back,
+          ...(changed ? { cloudImageCount: 1 } : {}),
+        }
         switch (intent) {
           // ── 2.5.8 cloud categories. Inputs specific to each (train set,
           // audio, driving video, extend pick) live in their own slots and are
@@ -1118,6 +1123,9 @@ export const useCreateStore = create<CreateState>()(
             if (s.imageSubMode === 'img2img') Object.assign(patch, { imageSubMode: 'text2img' })
             if (s.videoSubMode === 'i2v') Object.assign(patch, { videoSubMode: 't2v' })
           }
+          // A tab this flip closes takes its number of images with it, like
+          // any other tab change (setIntent).
+          if (deriveIntent({ ...s, ...patch }) !== deriveIntent(s)) Object.assign(patch, { cloudImageCount: 1 })
           return patch
         }),
       // Wie setCloudOpModel: ein anderer Endpunkt, andere erlaubte Felder. Dieselbe

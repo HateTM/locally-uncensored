@@ -7,7 +7,6 @@ import { classifyModel } from '../../../api/comfyui'
 import { nativeHiresFinalSize, type HiresUpscaleMethod } from '../../../api/hires-fix'
 import { isMlxImageHost } from '../../../api/mlx-image'
 import { INTENT_MAP } from './intents'
-import { MAX_IMAGE_COUNT, imageCountApplies } from '../../../lib/render/image-count'
 import { SAMPLERS as SAMPLERS_FALLBACK, SCHEDULERS as SCHEDULERS_FALLBACK } from './badges'
 import { Section } from '../ui/Section'
 import { Slider } from '../ui/Slider'
@@ -221,9 +220,6 @@ export function ParamGroups() {
       {/* OUTPUT */}
       <Section title="Output" icon={Boxes} defaultOpen>
         <NumberField label="Seed (−1 = random)" value={s.seed} step={1} mono onRandomize={() => s.setSeed(-1)} onChange={s.setSeed} />
-        {/* Cloud: Bilder pro Lauf, jedes ein eigener Auftrag mit eigenem Preis.
-            Lokal bleibt es die Batch size der ComfyUI-Warteschlange. */}
-        {isCloud && imageCountApplies(meta.id) && <Slider label="Images" min={1} max={MAX_IMAGE_COUNT} step={1} value={s.cloudImageCount} onChange={s.setCloudImageCount} />}
         {showTransparent && (
           <button
             type="button"

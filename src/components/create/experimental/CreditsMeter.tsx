@@ -88,7 +88,14 @@ export function CreditsMeter() {
           />
         </div>
         <span className="tabular-nums">{remaining}</span>
-        {state.runsLeft !== null && (
+        {/* Several images: the bar names what this run binds, next to the
+            button that starts it. One image keeps the "how many more" figure. */}
+        {imageCount > 1 ? (
+          <>
+            <span className="text-gray-600">·</span>
+            <span className="tabular-nums whitespace-nowrap">{imageCount} images, {cost} credits</span>
+          </>
+        ) : state.runsLeft !== null && (
           <>
             <span className="text-gray-600">·</span>
             <span className="tabular-nums whitespace-nowrap">≈{state.runsLeft} {state.unit}</span>

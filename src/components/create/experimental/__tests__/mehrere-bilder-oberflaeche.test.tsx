@@ -15,6 +15,7 @@ const ctx = vi.hoisted(() => ({
     topup: { credits: 0 }, video: { limit: 500000, used: 0, remaining: 500000 }, trainings: { limit: 3, used: 0, remaining: 3 },
   },
   quote: vi.fn(),
+  mlx: false,
 }))
 vi.mock('../CreateContext', () => ({
   useCreateExp: () => ({
@@ -25,8 +26,8 @@ vi.mock('../CreateContext', () => ({
 vi.mock('../loadImage', () => ({
   loadImageRef: vi.fn(async (f: File) => ({ filename: f.name, url: `data:image/png;base64,${f.name}`, width: 64, height: 64 })),
 }))
-vi.mock('../../../../api/mlx-image', () => ({ isMlxImageHost: () => false }))
-vi.mock('../../../../api/comfyui', () => ({ classifyModel: () => 'sdxl' }))
+vi.mock('../../../../api/mlx-image', () => ({ isMlxImageHost: () => ctx.mlx }))
+vi.mock('../../../../api/comfyui', () => ({ classifyModel: () => 'sdxl', isI2VModel: () => false, isT2VCapable: () => true }))
 vi.mock('../../../../api/backend', () => ({ openExternal: vi.fn() }))
 vi.mock('../../../../hooks/useCloudCreate', () => ({ resolveCharacterModel: () => undefined }))
 vi.mock('../../../../api/cloud/studio', async (importOriginal) => ({
@@ -35,18 +36,22 @@ vi.mock('../../../../api/cloud/studio', async (importOriginal) => ({
 }))
 
 import { ParamGroups } from '../ParamGroups'
+import { ImageCount } from '../ImageCount'
+import { AdvancedDrawer } from '../AdvancedDrawer'
 import { ReferenceStrip } from '../ReferenceStrip'
 import { CreditsMeter } from '../CreditsMeter'
 import { useStudioPrice } from '../useStudioPrice'
 import { useCreateStore } from '../../../../stores/createStore'
 import { useCloudCatalogStore } from '../../../../stores/cloudCatalogStore'
 import { neuerServer } from '../../../../lib/render/__tests__/fixtures/test-catalogs'
+import { studioPickFor } from '../../../../lib/render/create-studio'
 
 const BILD = { filename: 'a.png', url: 'data:image/png;base64,AA', width: 512, height: 512 }
 const FOTO = (n: number) => ({ filename: `p${n}.png`, url: `data:image/png;base64,P${n}`, width: 64, height: 64 })
 
 beforeEach(() => {
   ctx.quota.remaining.credits = 700
+  ctx.mlx = false
   ctx.quote.mockReset()
   ctx.quote.mockRejectedValue(new Error('offline'))
   useCloudCatalogStore.setState({ models: neuerServer() })
@@ -59,14 +64,15 @@ beforeEach(() => {
 afterEach(() => { cleanup() })
 
 describe('Regler Images', () => {
+  const range = (c: HTMLElement) => [...c.querySelectorAll('input[type=range]')].find((el) => (el as HTMLInputElement).max === '4') as HTMLInputElement
+
   it('steht in der Cloud bei Bild und Bearbeiten, von 1 bis 4', () => {
     useCreateStore.getState().setIntent('image')
-    const { container } = render(<ParamGroups />)
-    expect(screen.getByText('Images')).toBeTruthy()
+    const { container } = render(<><ImageCount /><ParamGroups /></>)
+    expect(screen.getAllByText('Images')).toHaveLength(1)
     expect(screen.queryByText('Batch size')).toBeNull()
-    const range = [...container.querySelectorAll('input[type=range]')].find((el) => (el as HTMLInputElement).max === '4') as HTMLInputElement
-    expect(range.min).toBe('1')
-    fireEvent.change(range, { target: { value: '3' } })
+    expect(range(container).min).toBe('1')
+    fireEvent.change(range(container), { target: { value: '3' } })
     expect(useCreateStore.getState().cloudImageCount).toBe(3)
   })
 
@@ -79,20 +85,73 @@ describe('Regler Images', () => {
 
   it('Bearbeiten hat ihn, Video nicht', () => {
     useCreateStore.getState().setIntent('edit')
-    const edit = render(<ParamGroups />)
+    const edit = render(<ImageCount />)
     expect(screen.getByText('Images')).toBeTruthy()
     edit.unmount()
     useCreateStore.getState().setIntent('video')
-    render(<ParamGroups />)
+    render(<ImageCount />)
     expect(screen.queryByText('Images')).toBeNull()
   })
 
   it('lokal bleibt es bei Batch size', () => {
     useCreateStore.setState({ backend: 'local' })
     useCreateStore.getState().setIntent('image')
-    render(<ParamGroups />)
+    render(<><ImageCount /><ParamGroups /></>)
     expect(screen.getByText('Batch size')).toBeTruthy()
     expect(screen.queryByText('Images')).toBeNull()
+  })
+
+  // Fund F1 (05.10.2026): bei einem Studio-Modell zeigte die Klappe nur dessen
+  // eigene Felder, der Regler fehlte, die Zahl galt aber weiter.
+  it('ein Studio-Modell in Bearbeiten und in Bild hat den Regler in der Klappe', () => {
+    for (const [intent, model, studio] of [['edit', 'flux-3-edit', true], ['image', 'flux-3', true], ['image', 'flux-schnell', false]] as const) {
+      const s = useCreateStore.getState()
+      s.setIntent(intent); s.setCloudImageModel(model)
+      useCreateStore.setState({ source: BILD })
+      const pick = studioPickFor(intent, useCreateStore.getState())
+      expect(!!pick, `${intent} ${model}`).toBe(studio)
+      const { container, unmount } = render(<AdvancedDrawer open onClose={() => {}} studioModel={pick} />)
+      expect(screen.getAllByText('Images'), `${intent} ${model}`).toHaveLength(1)
+      fireEvent.change(range(container), { target: { value: '2' } })
+      expect(useCreateStore.getState().cloudImageCount).toBe(2)
+      unmount()
+    }
+  })
+
+  it('die Zahl wandert nicht in eine andere Unterkategorie mit', () => {
+    const s = useCreateStore.getState()
+    s.setIntent('image'); s.setCloudImageCount(4)
+    s.setIntent('image')
+    expect(useCreateStore.getState().cloudImageCount).toBe(4)
+    s.setIntent('edit')
+    expect(useCreateStore.getState().cloudImageCount).toBe(1)
+  })
+
+  it('schliesst der Wechsel auf lokal die Unterkategorie, geht die Zahl mit ihr', () => {
+    const s = useCreateStore.getState()
+    s.setIntent('image'); s.setCloudImageCount(4)
+    s.setBackend('local'); s.setBackend('cloud')
+    expect(useCreateStore.getState().cloudImageCount).toBe(4)
+    // Auf einem Mac kennt die lokale Spur kein Bearbeiten: der Wechsel macht
+    // aus Edit Image, und die vier Bilder von Edit gelten dort nicht.
+    ctx.mlx = true
+    s.setIntent('edit'); s.setCloudImageCount(4)
+    s.setBackend('local'); s.setBackend('cloud')
+    expect(useCreateStore.getState().intent()).toBe('image')
+    expect(useCreateStore.getState().cloudImageCount).toBe(1)
+  })
+
+  it('ueber einem Bild nennen Regler und Leiste die Summe des Laufs, sichtbar und nicht nur im Tooltip', () => {
+    const s = useCreateStore.getState()
+    s.setIntent('image'); s.setCloudImageModel('flux-schnell'); s.setCloudImageCount(2)
+    render(<><CreditsMeter /><ImageCount /></>)
+    expect(screen.getByText('2 images, 600 credits')).toBeTruthy()
+    expect(screen.getByText('2, 600 credits in all')).toBeTruthy()
+    cleanup()
+    s.setCloudImageCount(1)
+    render(<><CreditsMeter /><ImageCount /></>)
+    expect(screen.queryByText(/images, \d+ credits/)).toBeNull()
+    expect(screen.getByText(/≈2 images/)).toBeTruthy() // 700 / 300 je Bild
   })
 
   it('die Zahl wird nie gespeichert: ein fremder Blob belegt sie nicht vor', () => {
@@ -110,12 +169,11 @@ describe('Zaehler und Preis mit Anzahl', () => {
     expect(screen.getByText(/Needs 900 credits \(700 left\)/)).toBeTruthy()
   })
 
-  it('zwei Bilder (600) passen ins Guthaben, der Zaehler rechnet je Bild', () => {
+  it('zwei Bilder (600) passen ins Guthaben', () => {
     const s = useCreateStore.getState()
     s.setIntent('image'); s.setCloudImageModel('flux-schnell'); s.setCloudImageCount(2)
     render(<CreditsMeter />)
     expect(screen.queryByText(/Needs/)).toBeNull()
-    expect(screen.getByText(/≈2 images/)).toBeTruthy() // 700 / 300 je Bild
   })
 
   it('ein Studio-Bild (5.000 je Bild) geht mal Anzahl ein', () => {
