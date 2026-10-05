@@ -41,6 +41,8 @@ Take the latest build from [Releases](https://github.com/PurpleDoubleD/locally-u
 
 Some antivirus engines flag unsigned NSIS installers that download other binaries, which is a false positive. The installer is built by GitHub Actions from the public source on `master`, and the update channel is signed against a public minisign key, so you can verify both: see [SECURITY.md](SECURITY.md#antivirus--browser-false-positives).
 
+Code signing for the Windows installers: free code signing provided by [SignPath.io](https://signpath.io), certificate by [SignPath Foundation](https://signpath.org). The application is in review, and until it is approved the installers ship unsigned.
+
 Current release: **v3.0.5** (October 2026). Every change since 1.0.0 is in [CHANGELOG.md](CHANGELOG.md).
 
 3.0.5 is about Create: LTX 2.5, FastH3 and YuE2 run on your own machine, Qwen-Image 2.1 gets a transparent background and its prompt enhancer, Edit, Remove Background and Enhance Image take up to 50 images in one go, and LU Cloud adds Qwen Image 2.1, LTX 2.5, MiniMax H3 and Wan 3.0 Reference. Chat takes any file, each model in a group chat can have its own persona, dropdowns stay inside the window (issue 149), and the speech install works again on Ubuntu 24.04.
