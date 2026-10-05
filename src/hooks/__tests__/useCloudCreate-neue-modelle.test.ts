@@ -338,6 +338,7 @@ describe('die neuen Studio-Modelle in Bild, Bearbeiten, Video, Animate und Enhan
 
   it('ein Modellwechsel und ein Wechsel der Unterkategorie werfen die Optionen weg', () => {
     const s = useCreateStore.getState()
+    s.setIntent('image')
     s.setCloudImageModel('qwen-image-3')
     s.setCloudImageModel('flux-3')
     s.setCloudStudioOptions({ resolution: '2k' })
@@ -346,12 +347,17 @@ describe('die neuen Studio-Modelle in Bild, Bearbeiten, Video, Animate und Enhan
     expect(useCreateStore.getState().cloudStudioOptions).toEqual({ resolution: '2k' })
     s.setCloudImageModel('qwen-image-3-pro')
     expect(useCreateStore.getState().cloudStudioOptions).toEqual({})
+    // Die Optionen gehoeren zum Modell, das die Unterkategorie faehrt: der
+    // Videowaehler aendert an einem Bildlauf nichts.
+    s.setCloudStudioOptions({ resolution: '2k' })
     s.setCloudVideoModel('wan-2.2-720p')
+    expect(useCreateStore.getState().cloudStudioOptions).toEqual({ resolution: '2k' })
+    s.setIntent('video')
+    expect(useCreateStore.getState().cloudStudioOptions).toEqual({})
     s.setCloudStudioOptions({ resolution: '1080p' })
     s.setCloudVideoModel('ltx-2.5-t2v')
     expect(useCreateStore.getState().cloudStudioOptions).toEqual({})
     s.setCloudStudioOptions({ resolution: '1080p' })
-    s.setIntent('video')
     s.setIntent('animate')
     expect(useCreateStore.getState().cloudStudioOptions).toEqual({})
   })

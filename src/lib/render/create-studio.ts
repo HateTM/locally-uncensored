@@ -10,11 +10,10 @@
 // per Bauart dieselbe Menge, und der Vertragstest in preset-models.test.ts
 // deckt beide Oberflaechen ab.
 
-import type { CreateIntent } from '../../stores/createStore'
 import { STUDIO_MODELS, studioBaseCredits, studioPreviewCredits, studioSchema } from './studio-contract'
 import { presetModels, requiredRoleInputs, type PresetModel, type StepRole } from './preset-models'
-import { defaultCloudModel, modelForOp, opPickerModels } from '../../stores/cloudCatalogStore'
-import { intentToJob } from './cloud-jobs'
+import { defaultCloudModel, modelForOp, opPickerModels, resolveCharacterModel, resolveOpPick } from '../../stores/cloudCatalogStore'
+import { intentToJob, type CreateIntentLike } from './cloud-jobs'
 
 // Desktop port (P2, checked again in P9): the web's CreateIntent already
 // carries 'video_upscale' as a distinct intent from the plain 'upscale'
@@ -31,7 +30,7 @@ import { intentToJob } from './cloud-jobs'
 // crystal-upscaler, flux-3-upscale) is correctly wired and tested, but
 // reachable only by calling these functions directly with 'video_upscale',
 // which no UI path does today.
-export type StudioIntent = CreateIntent | 'video_upscale'
+export type StudioIntent = CreateIntentLike | 'video_upscale'
 
 /** Die Rolle, die eine Create-Unterkategorie faehrt. Absichten ohne Eintrag
  *  (Bild, Video, Animate, Edit) haben ihre eigenen, aelteren Waehler. */
@@ -106,26 +105,40 @@ export function resolveIntentPick(intent: StudioIntent, picked: string): string 
   return list.some((m) => m.id === picked) ? picked : list[0].id
 }
 
+/** The model the tab on screen would run in the cloud right now, from the three
+ *  pickers.
+ *
+ *  One rule for the Create button, the meter, the settings drawer and the
+ *  store. `characterFamily` is set on Character Studio's use surface only: that
+ *  run is a plain image generate on a model of the character's family. */
+export function createRunModel(
+  intent: StudioIntent,
+  picks: { image: string; video: string; op: string },
+  characterFamily?: string,
+): string {
+  if (characterFamily !== undefined) {
+    return modelForOp('image', 'generate', resolveCharacterModel(characterFamily, picks.op) ?? '')
+  }
+  if (intentRoles(intent).length > 0) return resolveIntentPick(intent, picks.op)
+  const { kind, op } = intentToJob(intent as CreateIntentLike)
+  // Character training is the one specialized intent without a role.
+  const picked = intent === 'character'
+    ? resolveOpPick(op, picks.op)
+    : (kind === 'video' ? picks.video : picks.image) || defaultCloudModel(kind)?.id || ''
+  return modelForOp(kind, op, picked)
+}
+
 /** Das Studio-Modell, auf dem ein Cloud-Lauf dieser Unterkategorie wirklich
- *  laeuft, oder `undefined`. Dieselbe Aufloesung wie Waehler, Zaehler und Start:
- *  Rollen-Absichten lesen ihre Wahl aus der Rolle, alle anderen laufen durch
- *  modelForOp. Der Character-Weg bleibt auf seiner festen -lora-Familie und
- *  die spezialisierten Ops ohne Rolle (Training) fahren nie Studio. Die
- *  Schublade mit den Einstellungen liest das, um ihr Schema zu zeigen. */
+ *  laeuft, oder `undefined`. Dieselbe Aufloesung wie Waehler, Zaehler und Start
+ *  (createRunModel). Der Character-Weg bleibt auf seiner festen -lora-Familie
+ *  und das Training faehrt nie Studio. Die Schublade mit den Einstellungen
+ *  liest das, um ihr Schema zu zeigen. */
 export function studioPickFor(
   intent: StudioIntent,
   s: { cloudImageModel: string; cloudVideoModel: string; cloudOpModel: string },
 ): string | undefined {
   if (intent === 'character') return undefined
-  if (intentRoles(intent).length) {
-    const picked = resolveIntentPick(intent, s.cloudOpModel)
-    return isStudioModel(picked) ? picked : undefined
-  }
-  if (intent === 'video_upscale') return undefined
-  const { kind, op } = intentToJob(intent)
-  if (op === 'lora-train' || op === 'tts') return undefined
-  const picked = (kind === 'video' ? s.cloudVideoModel : s.cloudImageModel) || defaultCloudModel(kind)?.id || ''
-  const model = modelForOp(kind, op, picked)
+  const model = createRunModel(intent, { image: s.cloudImageModel, video: s.cloudVideoModel, op: s.cloudOpModel })
   return isStudioModel(model) ? model : undefined
 }
 

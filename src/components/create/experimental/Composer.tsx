@@ -15,12 +15,11 @@ import {
   modelForOp,
   runCredits,
 } from '../../../stores/cloudCatalogStore'
-import { intentPickerModels, intentRequiredInputs, intentRoles, isStudioModel, resolveIntentPick } from '../../../lib/render/create-studio'
+import { createRunModel, intentPickerModels, intentRequiredInputs, isStudioModel } from '../../../lib/render/create-studio'
 import { STUDIO_MODELS } from '../../../lib/render/studio-contract'
 import { effectiveVideoDurations, snapToVideoDuration } from '../../../lib/render/video-duration'
 import { mediaSeconds, useStudioPrice } from './useStudioPrice'
 import { getJob } from '../../../api/cloud/jobs'
-import { resolveCharacterModel } from '../../../hooks/useCloudCreate'
 import { INTENT_MAP } from './intents'
 import { subscribeInstallRuns, getInstallRun } from '../../../lib/model-install-runs'
 import { useWorkflowStore, shouldShowManagerNotice } from '../../../stores/workflowStore'
@@ -123,20 +122,14 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
   // bei seiner festen -lora-Familie (resolveCharacterModel) und ruehrt Studio
   // nie an. Auf der lokalen Spur ist `studioPick` immer undefined, und
   // ausschliesslich das haelt useStudioPrice unten von jedem Netzabruf ab.
-  const roleIntent = backend === 'cloud' && !characterUse && intentRoles(intent).length > 0
-  const rolePick = roleIntent ? resolveIntentPick(intent, cloudOpModel) : undefined
-  const pickedModel = characterUse
-    ? (resolveCharacterModel(selectedCharacter?.family ?? '', cloudOpModel) ?? '')
-    : roleIntent
-      ? (rolePick ?? '')
-      : special
-        ? cloudOpModel
-        : (intentKind === 'video' ? cloudVideoModel : cloudImageModel) ||
-          defaultCloudModel(intentKind)?.id || ''
-  // Dieselbe Aufloesung wie Waehler, Zaehler und Start (modelForOp): eine Wahl,
-  // die die Unterkategorie nicht fahren kann, rechnet hier als das Modell, das
-  // wirklich laeuft. Rollen-Absichten behalten ihre Wahl.
-  const runModel = roleIntent ? (rolePick ?? '') : modelForOp(intentKind, intentOp, pickedModel)
+  // Dieselbe Aufloesung wie Zaehler, Speicher und Start (createRunModel): eine
+  // Wahl, die die Unterkategorie nicht fahren kann, rechnet hier als das Modell,
+  // das wirklich laeuft. Rollen-Absichten behalten ihre Wahl.
+  const runModel = createRunModel(
+    intent,
+    { image: cloudImageModel, video: cloudVideoModel, op: cloudOpModel },
+    characterUse ? selectedCharacter?.family ?? '' : undefined,
+  )
   // A Studio pick runs on its own schema-driven endpoint (studioBaseCredits /
   // studioQuote), not on the classic per-kind picker's kind.
   const studioPick = backend === 'cloud' && !characterUse && isStudioModel(runModel) ? runModel : undefined
@@ -222,7 +215,7 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
       !(studioPick && studioPrice?.error) &&
       meterState(
         quota,
-        imageCount * (studioPick ? (studioPrice?.credits ?? costFallback) : runCredits(intentKind, intentOp, pickedModel, runSeconds, costFallback, targetResolution)),
+        imageCount * (studioPick ? (studioPrice?.credits ?? costFallback) : runCredits(intentKind, intentOp, runModel, runSeconds, costFallback, targetResolution)),
         runKind,
         intentOp,
       ).kind === 'ok')

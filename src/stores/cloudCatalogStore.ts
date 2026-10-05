@@ -110,6 +110,36 @@ export function loraGenModels(): CloudModel[] {
   return useCloudCatalogStore.getState().models.filter((m) => m.lora === true)
 }
 
+// Which generation models accept which trained-LoRA family. Ported from
+// uselu main 5be5dec3 (apps/web/lib/render/cloud-models.ts,
+// CHARACTER_MODEL_FAMILY): the picker (ModelChip), the meter (CreditsMeter)
+// and the submit path (useCloudCreate) all resolve through the SAME table, so
+// the UI cannot show Flux while quietly running Z-Image. `qwen-image-lora` is
+// in the desktop seed (cloud-models.ts); flux/z-image keep their two endpoints
+// each (a fast + a slower/quality one).
+export const CHARACTER_MODEL_FAMILY: Readonly<Record<string, string>> = {
+  'flux-schnell-lora': 'flux',
+  'flux-dev-lora-ultra-fast': 'flux',
+  'z-image-turbo-lora': 'z-image',
+  'z-image-base-lora': 'z-image',
+  'qwen-image-lora': 'qwen-image',
+  'ltx-2': 'ltx-2',
+  'ltx-2.3': 'ltx-2',
+}
+
+/** Generation models that accept this trained-LoRA family's weights. */
+export function characterGenerationModels(family: string): CloudModel[] {
+  return loraGenModels().filter((m) => CHARACTER_MODEL_FAMILY[m.id] === family)
+}
+
+/** The model a character run will really use: the stored pick if it still
+ *  fits the trained family, else the family's first compatible model, else
+ *  null (no compatible generation endpoint exists yet for this family). */
+export function resolveCharacterModel(family: string, pickedId: string): string | null {
+  const list = characterGenerationModels(family)
+  return list.some((m) => m.id === pickedId) ? pickedId : (list[0]?.id ?? null)
+}
+
 /** Das klassische Standardmodell (ohne Studio-Eintraege) fuer Wege, die nur den
  *  klassischen Katalog fahren. First classic model of the kind; kinds whose
  *  models are ALL op-specialized (audio, every entry carries `ops`, in the live

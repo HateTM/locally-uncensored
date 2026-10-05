@@ -26,7 +26,6 @@ vi.mock('../../../../api/backend', async (importOriginal) => ({
   openExternal: vi.fn(),
 }))
 vi.mock('../../../../hooks/useCloudCreate', () => ({
-  resolveCharacterModel: () => undefined,
   takeCloudRunStop: () => null,
   dataUrlToBlob: (url: string) => new Blob([url], { type: 'image/png' }),
 }))

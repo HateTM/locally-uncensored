@@ -32,7 +32,7 @@ import {
   resolveOpPick,
   cloudModelById,
   cloudMediaLive,
-  loraGenModels,
+  resolveCharacterModel,
 } from '../stores/cloudCatalogStore'
 import { checkPromptSafety, blockMessageFor, type SafetyVerdict } from '../lib/render/safety'
 import { contentPolicySnapshot, loadContentPolicy } from './useContentPolicy'
@@ -65,38 +65,6 @@ function clientSafety(text: string): SafetyVerdict {
   const policy = contentPolicySnapshot()
   if (!policy) void loadContentPolicy() // for the next run
   return checkPromptSafety(text, { tier: 'cloud', policy: policy ?? 'off' })
-}
-
-// Which generation models accept which trained-LoRA family. Ported from
-// uselu main 5be5dec3 (apps/web/lib/render/cloud-models.ts,
-// CHARACTER_MODEL_FAMILY): the picker (ModelChip), the meter (CreditsMeter)
-// and this submit path all resolve through the SAME table now, so the UI
-// cannot show Flux while quietly running Z-Image. Replaces the old fixed
-// single-entry default (CHARACTER_GEN_DEFAULT) that only ever offered ONE
-// endpoint per family and silently ignored the catalog. `qwen-image-lora` is
-// already in the desktop seed (cloud-models.ts); flux/z-image keep their two
-// endpoints each (a fast + a slower/quality one).
-export const CHARACTER_MODEL_FAMILY: Readonly<Record<string, string>> = {
-  'flux-schnell-lora': 'flux',
-  'flux-dev-lora-ultra-fast': 'flux',
-  'z-image-turbo-lora': 'z-image',
-  'z-image-base-lora': 'z-image',
-  'qwen-image-lora': 'qwen-image',
-  'ltx-2': 'ltx-2',
-  'ltx-2.3': 'ltx-2',
-}
-
-/** Generation models that accept this trained-LoRA family's weights. */
-export function characterGenerationModels(family: string) {
-  return loraGenModels().filter((m) => CHARACTER_MODEL_FAMILY[m.id] === family)
-}
-
-/** The model a character run will really use: the stored pick if it still
- *  fits the trained family, else the family's first compatible model, else
- *  null (no compatible generation endpoint exists yet for this family). */
-export function resolveCharacterModel(family: string, pickedId: string): string | null {
-  const list = characterGenerationModels(family)
-  return list.some((m) => m.id === pickedId) ? pickedId : (list[0]?.id ?? null)
 }
 
 // Gallery label for ops that never read the composer prompt. Without this

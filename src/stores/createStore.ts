@@ -43,6 +43,7 @@ import { releaseVideoBlobUrl } from '../api/mlx-video'
 import { isMlxImageHost } from '../api/mlx-image'
 import { STUDIO_MODELS } from '../lib/render/studio-contract'
 import { cloudModelsFor } from './cloudCatalogStore'
+import { createRunModel } from '../lib/render/create-studio'
 // ModelType includes: flux, flux2, zimage, sdxl, sd15, wan, hunyuan, unknown
 
 export type ProgressPhase = 'idle' | 'queued' | 'loading-model' | 'loading-clip' | 'loading-vae' | 'sampling' | 'decoding' | 'complete'
@@ -117,6 +118,26 @@ export function deriveIntent(s: {
   if (s.cloudOp) return s.cloudOp
   if (s.mode === 'video') return s.videoSubMode === 'i2v' ? 'animate' : 'video'
   return s.imageSubMode === 'img2img' ? 'edit' : 'image'
+}
+
+/** The model the tab in this state would run in the cloud. */
+function runModelOf(s: Parameters<typeof deriveIntent>[0] & Pick<CreateState,
+  'cloudImageModel' | 'cloudVideoModel' | 'cloudOpModel' | 'characterTab' | 'selectedCharacter'>): string {
+  const intent = deriveIntent(s)
+  return createRunModel(
+    intent,
+    { image: s.cloudImageModel, video: s.cloudVideoModel, op: s.cloudOpModel },
+    intent === 'character' && s.characterTab === 'use' ? s.selectedCharacter?.family ?? '' : undefined,
+  )
+}
+
+/** Studio options belong to the model they were chosen for. A change that moves
+ *  the run onto another model (a pick, a tab change, a backend flip that closes
+ *  the tab, a result that sets the picker) drops them: a longer clip or a higher
+ *  resolution must never travel along unseen and be booked on a model the
+ *  customer did not set it for. */
+function withOwnStudioOptions(s: CreateState, patch: Partial<CreateState>): Partial<CreateState> {
+  return runModelOf(s) === runModelOf({ ...s, ...patch }) ? patch : { ...patch, cloudStudioOptions: {} }
 }
 
 /**
@@ -872,13 +893,12 @@ export const useCreateStore = create<CreateState>()(
 
       // ── redesign additions ──
       intent: () => deriveIntent(get()),
-      // Eine andere Unterkategorie wirft die Studio-Optionen weg (wie ein
-      // Modellwechsel): Image, Edit, Video und Animate fuehren seit 02.10.2026
-      // Studio-Modelle, und ein Feld wie `resolution` hat je Endpunkt eine andere
-      // Auswahl. Ein uebriggebliebener Wert wuerde das Absenden abweisen.
+      // Eine andere Unterkategorie faehrt ein anderes Modell und wirft damit die
+      // Studio-Optionen weg (withOwnStudioOptions): ein Feld wie `resolution` hat
+      // je Endpunkt eine andere Auswahl.
       setIntent: (intent) => {
         const changed = get().intent() !== intent
-        set((s) => {
+        set((s) => withOwnStudioOptions(s, ((): Partial<CreateState> => {
         // Clear intent-incompatible inputs: intents without a source drop both;
         // removebg/animate keep the source but drop a stale mask. Video/animate
         // mirror setMode's reset so image resolution never leaks into video.
@@ -950,8 +970,7 @@ export const useCreateStore = create<CreateState>()(
               width: d.width, height: d.height, ...(d.frames ? { frames: d.frames } : {}), ...(d.fps ? { fps: d.fps } : {}) }
           }
         }
-      })
-        if (changed) set({ cloudStudioOptions: {} })
+        })()))
         // The list of further source images stays only where it can run.
         if (get().batchSources.length && (!get().source || !BATCH_INTENTS.has(intent))) get().setBatchSources([])
       },
@@ -986,7 +1005,7 @@ export const useCreateStore = create<CreateState>()(
       setClipSkip: (n) => set({ clipSkip: Math.max(0, Math.min(12, Math.floor(n))) }),
       setGrowMaskBy: (n) => set({ growMaskBy: Math.max(0, Math.min(64, Math.floor(n))) }),
       setTargetResolution: (targetResolution) => set({ targetResolution }),
-      setCharacterTab: (characterTab) => set({ characterTab }),
+      setCharacterTab: (characterTab) => set((s) => withOwnStudioOptions(s, { characterTab })),
       // Cap at the backend's photo limit (lib/train-image-cap) and de-dupe by filename so
       // a re-drop of the same files doesn't double the set. Both of those
       // THROW REFS AWAY — the caller minted a blob: URL for every file it
@@ -1015,7 +1034,7 @@ export const useCreateStore = create<CreateState>()(
       setTriggerWord: (w) => set({ triggerWord: w.replace(/\s+/g, '').slice(0, 30) }),
       // Same clamp as the Rust command so the UI can never book a rejected run.
       setTrainSteps: (n) => set({ trainSteps: Math.max(100, Math.min(4000, Math.floor(n))) }),
-      setSelectedCharacter: (selectedCharacter) => set({ selectedCharacter }),
+      setSelectedCharacter: (selectedCharacter) => set((s) => withOwnStudioOptions(s, { selectedCharacter })),
       // Upload and voice-pick are mutually exclusive speech sources.
       setAudioInput: (audioInput) => {
         releaseReplacedMediaRef(get().audioInput, audioInput)
@@ -1027,10 +1046,7 @@ export const useCreateStore = create<CreateState>()(
         set({ videoInput })
       },
       bumpCharactersVersion: () => set((s) => ({ charactersVersion: s.charactersVersion + 1 })),
-      // Ein Modellwechsel wirft die Studio-Optionen weg: die Felder des einen
-      // Endpunkts sind beim naechsten nicht unbedingt erlaubt, und ein
-      // uebriggebliebener Wert wuerde das Absenden abweisen.
-      setCloudOpModel: (cloudOpModel) => set({ cloudOpModel, cloudStudioOptions: {} }),
+      setCloudOpModel: (cloudOpModel) => set((s) => withOwnStudioOptions(s, { cloudOpModel })),
       setCloudStudioOptions: (cloudStudioOptions) => set({ cloudStudioOptions }),
       setCloudStudioCredits: (cloudStudioCredits) => set({ cloudStudioCredits }),
       setCloudImageCount: (count) => set({ cloudImageCount: clampImageCount(count) }),
@@ -1094,9 +1110,9 @@ export const useCreateStore = create<CreateState>()(
       // local I2V lane is back (buildDynamicWorkflow wires the family's
       // image-to-video node).
       setBackend: (backend) =>
-        set((s) => {
+        set((s) => withOwnStudioOptions(s, ((): Partial<CreateState> => {
           if (backend !== 'local') return { backend }
-          const patch: Record<string, unknown> = { backend }
+          const patch: Partial<CreateState> = { backend }
           if (s.utilityOp) Object.assign(patch, { utilityOp: null, mask: null, error: null })
           // music/lipsync/extend/motion (2.5.8) and character (2.6.0, local
           // musubi trainer) run locally, so a backend flip keeps them
@@ -1127,12 +1143,9 @@ export const useCreateStore = create<CreateState>()(
           // any other tab change (setIntent).
           if (deriveIntent({ ...s, ...patch }) !== deriveIntent(s)) Object.assign(patch, { cloudImageCount: 1 })
           return patch
-        }),
-      // Wie setCloudOpModel: ein anderer Endpunkt, andere erlaubte Felder. Dieselbe
-      // Wahl noch einmal zu setzen (der Waehler tut das nach jedem Lauf) behaelt
-      // die Optionen.
-      setCloudImageModel: (cloudImageModel) => set((s) => s.cloudImageModel === cloudImageModel ? {} : { cloudImageModel, cloudStudioOptions: {} }),
-      setCloudVideoModel: (cloudVideoModel) => set((s) => s.cloudVideoModel === cloudVideoModel ? {} : { cloudVideoModel, cloudStudioOptions: {} }),
+        })())),
+      setCloudImageModel: (cloudImageModel) => set((s) => withOwnStudioOptions(s, { cloudImageModel })),
+      setCloudVideoModel: (cloudVideoModel) => set((s) => withOwnStudioOptions(s, { cloudVideoModel })),
       setCaps: (caps) => set({ caps }),
       resetParamsToModelDefaults: () => {
         const s = get()
@@ -1189,8 +1202,8 @@ export const useCreateStore = create<CreateState>()(
         const gallery = next.slice(0, GALLERY_CAP)
         if (s.backend !== 'cloud') return { gallery }
         const id = STUDIO_MODELS[item.model]?.sourceModel ?? item.model
-        if (cloudModelsFor('image').some((m) => m.id === id)) return { gallery, cloudImageModel: id }
-        if (cloudModelsFor('video').some((m) => m.id === id)) return { gallery, cloudVideoModel: id }
+        if (cloudModelsFor('image').some((m) => m.id === id)) return withOwnStudioOptions(s, { gallery, cloudImageModel: id })
+        if (cloudModelsFor('video').some((m) => m.id === id)) return withOwnStudioOptions(s, { gallery, cloudVideoModel: id })
         return { gallery }
       }),
       updateGalleryItem: (id, patch) =>
@@ -1404,7 +1417,7 @@ useCreateStore.subscribe((s, prev) => {
   const slot = opSlot(s)
   if (slot !== opSlot(prev)) {
     const want = s.cloudOpPicks[slot] ?? ''
-    if (s.cloudOpModel !== want) useCreateStore.setState({ cloudOpModel: want })
+    if (s.cloudOpModel !== want) useCreateStore.setState(withOwnStudioOptions(s, { cloudOpModel: want }))
   } else if (s.cloudOpModel !== prev.cloudOpModel && s.cloudOpPicks[slot] !== s.cloudOpModel) {
     useCreateStore.setState({ cloudOpPicks: { ...s.cloudOpPicks, [slot]: s.cloudOpModel } })
   }

@@ -41,7 +41,6 @@ vi.mock('../../../../api/vram-handoff', () => ({
   },
 }))
 vi.mock('../../../../hooks/useCloudCreate', () => ({
-  resolveCharacterModel: () => undefined,
   takeCloudRunStop: () => null,
   dataUrlToBlob: (url: string) => new Blob([url], { type: 'image/png' }),
 }))

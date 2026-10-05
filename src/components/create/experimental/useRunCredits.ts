@@ -1,10 +1,9 @@
 import { useCreateStore } from '../../../stores/createStore'
 import { useCreateExp } from './CreateContext'
 import { intentToJob, type RenderKind, type RenderOp } from '../../../lib/render/cloud-jobs'
-import { defaultCloudModel, modelForOp, resolveOpPick, runCredits } from '../../../stores/cloudCatalogStore'
-import { createStudioCost, intentRoles, isStudioModel, resolveIntentPick, startImageCount } from '../../../lib/render/create-studio'
+import { runCredits } from '../../../stores/cloudCatalogStore'
+import { createRunModel, createStudioCost, isStudioModel, startImageCount } from '../../../lib/render/create-studio'
 import { STUDIO_MODELS } from '../../../lib/render/studio-contract'
-import { resolveCharacterModel } from '../../../hooks/useCloudCreate'
 import { runImageCount } from '../../../lib/render/image-count'
 
 /** What the cloud run on screen costs. One reader for the meter chip and for
@@ -60,22 +59,14 @@ export function useRunCredits(): RunCredits | null {
     kind = 'image'
     op = 'generate'
   }
-  const special =
-    op === 'lipsync' || op === 'extend' || op === 'motion' ||
-    op === 'music' || op === 'tts' || op === 'lora-train'
-  const roleIntent = !characterUse && intentRoles(intent).length > 0
-  const rolePick = roleIntent ? resolveIntentPick(intent, cloudOpModel) : undefined
-  const picked = characterUse
-    ? (resolveCharacterModel(selectedCharacter?.family ?? '', cloudOpModel) ?? '')
-    : roleIntent
-      ? (rolePick ?? '')
-      : special
-        ? resolveOpPick(op, cloudOpModel)
-        : (kind === 'video' ? cloudVideoModel : cloudImageModel) || defaultCloudModel(kind)?.id || ''
-  // Dieselbe Aufloesung wie Composer und Start (modelForOp): eine Wahl, die die
-  // Unterkategorie nicht fahren kann, rechnet hier als das Modell, das wirklich
-  // laeuft. Rollen-Absichten und der Character-Weg behalten ihre Wahl.
-  const model = roleIntent || characterUse ? picked : modelForOp(kind, op, picked)
+  // Dieselbe Aufloesung wie Composer, Speicher und Start (createRunModel): eine
+  // Wahl, die die Unterkategorie nicht fahren kann, rechnet hier als das Modell,
+  // das wirklich laeuft.
+  const model = createRunModel(
+    intent,
+    { image: cloudImageModel, video: cloudVideoModel, op: cloudOpModel },
+    characterUse ? selectedCharacter?.family ?? '' : undefined,
+  )
   // Ein Studio-Modell rechnet nach seinem eigenen Schema, auch aus Image, Edit,
   // Video und Animate (seit 02.10.2026).
   const studioPick = !characterUse && isStudioModel(model) ? model : undefined
@@ -94,7 +85,7 @@ export function useRunCredits(): RunCredits | null {
   const extraPhotos = intent === 'edit' || intent === 'animate' ? references.length : 0
   const unitCost = studioPick
     ? cloudStudioCredits ?? createStudioCost(studioPick, cloudStudioOptions, Array.from(prompt).length, undefined, startImageCount(studioPick, extraPhotos) ?? 1)
-    : runCredits(kind, op, picked, seconds, quota.costs[kind === 'audio' ? 'image' : kind], targetResolution)
+    : runCredits(kind, op, model, seconds, quota.costs[kind === 'audio' ? 'image' : kind], targetResolution)
   // Mehrere Bilder: jedes ist ein eigener Auftrag zum vollen Preis, die Summe
   // ist, was der Lauf bindet. Der Zaehler "noch N Bilder" rechnet je Bild.
   const imageCount = runImageCount(intent, cloudImageCount, characterUse)

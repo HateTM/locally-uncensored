@@ -2,12 +2,12 @@ import { useCreateStore } from '../../../stores/createStore'
 import {
   useCloudCatalogStore, cloudModelById, defaultCloudModel, opPickerModels, modelCostHint, shortCount,
   editCapableModels, animatePickerModels, videoPickerModels, studioOnlyImageModels,
+  resolveCharacterModel, characterGenerationModels,
 } from '../../../stores/cloudCatalogStore'
 import { DEFAULT_MODEL_IDS } from '../../../lib/render/cloud-models'
 import { groupForPicker, sortByTier, tierGroup, tierMarks } from '../../../lib/render/model-tier'
 import { localTier } from '../../../lib/render/local-model-tier'
 import { intentPickerModels, intentRoles, createStudioCost, isStudioModel } from '../../../lib/render/create-studio'
-import { resolveCharacterModel, characterGenerationModels } from '../../../hooks/useCloudCreate'
 import type { RenderOp } from '../../../lib/render/cloud-jobs'
 import type { PresetModel } from '../../../lib/render/preset-models'
 import { useSettingsStore } from '../../../stores/settingsStore'

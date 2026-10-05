@@ -29,7 +29,6 @@ vi.mock('../loadImage', () => ({
 vi.mock('../../../../api/mlx-image', () => ({ isMlxImageHost: () => ctx.mlx }))
 vi.mock('../../../../api/comfyui', () => ({ classifyModel: () => 'sdxl', isI2VModel: () => false, isT2VCapable: () => true }))
 vi.mock('../../../../api/backend', () => ({ openExternal: vi.fn() }))
-vi.mock('../../../../hooks/useCloudCreate', () => ({ resolveCharacterModel: () => undefined }))
 vi.mock('../../../../api/cloud/studio', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../../api/cloud/studio')>()),
   studioQuote: ctx.quote,
