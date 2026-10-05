@@ -146,7 +146,6 @@ function CloudModelChip() {
     : intent === 'music' ? 'music'
     : intent === 'extend' ? 'extend'
     : intent === 'motion' ? 'motion'
-    : intent === 'upscale' ? 'upscale'
     : intent === 'edit' ? 'edit'
     : intent === 'animate' ? 'animate'
     : 'generate'

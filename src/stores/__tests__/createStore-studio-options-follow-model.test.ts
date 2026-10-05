@@ -11,7 +11,7 @@ vi.mock('../../api/mlx-image', () => ({ isMlxImageHost: () => host.mlx }))
 
 import { useCreateStore, type GalleryItem } from '../createStore'
 import { useCloudCatalogStore } from '../cloudCatalogStore'
-import { createRunModel, studioPickFor } from '../../lib/render/create-studio'
+import { createRunModel } from '../../lib/render/create-studio'
 import { neuerServer } from '../../lib/render/__tests__/fixtures/test-catalogs'
 
 const st = () => useCreateStore.getState()
@@ -44,35 +44,35 @@ describe('Studio-Optionen beim Modellwechsel', () => {
     expect(options()).toEqual({})
   })
 
-  it('Bild: 4K auf FLUX 3 gilt nach dem Wechsel des Bildmodells nicht weiter', () => {
-    st().setCloudImageModel('flux-3')
-    st().setCloudStudioOptions({ resolution: '4k' })
+  it('Bild: 2K auf Qwen Image 2.1 gilt nach dem Wechsel des Bildmodells nicht weiter', () => {
     st().setCloudImageModel('qwen-image-2.1')
+    st().setCloudStudioOptions({ resolution: '2k' })
+    st().setCloudImageModel('z-image')
     expect(options()).toEqual({})
   })
 
   it('dasselbe Modell noch einmal gewaehlt behaelt die Einstellungen', () => {
-    st().setCloudImageModel('flux-3')
-    st().setCloudStudioOptions({ resolution: '4k' })
-    st().setCloudImageModel('flux-3')
-    expect(options()).toEqual({ resolution: '4k' })
+    st().setCloudImageModel('qwen-image-2.1')
+    st().setCloudStudioOptions({ resolution: '2k' })
+    st().setCloudImageModel('qwen-image-2.1')
+    expect(options()).toEqual({ resolution: '2k' })
   })
 
   it('der Wechsel der Unterkategorie faehrt ein anderes Modell und nimmt nichts mit', () => {
-    st().setCloudImageModel('flux-3')
-    st().setCloudStudioOptions({ resolution: '4k' })
-    const vorher = createRunModel('image', { image: 'flux-3', video: '', op: '' })
-    const nachher = createRunModel('edit', { image: 'flux-3', video: '', op: '' })
+    st().setCloudImageModel('qwen-image-2.1')
+    st().setCloudStudioOptions({ resolution: '2k' })
+    const vorher = createRunModel('image', { image: 'qwen-image-2.1', video: '', op: '' })
+    const nachher = createRunModel('edit', { image: 'qwen-image-2.1', video: '', op: '' })
     expect(nachher).not.toBe(vorher)
     st().setIntent('edit')
     expect(options()).toEqual({})
   })
 
   it('dieselbe Unterkategorie erneut gesetzt behaelt die Einstellungen', () => {
-    st().setCloudImageModel('flux-3')
-    st().setCloudStudioOptions({ resolution: '4k' })
+    st().setCloudImageModel('qwen-image-2.1')
+    st().setCloudStudioOptions({ resolution: '2k' })
     st().setIntent('image')
-    expect(options()).toEqual({ resolution: '4k' })
+    expect(options()).toEqual({ resolution: '2k' })
   })
 
   it('der Waehler der Spezialkategorien haelt dieselbe Regel', () => {
@@ -81,7 +81,7 @@ describe('Studio-Optionen beim Modellwechsel', () => {
     st().setCloudStudioOptions({ duration: 10 })
     st().setCloudOpModel('seedance-2.5-extend')
     expect(options()).toEqual({ duration: 10 })
-    st().setCloudOpModel('flux-3-extend')
+    st().setCloudOpModel('wan-3.0-extend')
     expect(options()).toEqual({})
   })
 
@@ -107,7 +107,7 @@ describe('Studio-Optionen beim Modellwechsel', () => {
 
   it('ein spaetes Ergebnis eines anderen Modells stellt den Waehler um und nimmt die Einstellungen nicht mit', () => {
     st().setIntent('video')
-    st().setCloudVideoModel('flux-3-t2v')
+    st().setCloudVideoModel('ltx-2.5-t2v')
     st().setCloudStudioOptions({ duration: 10 })
     st().addToGallery(item('ltx-2', 'video'))
     expect(st().cloudVideoModel).toBe('ltx-2')
@@ -116,11 +116,11 @@ describe('Studio-Optionen beim Modellwechsel', () => {
 
   it('ein lokales Ergebnis ruehrt weder den Waehler noch die Einstellungen an', () => {
     st().setIntent('video')
-    st().setCloudVideoModel('flux-3-t2v')
+    st().setCloudVideoModel('ltx-2.5-t2v')
     st().setCloudStudioOptions({ duration: 10 })
     useCreateStore.setState({ backend: 'local' })
     st().addToGallery(item('ltx-2', 'video'))
-    expect(st().cloudVideoModel).toBe('flux-3-t2v')
+    expect(st().cloudVideoModel).toBe('ltx-2.5-t2v')
     expect(options()).toEqual({ duration: 10 })
   })
 
@@ -128,21 +128,19 @@ describe('Studio-Optionen beim Modellwechsel', () => {
   // (cloudOpPicks), und der Speicher stellt cloudOpModel beim Wechsel selbst um.
   it('die gemerkte Wahl einer Unterkategorie kommt ohne fremde Einstellungen zurueck', () => {
     st().setIntent('extend')
-    st().setCloudOpModel('flux-3-extend')
+    st().setCloudOpModel('wan-3.0-extend')
     st().setIntent('motion')
     st().setCloudStudioOptions({ duration: 10 })
     st().setIntent('extend')
-    expect(st().cloudOpModel).toBe('flux-3-extend')
+    expect(st().cloudOpModel).toBe('wan-3.0-extend')
     expect(options()).toEqual({})
   })
 
   // Nur im Desktop: der Wechsel auf lokal schliesst die Unterkategorien, die es
   // nur in der Cloud gibt. Zurueck in der Cloud steht eine andere da.
-  it('der Wechsel auf lokal und zurueck traegt die Einstellungen des Upscalers nicht nach Edit', () => {
+  it('der Wechsel auf lokal und zurueck traegt Einstellungen aus Enhance Image nicht nach Edit', () => {
     st().setIntent('upscale')
-    st().setCloudOpModel('seedvr2-image')
-    expect(studioPickFor('upscale', st())).toBe('seedvr2-image')
-    st().setCloudStudioOptions({ target_resolution: '4k' })
+    st().setCloudStudioOptions({ target_resolution: '2k' })
     st().setBackend('local')
     st().setBackend('cloud')
     expect(st().intent()).toBe('edit')
@@ -150,11 +148,11 @@ describe('Studio-Optionen beim Modellwechsel', () => {
   })
 
   it('der Wechsel auf lokal und zurueck behaelt sie, wo die Unterkategorie bleibt', () => {
-    st().setCloudImageModel('flux-3')
-    st().setCloudStudioOptions({ resolution: '4k' })
+    st().setCloudImageModel('qwen-image-2.1')
+    st().setCloudStudioOptions({ resolution: '2k' })
     st().setBackend('local')
     st().setBackend('cloud')
     expect(st().intent()).toBe('image')
-    expect(options()).toEqual({ resolution: '4k' })
+    expect(options()).toEqual({ resolution: '2k' })
   })
 })

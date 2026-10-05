@@ -15,7 +15,7 @@ import {
   modelForOp,
   runCredits,
 } from '../../../stores/cloudCatalogStore'
-import { createRunModel, intentPickerModels, intentRequiredInputs, isStudioModel } from '../../../lib/render/create-studio'
+import { createRunModel, intentRequiredInputs, isStudioModel } from '../../../lib/render/create-studio'
 import { STUDIO_MODELS } from '../../../lib/render/studio-contract'
 import { effectiveVideoDurations, snapToVideoDuration } from '../../../lib/render/video-duration'
 import { mediaSeconds, useStudioPrice } from './useStudioPrice'
@@ -117,7 +117,7 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
   // models.
   // Studio-Spur (Portplan Abschnitt 3d): ein DRITTER Zweig, strikt hinter
   // `backend === 'cloud'`. Die Rollen-Absichten (lipsync/music/extend/motion/
-  // upscale, intentRoles(intent)) fahren ein Studio-Modell aus ihrer Rolle;
+  // video_upscale, intentRoles(intent)) fahren ein Studio-Modell aus ihrer Rolle;
   // seit 02.10.2026 koennen auch Image, Edit, Video und Animate eines fahren
   // (Web-Paritaet), die Wahl kommt dort durch modelForOp. character-use bleibt
   // bei seiner festen -lora-Familie (resolveCharacterModel) und ruehrt Studio
@@ -202,7 +202,6 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
   useEffect(() => {
     setCloudStudioCredits(studioPrice?.credits ?? null)
   }, [studioPrice?.credits, setCloudStudioCredits])
-  const showUpscalePicker = backend === 'cloud' && meta.id === 'upscale' && intentPickerModels(intent).length > 1
   const costFallback = quota?.costs[runKind === 'audio' ? 'image' : runKind] ?? 0
   // The exact rule the meter chip renders, so the button can never invite a run
   // the chip is already refusing. Credits alone were not enough: a user out of
@@ -405,7 +404,7 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
             {studioPick && studioPrice?.error && (
               <span className="t-control text-red-300">{studioPrice.error}</span>
             )}
-            {meta.id === 'upscale' && !studioPick && (
+            {meta.id === 'upscale' && (
               <Tooltip content="Target resolution for the upscale pass.">
                 <div>
                   <Segmented
@@ -436,13 +435,13 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
                 </div>
               </Tooltip>
             )}
-            {/* Enhance Image fuehrt ein Waehler nur, wenn es etwas zu waehlen
-                gibt: der feste Standard allein ist kein Modell. */}
-            {(!isUtility || showUpscalePicker) && <ModelChip />}
-            {(!isUtility || studioPick) && (
-              <Tooltip content="All advanced settings. Sampler, seed, LoRA, VAE and more.">
-                <Button variant="ghost" size="sm" icon={SlidersHorizontal} iconOnly onClick={onOpenAdvanced} title="Advanced settings" />
-              </Tooltip>
+            {!isUtility && (
+              <>
+                <ModelChip />
+                <Tooltip content="All advanced settings. Sampler, seed, LoRA, VAE and more.">
+                  <Button variant="ghost" size="sm" icon={SlidersHorizontal} iconOnly onClick={onOpenAdvanced} title="Advanced settings" />
+                </Tooltip>
+              </>
             )}
             {isGenerating ? (
               <Button variant="danger" size="md" icon={X} onClick={guardedCancel}>Cancel</Button>

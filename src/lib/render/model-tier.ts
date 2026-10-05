@@ -70,7 +70,7 @@ export const OTHER_GROUP = 'Other'
 
 /**
  * Die Familie eines Medienmodells, aus seinem Namen gelesen: das erste Wort
- * ohne Versionsanhang. "FLUX 3", "Flux Schnell (fast)" und "FLUX.2 Klein" sind
+ * ohne Versionsanhang. "FLUX 3 Upscale", "Flux Schnell (fast)" und "Flux 2 Dev" sind
  * Flux, "Qwen3 TTS" und "Qwen Image" sind Qwen, "LTX-2" und "LTX 2.5" sind LTX.
  * Verglichen wird ohne Gross- und Kleinschreibung.
  */

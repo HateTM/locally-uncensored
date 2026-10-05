@@ -43,7 +43,7 @@ describe('musicHowtoLines', () => {
     // Locally the box is always there, so mentioning it is fair.
     expect(local).toContain('lyrics box')
     expect(cloud).toContain('lyrics box')
-    for (const model of ['ace-step', 'eleven-music', 'mureka-song', 'yue2', 'minimax-music']) {
+    for (const model of ['ace-step', 'eleven-music', 'mureka-song', 'minimax-music']) {
       expect(cloudLines(model).join('\n').toLowerCase(), model).not.toContain('lyrics box')
     }
   })

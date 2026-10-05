@@ -103,7 +103,7 @@ describe('Regler Images', () => {
   // Fund F1 (05.10.2026): bei einem Studio-Modell zeigte die Klappe nur dessen
   // eigene Felder, der Regler fehlte, die Zahl galt aber weiter.
   it('ein Studio-Modell in Bearbeiten und in Bild hat den Regler in der Klappe', () => {
-    for (const [intent, model, studio] of [['edit', 'flux-3-edit', true], ['image', 'flux-3', true], ['image', 'flux-schnell', false]] as const) {
+    for (const [intent, model, studio] of [['edit', 'qwen-image-2.1-edit', true], ['image', 'qwen-image-2.1', true], ['image', 'flux-schnell', false]] as const) {
       const s = useCreateStore.getState()
       s.setIntent(intent); s.setCloudImageModel(model)
       useCreateStore.setState({ source: BILD })
@@ -178,7 +178,7 @@ describe('Zaehler und Preis mit Anzahl', () => {
   it('ein Studio-Bild (5.000 je Bild) geht mal Anzahl ein', () => {
     ctx.quota.remaining.credits = 15000
     const s = useCreateStore.getState()
-    s.setIntent('edit'); s.setCloudImageModel('flux-3-edit'); s.setCloudImageCount(4)
+    s.setIntent('edit'); s.setCloudImageModel('qwen-image-2.1-edit'); s.setCloudImageCount(4)
     useCreateStore.setState({ source: BILD, cloudStudioCredits: 5000 })
     render(<CreditsMeter />)
     expect(screen.getByText(/Needs 20000 credits \(15000 left\)/)).toBeTruthy()
@@ -203,13 +203,13 @@ describe('Zaehler und Preis mit Anzahl', () => {
 
   it('der Vorab-Preis fragt mit der echten Bildzahl, hoechstens bis zur Grenze des Modells', async () => {
     ctx.quote.mockResolvedValue({ credits: 5000 })
-    const a = renderHook(() => useStudioPrice('flux-3-edit', {}, 'x', undefined, 3))
+    const a = renderHook(() => useStudioPrice('qwen-image-2.1-edit', {}, 'x', undefined, 3))
     await waitFor(() => expect(a.result.current?.live).toBe(true), { timeout: 3000 })
     expect(ctx.quote.mock.calls[0][3]).toBe(4)
     ctx.quote.mockClear()
-    const b = renderHook(() => useStudioPrice('hunyuan-image-3-edit', {}, 'x', undefined, 4))
+    const b = renderHook(() => useStudioPrice('qwen-image-3-edit', {}, 'x', undefined, 4))
     await waitFor(() => expect(b.result.current?.live).toBe(true), { timeout: 3000 })
-    expect(ctx.quote.mock.calls[0][3]).toBe(2)
+    expect(ctx.quote.mock.calls[0][3]).toBe(3)
   })
 })
 
@@ -223,20 +223,14 @@ describe('Referenzleiste', () => {
   }
 
   it('zeigt bei einem Mehrbild-Editor den Hinweis mit der Grenze des Modells', () => {
-    edit('flux-3-edit')
+    edit('qwen-image-2.1-edit')
     render(<ReferenceStrip />)
     expect(screen.getByTestId('reference-strip')).toBeTruthy()
     expect(screen.getByText(/Add up to 5 photos of your character/)).toBeTruthy()
   })
 
-  it('die Grenze folgt dem Modell: Hunyuan nimmt zwei, Skyreels drei', () => {
-    edit('hunyuan-image-3-edit')
-    const a = render(<ReferenceStrip />)
-    expect(screen.getByText(/Add up to 2 photos/)).toBeTruthy()
-    a.unmount()
-    const s = useCreateStore.getState()
-    s.setIntent('animate'); s.setCloudVideoModel('skyreels-v4-ref')
-    useCreateStore.setState({ source: BILD })
+  it('die Grenze folgt dem Modell: Qwen Image 3.0 nimmt drei', () => {
+    edit('qwen-image-3-edit')
     render(<ReferenceStrip />)
     expect(screen.getByText(/Add up to 3 photos/)).toBeTruthy()
   })
@@ -250,7 +244,7 @@ describe('Referenzleiste', () => {
   })
 
   it('fehlt bei Modellen mit einem Bildfeld und bei anderen Unterkategorien', () => {
-    edit('ideogram-4.5-edit')
+    edit('flux-dev')
     const a = render(<ReferenceStrip />)
     expect(screen.queryByTestId('reference-strip')).toBeNull()
     a.unmount()
@@ -260,7 +254,7 @@ describe('Referenzleiste', () => {
   })
 
   it('Fotos kommen per Auswahl hinein, werden nummeriert und lassen sich entfernen', async () => {
-    edit('flux-3-edit')
+    edit('qwen-image-2.1-edit')
     const { container } = render(<ReferenceStrip />)
     const input = container.querySelector('input[type=file]') as HTMLInputElement
     fireEvent.change(input, { target: { files: [new File(['x'], 'a.png', { type: 'image/png' }), new File(['x'], 'b.png', { type: 'image/png' })] } })
@@ -273,17 +267,17 @@ describe('Referenzleiste', () => {
   })
 
   it('nimmt nicht mehr Fotos an, als das Modell liest, und bietet dann keinen Plus-Knopf mehr', async () => {
-    edit('hunyuan-image-3-edit') // 2 Fotos, also 1 weiteres neben dem Standbild
+    edit('qwen-image-3-edit') // 3 Fotos, also 2 weitere neben dem Standbild
     const { container } = render(<ReferenceStrip />)
     const input = container.querySelector('input[type=file]') as HTMLInputElement
     fireEvent.change(input, { target: { files: ['a', 'b', 'c'].map((n) => new File(['x'], `${n}.png`, { type: 'image/png' })) } })
-    await waitFor(() => expect(useCreateStore.getState().references).toHaveLength(1))
-    expect(tiles()).toHaveLength(1)
+    await waitFor(() => expect(useCreateStore.getState().references).toHaveLength(2))
+    expect(tiles()).toHaveLength(2)
     expect(screen.queryByTitle('Add another photo of your character')).toBeNull()
   })
 
   it('eine Datei, die kein Bild ist, wird abgewiesen', async () => {
-    edit('flux-3-edit')
+    edit('qwen-image-2.1-edit')
     const { container } = render(<ReferenceStrip />)
     const input = container.querySelector('input[type=file]') as HTMLInputElement
     fireEvent.change(input, { target: { files: [new File(['x'], 'a.txt', { type: 'text/plain' })] } })
@@ -297,13 +291,13 @@ describe('Referenzleiste', () => {
   })
 
   it('ein Modellwechsel auf eines mit weniger Platz blendet nur aus, was nicht mehr passt', () => {
-    edit('flux-3-edit')
+    edit('qwen-image-2.1-edit')
     useCreateStore.setState({ references: [FOTO(1), FOTO(2), FOTO(3)] })
     const { rerender } = render(<ReferenceStrip />)
     expect(tiles()).toHaveLength(3)
-    useCreateStore.getState().setCloudImageModel('hunyuan-image-3-edit')
+    useCreateStore.getState().setCloudImageModel('qwen-image-3-edit')
     rerender(<ReferenceStrip />)
-    expect(tiles()).toHaveLength(1)
+    expect(tiles()).toHaveLength(2)
     expect(useCreateStore.getState().references).toHaveLength(3)
   })
 })

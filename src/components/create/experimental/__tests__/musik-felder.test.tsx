@@ -9,7 +9,7 @@
  * liest, und setzt genau das Feld, das der Lauf schickt und aus dem der Preis
  * rechnet.
  *
- * M1: bei Mureka Song und YuE2 ist das grosse Textfeld laut Schema der
+ * M1: bei Mureka Song ist das grosse Textfeld laut Schema der
  * Liedtext. Die Oberflaeche sagte "Describe the track" und behauptete, das
  * Modell schreibe den Text selbst. Beschriftung, Hinweis und das zweite
  * Textfeld kommen aus dem Schema des gewaehlten Modells.
@@ -90,8 +90,8 @@ describe('Laengen-Regler in Musik', () => {
     expect(studioPreviewCredits('eleven-music', options)).toBe(3 * studioPreviewCredits('eleven-music', {})!)
   })
 
-  it('MiniMax Music, Mureka Song und YuE2 kennen keine Laenge und zeigen keinen Regler', () => {
-    for (const model of ['minimax-music', 'mureka-song', 'yue2']) {
+  it('MiniMax Music und Mureka Song kennen keine Laenge und zeigen keinen Regler', () => {
+    for (const model of ['minimax-music', 'mureka-song']) {
       const { container, unmount } = musik(model)
       expect(screen.queryByText('Length'), model).toBeNull()
       expect(range(container), model).toBeNull()
@@ -145,22 +145,18 @@ describe('welcher Text wohin gehoert, je Modell aus dem Schema', () => {
       }
     }
     expect(musicText('mureka-song')).toEqual({ main: 'lyrics', second: { is: 'style', option: 'prompt' } })
-    expect(musicText('yue2')).toEqual({ main: 'lyrics', second: { is: 'style', option: 'style' } })
     expect(musicText('minimax-music')).toEqual({ main: 'style', second: { is: 'lyrics', option: 'lyrics' } })
     expect(musicText('eleven-music')).toEqual({ main: 'style', second: null })
     expect(musicText('ace-step-1.5')).toEqual({ main: 'style', second: { is: 'lyrics' } })
     expect(musicText('ace-step')).toEqual({ main: 'style', second: null })
   })
 
-  it('Mureka Song und YuE2: das Feld fragt nach dem Liedtext, nicht nach einer Beschreibung', () => {
-    for (const model of ['mureka-song', 'yue2']) {
-      const { unmount } = composer(model)
-      expect(screen.getByPlaceholderText(MUSIC_PLACEHOLDER.lyrics), model).toBeTruthy()
-      expect(screen.queryByPlaceholderText(MUSIC_PLACEHOLDER.style), model).toBeNull()
-      expect(screen.queryByText(/writes its own lyrics/), model).toBeNull()
-      expect(screen.getByRole('button', { name: 'Style' }), model).toBeTruthy()
-      unmount()
-    }
+  it('Mureka Song: das Feld fragt nach dem Liedtext, nicht nach einer Beschreibung', () => {
+    composer('mureka-song')
+    expect(screen.getByPlaceholderText(MUSIC_PLACEHOLDER.lyrics)).toBeTruthy()
+    expect(screen.queryByPlaceholderText(MUSIC_PLACEHOLDER.style)).toBeNull()
+    expect(screen.queryByText(/writes its own lyrics/)).toBeNull()
+    expect(screen.getByRole('button', { name: 'Style' })).toBeTruthy()
   })
 
   it('ein Modell, das den Stil liest, fragt weiter nach der Beschreibung', () => {
@@ -169,17 +165,6 @@ describe('welcher Text wohin gehoert, je Modell aus dem Schema', () => {
     expect(screen.getByPlaceholderText(MUSIC_PLACEHOLDER.style)).toBeTruthy()
     expect(screen.getByText('This model writes its own lyrics from the prompt.')).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Lyrics' })).toBeNull()
-  })
-
-  it('YuE2: das Stilfeld zeigt den Stil, der sonst still mitgeht, und schreibt in dessen Option', () => {
-    musik('yue2')
-    fireEvent.click(screen.getByRole('button', { name: 'Style' }))
-    const feld = screen.getByLabelText('Style') as HTMLTextAreaElement
-    expect(feld.value).toBe(STUDIO_MODELS.yue2.defaults.style)
-    fireEvent.change(feld, { target: { value: 'slow jazz, smoky female vocals' } })
-    const options = useCreateStore.getState().cloudStudioOptions
-    expect(options).toEqual({ style: 'slow jazz, smoky female vocals' })
-    expect(studioOptions('yue2', '[Verse]\nla la', options).style).toBe('slow jazz, smoky female vocals')
   })
 
   it('Mureka Song: der Stil geht in das Feld, das der Anbieter "prompt" nennt', () => {
@@ -227,7 +212,6 @@ describe('welcher Text wohin gehoert, je Modell aus dem Schema', () => {
 describe('Improve my prompt', () => {
   it('ein Liedtext-Feld bekommt keine Umschreibung, ein Stil-Feld schon', () => {
     expect(improveKindForRun('music', 'mureka-song')).toBeNull()
-    expect(improveKindForRun('music', 'yue2')).toBeNull()
     expect(improveKindForRun('music', 'eleven-music')).toBe('music')
     expect(improveKindForRun('music', 'ace-step-1.5')).toBe('music')
     expect(improveKindForRun('image', 'mureka-song')).toBe('image')

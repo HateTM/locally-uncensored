@@ -53,12 +53,11 @@ describe('mit dem Katalog des neuen Servers', () => {
     expect(modelForOp('video', 'generate', 'wan-2.2-720p')).toBe('wan-2.2-720p')
     expect(modelForOp('video', 'animate', 'wan-2.2-720p')).toBe('wan-2.2-720p')
     expect(modelForOp('video', 'animate', 'seedance-2.5')).toBe('seedance-2.5')
-    expect(modelForOp('image', 'generate', 'flux-3')).toBe('flux-3')
+    expect(modelForOp('image', 'generate', 'qwen-image-2.1')).toBe('qwen-image-2.1')
   })
 
   it('Bild-Upscale bleibt wie er war', () => {
     expect(modelForOp('image', 'upscale', 'flux-schnell')).toBe('flux-schnell')
-    expect(modelForOp('image', 'upscale', 'seedvr2-image')).toBe('seedvr2-image')
   })
 
   it('der klassische Standard bleibt ein klassisches Modell, ohne Studio-Eintrag', () => {
@@ -109,6 +108,6 @@ describe('mit dem Katalog des alten Servers (vor dem 02.10.2026)', () => {
   it('eine Wahl, die der alte Server nicht kennt, faellt auf den Standard, statt zu scheitern', () => {
     expect(modelForOp('image', 'edit', 'qwen-image-2.1-edit')).toBe('flux-dev')
     expect(modelForOp('video', 'generate', 'minimax-h3-t2v')).toBe('wan-2.2-720p')
-    expect(modelForOp('image', 'generate', 'flux-3')).toBe('z-image-turbo')
+    expect(modelForOp('image', 'generate', 'qwen-image-2.1')).toBe('z-image-turbo')
   })
 })

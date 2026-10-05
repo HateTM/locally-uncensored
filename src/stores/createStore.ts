@@ -424,7 +424,7 @@ interface CreateState {
   cloudOpModel: string
   /** The pick of EACH sub-category (see opSlot), runtime-only like cloudOpModel.
    *  cloudOpModel mirrors the entry of the current sub-category, so choosing a
-   *  model in Enhance Image no longer wipes the music pick (02.10.2026). */
+   *  model in Lip Sync no longer wipes the music pick (02.10.2026). */
   cloudOpPicks: Record<string, string>
   /** Studio: the schema-driven option values for the picked cloudOpModel step
    *  (studio-contract.ts). Belongs to the model, not the run: a model switch
@@ -1483,7 +1483,7 @@ export function opSlot(s: Pick<CreateState, 'characterTab' | 'removebg' | 'utili
 }
 
 // One shared cloudOpModel used to serve lip sync, music, extend, motion and
-// Enhance Image, so a pick in one sub-category replaced the pick of another
+// video upscale, so a pick in one sub-category replaced the pick of another
 // (Opus review 02.10.2026). The slot map keeps one pick each, and the single
 // field every reader uses stays, as the mirror of the current slot:
 //   - the slot changed: the field takes that slot's own pick ('' if none yet);

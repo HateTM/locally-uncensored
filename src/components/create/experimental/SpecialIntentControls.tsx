@@ -907,9 +907,9 @@ function MusicControls() {
   const studioOptions = useCreateStore((s) => s.cloudStudioOptions)
   const setStudioOptions = useCreateStore((s) => s.setCloudStudioOptions)
   // Cloud: which text goes where is the model's own business. For most the
-  // prompt is the style and a few take lyrics next to it, for Mureka Song and
-  // YuE2 the prompt IS the lyrics and the style sits next to it. The second
-  // text is offered wherever the model reads one, under its real name.
+  // prompt is the style and a few take lyrics next to it, for Mureka Song the
+  // prompt IS the lyrics and the style sits next to it. The second text is
+  // offered wherever the model reads one, under its real name.
   // Local: every music checkpoint runs through buildMusicWorkflow, which feeds
   // the lyrics box straight into the encoder. Asking the CLOUD catalog about a
   // local checkpoint is how the local tab once hid the box while sitting on

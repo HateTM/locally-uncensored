@@ -10,7 +10,7 @@ import { safeJSONStorage } from '../lib/storage-quota'
 import { CLOUD_MODEL_SEED, DEFAULT_MODEL_IDS, type CloudModel } from '../lib/render/cloud-models'
 import { STUDIO_MODELS } from '../lib/render/studio-contract'
 import {
-  STUDIO_EDIT_MODELS, STUDIO_IMAGE_UPSCALERS, studioImageToVideo, studioReferenceVideo, studioTextToImage,
+  STUDIO_EDIT_MODELS, studioImageToVideo, studioReferenceVideo, studioTextToImage,
   studioTextToVideo,
 } from '../lib/render/studio-roles'
 import type { RenderKind, RenderOp } from '../lib/render/cloud-jobs'
@@ -267,9 +267,6 @@ export function animatePickerModels(): CloudModel[] {
  *  The run then looks exactly like one with the default image model picked. */
 export function utilityOpModel(kind: RenderKind, op: RenderOp, pickedId: string): string {
   const utility = op === 'removebg' || op === 'eraser' || op === 'upscale'
-  // Der Bild-Upscale darf auf einem Studio-Upscaler laufen (SeedVR2): das ist
-  // seine eigene Wahl und kein Rest aus dem Bild-Tab.
-  if (op === 'upscale' && STUDIO_IMAGE_UPSCALERS.includes(pickedId)) return pickedId
   return utility && kind === 'image' && STUDIO_MODELS[pickedId] ? (defaultCloudModel('image')?.id ?? pickedId) : pickedId
 }
 

@@ -12,7 +12,7 @@ import { routeCloud, seedOnboardingDone, signInViaGate, cloudSwitch, type CloudS
  *      stehen gesammelt unter "Older models". Die Marken stehen NUR in der
  *      aufgeklappten Liste: nichts davon im oder ueber dem Prompt-Eingabefeld
  *      und nichts am geschlossenen Waehler.
- *  (b) Server von heute (keine der beiden Angaben, kein FLUX 3): jede Zeile
+ *  (b) Server von heute (keine der beiden Angaben, kein Nucleus): jede Zeile
  *      steht neutral da, keine Marke, keine Zwischenzeile, das neue Modell
  *      fehlt.
  */
@@ -50,11 +50,11 @@ test('server with tiers: Best on top with its mark, Older models collected below
   const list = page.locator('.lu-elevated')
   await expect(list).toBeVisible()
   const names = await list.locator('button').evaluateAll((btns) => btns.map((b) => b.querySelector('.truncate')?.textContent ?? ''))
-  // Z-Image Turbo and FLUX 3 are best, the two Flux models are older and go last.
-  expect(names.slice(0, 2).sort()).toEqual(['FLUX 3', 'Z-Image Turbo (fast)'])
+  // Z-Image Turbo is best, Nucleus follows, the two Flux models are older and go last.
+  expect(names.slice(0, 2)).toEqual(['Z-Image Turbo (fast)', 'Nucleus'])
   expect(names.slice(-2)).toEqual(['Flux Schnell (fast)', 'Flux Dev (quality)'])
   await expect(list.getByText('Older models', { exact: true })).toHaveCount(1)
-  await expect(list.getByText('Best', { exact: true })).toHaveCount(2)
+  await expect(list.getByText('Best', { exact: true })).toHaveCount(1)
   await expect(list.getByText('Open family', { exact: true })).toHaveCount(1)
   await expect(list.getByText('Open weights', { exact: true })).toHaveCount(3)
 

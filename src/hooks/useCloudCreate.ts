@@ -38,7 +38,7 @@ import { checkPromptSafety, blockMessageFor, type SafetyVerdict } from '../lib/r
 import { contentPolicySnapshot, loadContentPolicy } from './useContentPolicy'
 import { signalCreditsExhausted } from '../lib/credits-exhausted'
 import { resolveRunSeed } from '../lib/run-seed'
-import { STANDARD_UPSCALE, intentRoles, intentRequiredInputs, isStudioModel, resolveIntentPick, studioExtraPhotoSlots } from '../lib/render/create-studio'
+import { intentRoles, intentRequiredInputs, isStudioModel, resolveIntentPick, studioExtraPhotoSlots } from '../lib/render/create-studio'
 import { bumpSeed, runImageCount } from '../lib/render/image-count'
 import { STUDIO_MODELS, studioFields } from '../lib/render/studio-contract'
 import { modelLabel } from '../lib/render/preset-models'
@@ -243,23 +243,16 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
     // submit never 400s. Seit 02.10.2026 fuehren Image, Edit, Video und Animate
     // auch Studio-Modelle (Web-Paritaet), also laeuft die Wahl IMMER durch
     // modelForOp, und erst das Ergebnis sagt, ob der Lauf ein Studio-Lauf ist.
-    // Eine Rollen-Absicht behaelt ihre Wahl, "Standard" in Enhance Image ist
-    // kein Modell, sondern der feste Endpunkt von frueher: er laeuft wie vorher
-    // unter dem Bildmodell, das der Server ignoriert.
-    const model = roleIntent
-      ? (picked === STANDARD_UPSCALE ? (defaultCloudModel(kind)?.id ?? picked) : picked)
-      : modelForOp(kind, op, picked)
+    // Eine Rollen-Absicht behaelt ihre Wahl.
+    const model = roleIntent ? picked : modelForOp(kind, op, picked)
     // A Studio pick runs its own schema-driven endpoint (op: 'studio'), never a
     // classic op shape. The character use-surface stays on its fixed -lora family.
     const studioModel = !characterUse && isStudioModel(model) ? model : undefined
     if (studioModel) kind = STUDIO_MODELS[studioModel].kind
     // The result carries the customer's own pick. A utility op that swapped a
-    // Studio pick out (utilityOpModel), and Enhance Image on "Standard", must
-    // not make addToGallery jump the picker to the default or overwrite a
-    // saved choice.
-    const galleryModel = roleIntent
-      ? (picked === STANDARD_UPSCALE ? (s.cloudImageModel || defaultCloudModel('image')?.id || model) : model)
-      : model !== picked && model === utilityOpModel(kind, op, picked) ? picked : model
+    // Studio pick out (utilityOpModel) must not make addToGallery jump the
+    // picker to the default or overwrite a saved choice.
+    const galleryModel = !roleIntent && model !== picked && model === utilityOpModel(kind, op, picked) ? picked : model
 
     // Bilder in diesem Lauf: nur Bild und Bearbeiten kennen mehr als eins.
     const count = runImageCount(intent, s.cloudImageCount, characterUse)

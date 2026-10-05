@@ -83,7 +83,7 @@ describe('Edit without a mask', () => {
   })
 
   it('starts on a studio editor without a mask', async () => {
-    useCreateStore.getState().setCloudImageModel('flux-3-edit')
+    useCreateStore.getState().setCloudImageModel('qwen-image-2.1-edit')
     await useCloudCreate().generate()
     expect(useCreateStore.getState().error).toBeNull()
     expect(submitted).toHaveLength(1)
@@ -111,7 +111,7 @@ describe('A catalog without the maskless field (server before c341f5ac)', () => 
 
   it('qwen-image-edit and the studio editors still take no mask, flux-dev still does', () => {
     expect(editNeedsMask('qwen-image-edit')).toBe(false)
-    expect(editNeedsMask('flux-3-edit')).toBe(false)
+    expect(editNeedsMask('qwen-image-2.1-edit')).toBe(false)
     expect(editNeedsMask('flux-dev')).toBe(true)
   })
 

@@ -53,7 +53,7 @@ export interface CloudScenario {
   studioQuoteStatus?: 200 | 404 | 'unreachable'
   /**
    * 02.10.2026: the catalog of a server that ships `tier` and `weights` on
-   * every entry plus a Studio image model (FLUX 3). Leaving it unset
+   * every entry plus a Studio image model (Nucleus). Leaving it unset
    * reproduces the server of today: no entry carries either field, and the
    * pickers must stand there neutral (no mark, no "Older models" row).
    */
@@ -197,7 +197,7 @@ export async function routeCloud(page: Page, scenario: CloudScenario): Promise<v
             ...(scenario.studioCatalog ? [STUDIO_CATALOG_MODEL] : []),
             ...(scenario.tierCatalog
               ? [{ id: 'z-image-turbo', label: 'Z-Image Turbo (fast)', kind: 'image' as const, edit: false, cfg: false, negative_prompt: false, credits: { base: 300 }, tier: 'best', weights: 'open' },
-                 { id: 'flux-3', label: 'FLUX 3', kind: 'image' as const, ops: ['studio'], quote_required: true, tier: 'best', weights: 'open-family' }]
+                 { id: 'nucleus-image', label: 'Nucleus', kind: 'image' as const, adult: true, ops: ['studio'], quote_required: true, tier: 'standard', weights: 'open-family' }]
               : []),
           ],
           ops: { removebg: 1000, eraser: 2500, upscale_image: 1000, upscale_video_per_s: 500, upscale_video_min: 2500 },

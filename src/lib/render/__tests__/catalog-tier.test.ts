@@ -68,11 +68,11 @@ describe('jedes Cloud-Modell traegt Stufe und Herkunft', () => {
     for (const id of ['flux-schnell', 'flux-dev', 'qwen-image', 'hidream', 'hunyuan-image', 'wan-2.2-720p', 'wan-2.2-fast', 'ltx-2', 'ltx-2.3', 'hunyuan-video']) {
       expect(t(id).tier, id).toBe('older')
     }
-    for (const id of ['wan-3.0', 'qwen-image-3', 'qwen-image-3-pro', 'flux-3', 'ideogram-4.5']) expect(t(id).weights, id).toBe('open-family')
+    for (const id of ['wan-3.0', 'wan-3.0-ref', 'qwen-image-3-edit', 'flux-3-upscale']) expect(t(id).weights, id).toBe('open-family')
     for (const id of ['seedance-2.5', 'seedance-2.5-spicy', 'seedream-5-edit', 'vidu-q3-spicy', 'heygen-twin', 'eleven-v3', 'mureka-song', 'minimax-music', 'minimax-speech-hd', 'lipsync-3-avatar', 'lipsync-2', 'pixverse-extend']) {
       expect(t(id).weights, id).toBe('closed')
     }
-    for (const id of ['minimax-h3', 'z-image', 'cosmos-3-super', 'cosmos-3-super-i2v', 'ltx-2.5-t2v', 'yue2']) expect(t(id).weights, id).toBe('open')
+    for (const id of ['minimax-h3', 'z-image', 'ltx-2.5-t2v', 'qwen-image-2.1', 'qwen-image-2.1-edit']) expect(t(id).weights, id).toBe('open')
   })
 
   it('der Katalog behaelt alles, was er hatte: nichts wurde entfernt', () => {
@@ -93,7 +93,6 @@ describe('die Waehler ordnen nach Stufe', () => {
     music: () => intentPickerModels('music'),
     extend: () => intentPickerModels('extend'),
     video_upscale: () => intentPickerModels('video_upscale'),
-    upscale: () => intentPickerModels('upscale'),
     restyle: () => presetModels('restyle'),
   }
 

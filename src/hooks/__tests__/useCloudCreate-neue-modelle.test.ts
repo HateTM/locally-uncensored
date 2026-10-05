@@ -1,10 +1,10 @@
 /**
- * Bild, Bearbeiten, Video, Animate und Enhance Image fahren die neuen Studio-
- * Modelle (02.10.2026, Web-Paritaet; Vorlage: apps/web/hooks/__tests__/
+ * Bild, Bearbeiten, Video und Animate fahren die neuen Studio-Modelle
+ * (02.10.2026, Web-Paritaet; Vorlage: apps/web/hooks/__tests__/
  * useCloudCreate-neue-modelle.test.ts). Daran haengen Dinge, die still falsch
  * sein koennen: der Op, das Bild als Liste, keine Maske fuer Editoren per
- * Anweisung, keine klassischen Laengenfelder fuer ein Studio-Video, und die
- * Standard-Wahl von Enhance Image, die weiter den alten Weg nimmt.
+ * Anweisung, keine klassischen Laengenfelder fuer ein Studio-Video, und
+ * Enhance Image, das weiter den festen Endpunkt nimmt.
  *
  * Der letzte Block laeuft gegen den Katalog des Servers von heute: ein Modell,
  * das er nicht kennt, wird nicht gestartet, sondern auf den Standard gebogen.
@@ -132,16 +132,16 @@ beforeEach(() => {
 })
 
 
-describe('die neuen Studio-Modelle in Bild, Bearbeiten, Video, Animate und Enhance Image', () => {
+describe('die neuen Studio-Modelle in Bild, Bearbeiten, Video und Animate', () => {
   it('Bearbeiten: ein Studio-Editor startet ohne Maske und bekommt das Bild als Liste', async () => {
     const s = useCreateStore.getState()
     s.setIntent('edit')
-    s.setCloudImageModel('flux-3-edit')
+    s.setCloudImageModel('qwen-image-2.1-edit')
     useCreateStore.setState({ source: BILD, mask: null })
     await useCloudCreate().generate()
     expect(useCreateStore.getState().error).toBeNull()
     expect(submitted).toHaveLength(1)
-    expect(submitted[0].model).toBe('flux-3-edit')
+    expect(submitted[0].model).toBe('qwen-image-2.1-edit')
     expect(submitted[0].kind).toBe('image')
     expect(submitted[0].params.op).toBe('studio')
     expect(submitted[0].params.image_paths).toEqual(['user-1/staged-source.png'])
@@ -154,17 +154,6 @@ describe('die neuen Studio-Modelle in Bild, Bearbeiten, Video, Animate und Enhan
     // Anbieter ohne Bild und der Deckel stimmte nicht.
     expect(hoisted.studioQuote).toHaveBeenCalledTimes(1)
     expect(hoisted.studioQuote.mock.calls[0][2]).toMatchObject({ image_paths: ['user-1/staged-source.png'] })
-  })
-
-  it('Bearbeiten: ein Editor mit einem Bildfeld bekommt source_path', async () => {
-    const s = useCreateStore.getState()
-    s.setIntent('edit')
-    s.setCloudImageModel('ideogram-4.5-edit')
-    useCreateStore.setState({ source: BILD, mask: null })
-    await useCloudCreate().generate()
-    expect(submitted[0].params.op).toBe('studio')
-    expect(submitted[0].params.source_path).toBe('user-1/staged-source.png')
-    expect(submitted[0].params.image_paths).toBeUndefined()
   })
 
   it('Bearbeiten: das maskierte flux-dev verlangt seine Maske weiter', async () => {
@@ -193,10 +182,10 @@ describe('die neuen Studio-Modelle in Bild, Bearbeiten, Video, Animate und Enhan
   it('Text zu Bild: ein neues Bildmodell geht als Studio-Lauf mit seinen Optionen', async () => {
     const s = useCreateStore.getState()
     s.setIntent('image')
-    s.setCloudImageModel('qwen-image-3-pro')
+    s.setCloudImageModel('qwen-image-2.1')
     s.setCloudStudioOptions({ resolution: '2k', aspect_ratio: '16:9' })
     await useCloudCreate().generate()
-    expect(submitted[0].model).toBe('qwen-image-3-pro')
+    expect(submitted[0].model).toBe('qwen-image-2.1')
     expect(submitted[0].params.op).toBe('studio')
     expect(submitted[0].params.studio_options).toEqual({ resolution: '2k', aspect_ratio: '16:9' })
     // Kein klassisches Feld rutscht in einen Studio-Lauf.
@@ -272,80 +261,41 @@ describe('die neuen Studio-Modelle in Bild, Bearbeiten, Video, Animate und Enhan
     expect(submitted[0].model).toBe('minimax-h3')
   })
 
-  it('Enhance Image: Standard geht weiter als Bild-Upscale und nicht als Studio-Lauf', async () => {
+  it('Enhance Image laeuft als Bild-Upscale auf dem festen Endpunkt und laesst die Bildwahl stehen', async () => {
     const s = useCreateStore.getState()
+    s.setCloudImageModel('flux-dev')
     s.setIntent('upscale')
-    s.setCloudOpModel('upscale-standard')
     useCreateStore.setState({ source: BILD })
     await useCloudCreate().generate()
     expect(submitted).toHaveLength(1)
     expect(submitted[0].params.op).toBe('upscale')
     expect(submitted[0].params.target_resolution).toBe(useCreateStore.getState().targetResolution)
     expect(submitted[0].params.studio_options).toBeUndefined()
-    expect(submitted[0].model).not.toBe('upscale-standard')
     expect(hoisted.studioQuote).not.toHaveBeenCalled()
-  })
-
-  it('Enhance Image mit Standard laesst die gespeicherte Bildwahl des Kunden stehen', async () => {
-    const s = useCreateStore.getState()
-    s.setCloudImageModel('flux-dev')
-    s.setIntent('upscale')
-    s.setCloudOpModel('upscale-standard')
-    useCreateStore.setState({ source: BILD })
-    await useCloudCreate().generate()
-    expect(submitted).toHaveLength(1)
-    expect(useCreateStore.getState().gallery.length).toBeGreaterThan(0)
     expect(useCreateStore.getState().gallery[0].model).toBe('flux-dev')
     expect(useCreateStore.getState().cloudImageModel).toBe('flux-dev')
   })
 
-  it('Enhance Image: SeedVR2 geht als Studio-Lauf mit seinem Ziel in den Optionen', async () => {
-    const s = useCreateStore.getState()
-    s.setIntent('upscale')
-    s.setCloudOpModel('seedvr2-image')
-    s.setCloudStudioOptions({ target_resolution: '8k' })
-    useCreateStore.setState({ source: BILD })
-    await useCloudCreate().generate()
-    expect(submitted[0].model).toBe('seedvr2-image')
-    expect(submitted[0].kind).toBe('image')
-    expect(submitted[0].params.op).toBe('studio')
-    expect(submitted[0].params.source_path).toBe('user-1/staged-source.png')
-    expect(submitted[0].params.target_resolution).toBeUndefined()
-    expect(submitted[0].params.studio_options).toEqual({ target_resolution: '8k' })
-  })
-
   it('ein Studio-Bildmodell im Bild-Tab rutscht nie in ein Cutout, einen Radierer oder Enhance', async () => {
     const s = useCreateStore.getState()
-    s.setCloudImageModel('flux-3')
+    s.setCloudImageModel('qwen-image-2.1')
     s.setIntent('removebg')
     useCreateStore.setState({ source: BILD })
     await useCloudCreate().generate()
     expect(submitted[0].params.op).toBe('removebg')
-    expect(submitted[0].model).not.toBe('flux-3')
-  })
-
-  it('Musik: YuE2 geht als Studio-Lauf mit seinen Optionen', async () => {
-    const s = useCreateStore.getState()
-    s.setIntent('music')
-    s.setCloudOpModel('yue2')
-    s.setCloudStudioOptions({ style: 'rock' })
-    s.setPrompt('[Verse]\nla la la')
-    await useCloudCreate().generate()
-    expect(submitted[0].model).toBe('yue2')
-    expect(submitted[0].kind).toBe('audio')
-    expect(submitted[0].params.studio_options).toEqual({ style: 'rock' })
+    expect(submitted[0].model).not.toBe('qwen-image-2.1')
   })
 
   it('ein Modellwechsel und ein Wechsel der Unterkategorie werfen die Optionen weg', () => {
     const s = useCreateStore.getState()
     s.setIntent('image')
-    s.setCloudImageModel('qwen-image-3')
-    s.setCloudImageModel('flux-3')
+    s.setCloudImageModel('z-image')
+    s.setCloudImageModel('qwen-image-2.1')
     s.setCloudStudioOptions({ resolution: '2k' })
     // Dieselbe Wahl noch einmal: die Optionen bleiben.
-    s.setCloudImageModel('flux-3')
+    s.setCloudImageModel('qwen-image-2.1')
     expect(useCreateStore.getState().cloudStudioOptions).toEqual({ resolution: '2k' })
-    s.setCloudImageModel('qwen-image-3-pro')
+    s.setCloudImageModel('z-image')
     expect(useCreateStore.getState().cloudStudioOptions).toEqual({})
     // Die Optionen gehoeren zum Modell, das die Unterkategorie faehrt: der
     // Videowaehler aendert an einem Bildlauf nichts.
@@ -387,7 +337,7 @@ describe('gegen den Server von heute', () => {
     expect(submitted[0].params.op).toBe('edit')
   })
 
-  it('Enhance Image mit Standard laeuft wie vorher, ohne Studio', async () => {
+  it('Enhance Image laeuft wie vorher, ohne Studio', async () => {
     const s = useCreateStore.getState()
     s.setIntent('upscale')
     useCreateStore.setState({ source: BILD })

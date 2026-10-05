@@ -15,15 +15,10 @@ import { STUDIO_MODELS, isMediaField, studioCredits, studioFields, studioOptions
 
 const FREMD = 'https://evil.example/x.png'
 
-const ACHT: Record<string, string[]> = {
-  'krea-2-large': ['reference'],
-  'ideogram-4.5-edit': ['mask_url', 'reference_images'],
-  'skyreels-v4-i2v': ['images'],
-  'skyreels-v4-ref': ['ref_videos'],
+const GEMELDET: Record<string, string[]> = {
   'minimax-h3-ref': ['reference_videos', 'reference_audios'],
   'wan-3.0-ref': ['reference_videos', 'reference_audios'],
   'minimax-h3-video-edit': ['reference_images', 'reference_audios'],
-  'wan-3.0-video-edit': ['reference_images', 'reference_audios'],
 }
 
 function wert(type: string | undefined) {
@@ -31,8 +26,8 @@ function wert(type: string | undefined) {
 }
 
 describe('studio_options laesst keine freien Datei- und Adressfelder durch', () => {
-  it('die acht gemeldeten Felder werden abgewiesen und stehen nicht in den Feldern der Oberflaeche', () => {
-    for (const [id, felder] of Object.entries(ACHT)) {
+  it('die gemeldeten Felder werden abgewiesen und stehen nicht in den Feldern der Oberflaeche', () => {
+    for (const [id, felder] of Object.entries(GEMELDET)) {
       const props = studioSchema(id).properties ?? {}
       for (const f of felder) {
         expect(props[f], `${id}.${f} fehlt im Schema`).toBeDefined()
@@ -41,11 +36,6 @@ describe('studio_options laesst keine freien Datei- und Adressfelder durch', () 
         expect(() => studioOptions(id, 'x', { [f]: wert(props[f].type) }, false), `${id}.${f}`).toThrow(/Unsupported model option/)
       }
     }
-  })
-
-  it('Ideogram Edit zeigt kein Feld "Mask url" mehr', () => {
-    expect(Object.keys(studioFields('ideogram-4.5-edit'))).not.toContain('mask_url')
-    expect(Object.keys(studioFields('ideogram-4.5-edit'))).not.toContain('reference_images')
   })
 
   it('fuer JEDES Studio-Modell: jedes Medien- oder Adressfeld ausserhalb von inputs wird abgewiesen', () => {
@@ -62,7 +52,7 @@ describe('studio_options laesst keine freien Datei- und Adressfelder durch', () 
       }
     }
     // Positivkontrolle: die Regel trifft wirklich etwas.
-    expect(geprueft).toBeGreaterThanOrEqual(8)
+    expect(geprueft).toBeGreaterThanOrEqual(6)
   })
 
   it('kein Feld aus inputs und kein Schalter oder Auswahlfeld wird versehentlich gesperrt', () => {
@@ -95,11 +85,11 @@ describe('freie Groesse als Text', () => {
     return p && !p.enum && !p.disabled && !(p as { 'x-hidden'?: boolean })['x-hidden']
   }).map(([id]) => id)
 
-  it('betrifft die gemeldeten Modelle', () => {
-    for (const id of ['hidream-o1', 'flux-2-klein-9b', 'ernie-image-turbo', 'hunyuan-image-3']) expect(frei).toContain(id)
+  it('betrifft die Modelle mit freier Groesse', () => {
+    for (const id of ['z-image', 'jib-mix-qwen']) expect(frei).toContain(id)
   })
 
-  it.each(['hidream-o1', 'flux-2-klein-9b', 'ernie-image-turbo', 'hunyuan-image-3'])('%s: Breite und Hoehe zwischen 256 und 4096', (id) => {
+  it.each(['z-image', 'jib-mix-qwen'])('%s: Breite und Hoehe zwischen 256 und 4096', (id) => {
     expect(studioOptions(id, 'x', { size: '1024*1024' }, false).size).toBe('1024*1024')
     expect(studioOptions(id, 'x', { size: '4096*4096' }, false).size).toBe('4096*4096')
     expect(studioOptions(id, 'x', { size: '256*256' }, false).size).toBe('256*256')
@@ -127,25 +117,18 @@ describe('Video-Edit: halber Satz auf die Eingabe, halber auf die Ausgabe', () =
     expect(credits('minimax-h3-video-edit', { resolution: '480p', duration: 15 })).toBe(130000)
   })
 
-  it('Wan 3.0: dasselbe Muster ueber alle Aufloesungen', () => {
-    expect(credits('wan-3.0-video-edit', { resolution: '720p', duration: 3 })).toBe(140000)
-    expect(credits('wan-3.0-video-edit', { resolution: '720p', duration: 15 })).toBe(260000)
-    expect(credits('wan-3.0-video-edit', { resolution: '1080p', duration: 3 })).toBe(280000)
-    expect(credits('wan-3.0-video-edit', { resolution: '1080p', duration: 15 })).toBe(520000)
-  })
-
   it('jede am Anbieter gemessene Zeile stimmt genau', () => {
     const zeilen = preise.filter((r) => /video-edit$/.test(r.model))
-    expect(zeilen.length).toBeGreaterThanOrEqual(20)
+    expect(zeilen.length).toBeGreaterThanOrEqual(16)
     for (const r of zeilen) {
       const o = studioOptions(r.model, 'x', r.options, false)
       expect(studioCredits(r.model, o, r.seconds), `${r.model} ${JSON.stringify(r.options)}`).toBe(Math.round(r.usd * 100000))
     }
   })
 
-  it('beide Modelle tragen den Modus inout und lesen die Eingabe aus der Messung', () => {
-    for (const id of ['minimax-h3-video-edit', 'wan-3.0-video-edit']) expect(STUDIO_MODELS[id].price.mode).toBe('inout')
-    expect(() => studioCredits('wan-3.0-video-edit', { resolution: '480p' })).toThrow()
-    expect(() => studioCredits('wan-3.0-video-edit', { resolution: '480p' }, 16)).toThrow(/no longer than 15/)
+  it('das Modell traegt den Modus inout und liest die Eingabe aus der Messung', () => {
+    expect(STUDIO_MODELS['minimax-h3-video-edit'].price.mode).toBe('inout')
+    expect(() => studioCredits('minimax-h3-video-edit', { resolution: '480p' })).toThrow()
+    expect(() => studioCredits('minimax-h3-video-edit', { resolution: '480p' }, 16)).toThrow(/no longer than 15/)
   })
 })

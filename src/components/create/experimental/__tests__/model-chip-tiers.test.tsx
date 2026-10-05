@@ -86,15 +86,15 @@ describe('der Bildwaehler (neuer Server)', () => {
 
     // Jedes Beste traegt die Marke, und nur die Besten tragen sie.
     const beste = katalog.filter((m) => m.tier === 'best').map((m) => m.label)
-    expect(beste.length).toBeGreaterThan(3)
+    expect(beste.length).toBeGreaterThanOrEqual(2)
     expect(zeilen.filter((z) => z.best).map((z) => z.name).sort()).toEqual([...beste].sort())
-    expect(beste).toEqual(expect.arrayContaining(['Z-Image Turbo (fast)', 'Qwen Image 3.0 Pro', 'FLUX 3']))
+    expect(beste).toEqual(expect.arrayContaining(['Z-Image Turbo (fast)', 'Z-Image Base']))
 
     // Die Koepfe: Familien mit mehr als einem Modell, dann Other, zuletzt die
     // Aelteren. Jeder Kopf nennt, wie viele Zeilen unter ihm stehen.
     const namen = koepfe.map((k) => k.name)
     expect(namen).toEqual([...new Set(erwartet.map((e) => e.group))])
-    expect(namen).toEqual(expect.arrayContaining(['Z-Image', 'Qwen', 'FLUX']))
+    expect(namen).toContain('Z-Image')
     expect(namen.at(-1)).toBe(OLDER_GROUP)
     expect(namen.at(-2)).toBe(OTHER_GROUP)
     for (const k of koepfe) {
@@ -142,10 +142,10 @@ describe('der Bildwaehler (neuer Server)', () => {
   it('nennt die Herkunft nur dort, wo die Familie offene Gewichte hat', () => {
     const { zeilen } = lies('image')
     const von = (name: string) => zeilen.find((z) => z.name === name)!
-    expect(von('FLUX 3').familie).toBe(true)
-    expect(von('FLUX 3').offen).toBe(false)
-    expect(von('Cosmos 3 Super').offen).toBe(true)
-    expect(von('Cosmos 3 Super').familie).toBe(false)
+    expect(von('Nucleus').familie).toBe(true)
+    expect(von('Nucleus').offen).toBe(false)
+    expect(von('Qwen Image 2.1').offen).toBe(true)
+    expect(von('Qwen Image 2.1').familie).toBe(false)
     expect(von('Z-Image Base').offen).toBe(true)
     expect(von('Flux Schnell (fast)').offen).toBe(true)
   })
@@ -176,7 +176,7 @@ describe('die anderen Waehler (neuer Server)', () => {
     const { zeilen } = lies('video')
     expect(zeilen.map((z) => z.name)).toEqual(reihenfolge(videoPickerModels()))
     expect(zeilen[0].best).toBe(true)
-    expect(zeilen.filter((z) => z.best).length).toBeGreaterThanOrEqual(3)
+    expect(zeilen.filter((z) => z.best).map((z) => z.name)).toEqual(['LTX 2.5', 'MiniMax H3'])
     const unten = zeilen.slice(-5).map((z) => z.name)
     expect(unten).toEqual(expect.arrayContaining(['Wan 2.2 720p', 'Wan 2.2 Fast', 'LTX 2.3']))
   })
@@ -184,21 +184,9 @@ describe('die anderen Waehler (neuer Server)', () => {
   it('Animate: Referenzmodelle und die neuen Bild-zu-Video-Modelle sind waehlbar', () => {
     const { zeilen } = lies('animate')
     expect(zeilen.map((z) => z.name)).toEqual(reihenfolge(animatePickerModels()))
-    for (const name of ['LTX 2.5', 'FLUX 3 Video', 'MiniMax H3 • Reference', 'Wan 3.0 • Reference', 'daVinci MagiHuman']) {
+    for (const name of ['LTX 2.5', 'MiniMax H3 • Reference', 'Wan 3.0 • Reference']) {
       expect(zeilen.map((z) => z.name), name).toContain(name)
     }
-  })
-
-  it('Enhance Image bekommt einen Waehler: Standard und SeedVR2, ohne Kopf ueber zwei Zeilen', () => {
-    const { zeilen, koepfe } = lies('upscale')
-    expect(koepfe).toEqual([])
-    expect(zeilen.map((z) => z.name)).toEqual(['Standard', 'SeedVR2'])
-    expect(zeilen[1].offen).toBe(true)
-  })
-
-  it('Musik: YuE2 steht neben den anderen', () => {
-    const { zeilen } = lies('music')
-    expect(zeilen.map((z) => z.name)).toContain('YuE2 (song from lyrics)')
   })
 })
 
@@ -220,7 +208,7 @@ describe('gegen den Server von heute (ohne Stufe, ohne die neuen Modelle)', () =
       expect(z.familie, z.name).toBe(false)
     }
     expect(kopf).toBeUndefined()
-    expect(zeilen.map((z) => z.name)).not.toContain('FLUX 3')
+    expect(zeilen.map((z) => z.name)).not.toContain('Qwen Image 2.1')
   })
 
   it('Video, Animate und Bearbeiten stehen ebenso neutral, ohne ein neues Modell', () => {
@@ -233,13 +221,6 @@ describe('gegen den Server von heute (ohne Stufe, ohne die neuen Modelle)', () =
       expect(zeilen.map((z) => z.name), intent).not.toContain('LTX 2.5')
       expect(zeilen.map((z) => z.name), intent).not.toContain('Qwen Image 2.1 Edit')
     }
-  })
-
-  it('Enhance Image zeigt keinen Waehler, der nur den Standard enthielte', () => {
-    // Der Waehler selbst listet "Standard" allein; der Composer blendet ihn dann aus
-    // (Composer.tsx, showUpscalePicker). Hier: die Liste hat genau diesen einen Eintrag.
-    const { zeilen } = lies('upscale')
-    expect(zeilen.map((z) => z.name)).toEqual(['Standard'])
   })
 })
 

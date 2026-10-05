@@ -185,7 +185,6 @@ describe('jedes waehlbare Modell faehrt seinen Schritt', () => {
 
   it('genau die Rollen ohne Alternative zeigen keine Auswahl', () => {
     const ohne = ALL_ROLES.filter((r) => !roleHasChoice(r))
-    // startend und imageup haben je ein Mitglied: FLUX 3 Start to End, SeedVR2.
-    expect(ohne.sort()).toEqual(['angles', 'imageup', 'presenter', 'startend'])
+    expect(ohne.sort()).toEqual(['angles', 'presenter'])
   })
 })

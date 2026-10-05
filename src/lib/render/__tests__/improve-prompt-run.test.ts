@@ -220,7 +220,7 @@ describe('Improve my prompt without a picked chat model', () => {
   it('THE FIX, Cloud: the rewrite runs on the helper model', async () => {
     useModelStore.setState({ activeModel: null, models: [] })
     cloudMode()
-    const out = await improvePrompt('a fox', { kind: 'image', modelLabel: 'FLUX 3' })
+    const out = await improvePrompt('a fox', { kind: 'image', modelLabel: 'Qwen Image 2.1' })
     expect(out).toEqual({ status: 'improved', prompt: 'A red fox in deep snow.' })
     expect(calls.list).toHaveLength(1)
     expect(calls.list[0].model).toBe('mistralai/Mistral-Small-3.2-24B-Instruct-2506')
@@ -228,13 +228,13 @@ describe('Improve my prompt without a picked chat model', () => {
 
   it('Cloud with a pick: the picked chat model writes, not the helper', async () => {
     cloudMode()
-    await improvePrompt('a fox', { kind: 'image', modelLabel: 'FLUX 3' })
+    await improvePrompt('a fox', { kind: 'image', modelLabel: 'Qwen Image 2.1' })
     expect(calls.list[0].model).toBe('chat-model')
   })
 
   it('NEGATIVE CONTROL, Local without a chat model: nothing is called', async () => {
     useModelStore.setState({ activeModel: null, models: [] })
-    const out = await improvePrompt('a fox', { kind: 'image', modelLabel: 'FLUX 3' })
+    const out = await improvePrompt('a fox', { kind: 'image', modelLabel: 'Qwen Image 2.1' })
     expect(out).toEqual({ status: 'failed' })
     expect(calls.list).toHaveLength(0)
   })

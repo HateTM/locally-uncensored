@@ -190,7 +190,7 @@ describe('Improve my prompt: Cloud (Desktop)', () => {
 
   it('Bearbeiten ruft das Chatmodell nie, auch bei eingeschaltetem Schalter', async () => {
     const s = useCreateStore.getState()
-    s.setImprovePrompt(true); s.setIntent('edit'); s.setCloudImageModel('flux-3-edit')
+    s.setImprovePrompt(true); s.setIntent('edit'); s.setCloudImageModel('qwen-image-2.1-edit')
     useCreateStore.setState({
       source: { filename: 'a.png', url: 'data:image/png;base64,AA', width: 512, height: 512 },
       mask: { filename: 'm.png', url: 'data:image/png;base64,AA', width: 512, height: 512 },
@@ -222,26 +222,22 @@ describe('Improve my prompt: Cloud (Desktop)', () => {
   })
 })
 
-// Fund M1 (05.10.2026): bei Mureka Song und YuE2 ist das Textfeld der Liedtext.
+// Fund M1 (05.10.2026): bei Mureka Song ist das Textfeld der Liedtext.
 // Die Umschreibung machte daraus eine Stilbeschreibung, und die wurde gesungen.
 describe('Improve my prompt: Musik', () => {
   const LIED = '[Verse]\nmorning light on the kitchen floor'
 
   it('ein Liedtext wird nie umgeschrieben, auch wenn der Schalter an ist', async () => {
     const { generate } = useCloudCreate()
-    for (const model of ['mureka-song', 'yue2']) {
-      submitted.length = 0
-      improve.calls.length = 0
-      const s = useCreateStore.getState()
-      s.setIntent('music'); s.setCloudOpModel(model); s.setPrompt(LIED)
-      useCreateStore.setState({ improvePrompt: true })
-      await generate()
-      expect(useCreateStore.getState().error, model).toBeNull()
-      expect(improve.calls, model).toHaveLength(0)
-      expect(submitted[0].model, model).toBe(model)
-      expect(submitted[0].prompt, model).toBe(LIED)
-      expect(submitted[0].params.prompt_original, model).toBeUndefined()
-    }
+    const s = useCreateStore.getState()
+    s.setIntent('music'); s.setCloudOpModel('mureka-song'); s.setPrompt(LIED)
+    useCreateStore.setState({ improvePrompt: true })
+    await generate()
+    expect(useCreateStore.getState().error).toBeNull()
+    expect(improve.calls).toHaveLength(0)
+    expect(submitted[0].model).toBe('mureka-song')
+    expect(submitted[0].prompt).toBe(LIED)
+    expect(submitted[0].params.prompt_original).toBeUndefined()
   })
 
   it('eine Stilbeschreibung wird weiter umgeschrieben', async () => {

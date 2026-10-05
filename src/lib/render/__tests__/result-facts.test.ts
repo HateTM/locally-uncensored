@@ -2,9 +2,7 @@
  * The box, 04.10.2026: under a cutout stood "512×512 · seed 697334996 · sd
  * turbo". A cutout has no seed and never ran on sd turbo.
  */
-import { describe, it, expect, vi } from 'vitest'
-
-vi.mock('../preset-models', () => ({ modelLabel: (id: string) => (id === 'seedvr2-image' ? 'SeedVR2' : id) }))
+import { describe, it, expect } from 'vitest'
 
 import { resultFacts } from '../result-facts'
 import type { GalleryItem } from '../../../stores/createStore'
@@ -31,9 +29,8 @@ describe('the line under a result', () => {
     expect(resultFacts(item({ intent: 'removebg', jobId: 'j1', model: 'flux-schnell' }))).toEqual(['512×512'])
   })
 
-  it('Enhance: no seed; the upscaler only when the run really used one', () => {
+  it('Enhance: no seed and not the image tab model', () => {
     expect(resultFacts(item({ intent: 'upscale', model: 'flux-schnell', width: 4096, height: 4096 }))).toEqual(['4096×4096'])
-    expect(resultFacts(item({ intent: 'upscale', model: 'seedvr2-image', width: 4096, height: 4096 }))).toEqual(['4096×4096', 'SeedVR2'])
   })
 
   it('Erase: no seed and not the image tab model', () => {

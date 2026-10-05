@@ -21,7 +21,7 @@ import { neuerServer } from './fixtures/test-catalogs'
 import { opPickerModels, useCloudCatalogStore } from '../../../stores/cloudCatalogStore'
 import type { CreateIntent } from '../../../stores/createStore'
 
-const MIT_ROLLE: StudioIntent[] = ['lipsync', 'music', 'extend', 'motion', 'video_upscale', 'upscale']
+const MIT_ROLLE: StudioIntent[] = ['lipsync', 'music', 'extend', 'motion', 'video_upscale']
 
 // Review B1 (Runde 2): die ganze Datei prueft den Fall "der lebende Katalog
 // kennt Studio" (`quote_required` auf mindestens einem Eintrag). Das ist

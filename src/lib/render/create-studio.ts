@@ -42,14 +42,7 @@ const INTENT_ROLE: Partial<Record<StudioIntent, StepRole[]>> = {
   extend: ['extend'],
   motion: ['motion'],
   video_upscale: ['upscale'],
-  // Enhance Image: der Standard-Upscaler plus SeedVR2. Siehe intentPickerModels.
-  upscale: ['imageup'],
 }
-
-/** Die Wahl "Standard" im Waehler von Enhance Image: der feste Endpunkt, auf dem
- *  die Unterkategorie bis 02.10.2026 allein lief. Kein Studio-Modell, deshalb
- *  schickt der Start dafuer weiter den Bild-Upscale-Op und kein Studio-Op. */
-export const STANDARD_UPSCALE = 'upscale-standard'
 
 export function intentRoles(intent: StudioIntent): StepRole[] {
   return INTENT_ROLE[intent] ?? []
@@ -66,8 +59,7 @@ export function intentRoleFor(intent: StudioIntent, model: string): StepRole | u
  *  kennt, und ein Wechsel der Liste darf seine bisherige Wahl nicht verschieben.
  *  `lipsync` fuehrt zusaetzlich die beiden Nachvertonungsmodelle, die einen
  *  fertigen Clip statt eines Fotos lesen. Die sind kein Rollenmitglied, gehoeren
- *  in der Oberflaeche aber seit jeher hierher. `upscale` (Enhance Image) fuehrt
- *  vorn den festen Standard-Endpunkt, der kein Modell ist (STANDARD_UPSCALE).
+ *  in der Oberflaeche aber seit jeher hierher.
  *
  *  Ein Studio-Mitglied erscheint NUR, wenn der lebende Katalog genau dieses
  *  Modell fuehrt (preset-models.ts, studioKnown). Ein aelterer Server sagt damit
@@ -86,9 +78,6 @@ export function intentPickerModels(intent: StudioIntent): PresetModel[] {
   const add = (m: PresetModel) => { if (!seen.has(m.id)) { seen.add(m.id); out.push(m) } }
   if (intent === 'lipsync') for (const m of opPickerModels('lipsync')) {
     add({ id: m.id, label: m.label, kind: m.kind, op: 'lipsync', adult: m.adult === true, tier: m.tier, weights: m.weights })
-  }
-  if (intent === 'upscale') {
-    add({ id: STANDARD_UPSCALE, label: 'Standard', kind: 'image', op: 'upscale', adult: false, tier: 'standard', weights: 'closed' })
   }
   for (const role of roles) for (const m of presetModels(role)) add(m)
   return out

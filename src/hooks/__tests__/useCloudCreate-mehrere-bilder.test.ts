@@ -145,7 +145,7 @@ describe('Anzahl der Bilder pro Lauf', () => {
 
   it('Bearbeiten kennt die Anzahl auch, und das Quellbild geht nur einmal hoch', async () => {
     const s = useCreateStore.getState()
-    s.setIntent('edit'); s.setCloudImageModel('flux-3-edit'); s.setCloudImageCount(2)
+    s.setIntent('edit'); s.setCloudImageModel('qwen-image-2.1-edit'); s.setCloudImageCount(2)
     useCreateStore.setState({ source: BILD })
     await useCloudCreate().generate()
     expect(submitted[0].params.count).toBe(2)
@@ -163,7 +163,7 @@ describe('Anzahl der Bilder pro Lauf', () => {
 
   it('der bestaetigte Preis und der Deckel gelten je Bild', async () => {
     const s = useCreateStore.getState()
-    s.setIntent('image'); s.setCloudImageModel('qwen-image-3-pro'); s.setCloudImageCount(3)
+    s.setIntent('image'); s.setCloudImageModel('qwen-image-2.1'); s.setCloudImageCount(3)
     useCreateStore.setState({ cloudStudioCredits: 5000 })
     await useCloudCreate().generate()
     expect(submitted[0].params.max_credits).toBe(5000)
@@ -173,7 +173,7 @@ describe('Anzahl der Bilder pro Lauf', () => {
   it('ein hoeherer bestaetigter Preis je Bild haelt den ganzen Lauf an, bevor etwas gebucht wird', async () => {
     hoisted.quote.mockResolvedValueOnce({ credits: 9000 })
     const s = useCreateStore.getState()
-    s.setIntent('image'); s.setCloudImageModel('qwen-image-3-pro'); s.setCloudImageCount(3)
+    s.setIntent('image'); s.setCloudImageModel('qwen-image-2.1'); s.setCloudImageCount(3)
     useCreateStore.setState({ cloudStudioCredits: 5000 })
     await useCloudCreate().generate()
     expect(submitted).toHaveLength(0)
@@ -235,7 +235,7 @@ describe('Anzahl der Bilder pro Lauf', () => {
 describe('mehrere Fotos aus der Referenzleiste', () => {
   it('Bearbeiten: das Standbild ist das erste Foto, die Leiste liefert die weiteren in Reihenfolge', async () => {
     const s = useCreateStore.getState()
-    s.setIntent('edit'); s.setCloudImageModel('flux-3-edit')
+    s.setIntent('edit'); s.setCloudImageModel('qwen-image-2.1-edit')
     useCreateStore.setState({ source: BILD, references: [FOTO(1), FOTO(2), FOTO(3)] })
     await useCloudCreate().generate()
     expect(submitted[0].params.image_paths).toEqual([
@@ -256,16 +256,16 @@ describe('mehrere Fotos aus der Referenzleiste', () => {
 
   it('ein Modell mit kleiner Grenze bekommt nicht mehr, als es liest', async () => {
     const s = useCreateStore.getState()
-    s.setIntent('edit'); s.setCloudImageModel('hunyuan-image-3-edit')
+    s.setIntent('edit'); s.setCloudImageModel('qwen-image-3-edit')
     useCreateStore.setState({ source: BILD, references: [FOTO(1), FOTO(2), FOTO(3)] })
     await useCloudCreate().generate()
-    expect((submitted[0].params.image_paths as string[])).toHaveLength(2)
-    expect(hochgeladen).toHaveLength(2)
+    expect((submitted[0].params.image_paths as string[])).toHaveLength(3)
+    expect(hochgeladen).toHaveLength(3)
   })
 
   it('ohne Leistenfotos bleibt es bei dem einen Standbild, wie bisher', async () => {
     const s = useCreateStore.getState()
-    s.setIntent('edit'); s.setCloudImageModel('flux-3-edit')
+    s.setIntent('edit'); s.setCloudImageModel('qwen-image-2.1-edit')
     useCreateStore.setState({ source: BILD, references: [] })
     await useCloudCreate().generate()
     expect(submitted[0].params.image_paths).toEqual(['user-1/staged-source-1.png'])
@@ -281,7 +281,7 @@ describe('mehrere Fotos aus der Referenzleiste', () => {
 
   it('die Fotos gehen als eigene Pfade, nie als Adresse', async () => {
     const s = useCreateStore.getState()
-    s.setIntent('edit'); s.setCloudImageModel('flux-3-edit')
+    s.setIntent('edit'); s.setCloudImageModel('qwen-image-2.1-edit')
     useCreateStore.setState({ source: BILD, references: [FOTO(1)] })
     await useCloudCreate().generate()
     for (const p of submitted[0].params.image_paths as string[]) expect(p).not.toMatch(/^https?:|^data:/)

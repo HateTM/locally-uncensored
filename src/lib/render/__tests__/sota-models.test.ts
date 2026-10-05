@@ -2,8 +2,10 @@
 //
 // Regel von David: neu aufgenommen wird nur, was aus einer Familie stammt, die
 // je offene Gewichte veroeffentlicht hat. Bestehende Modelle bleiben, auch
-// geschlossene. Dieser Fall haelt fest, dass jedes neue Modell im Cloud-Modus
-// des Desktops wirklich ankommt: mit Schema, mit einem Preis, der nie unter dem
+// geschlossene. Entscheid vom 06.10.2026: ausgeliefert werden Wan 3.0
+// Reference, LTX 2.5, MiniMax H3 und Qwen Image 2.1 samt Edit. Dieser Fall
+// haelt fest, dass jedes dieser Modelle im Cloud-Modus des Desktops wirklich
+// ankommt: mit Schema, mit einem Preis, der nie unter dem
 // Einkaufspreis liegt, in genau einer Rolle und an der Stelle, an der der Kunde
 // es waehlen kann. Der Desktop liest den Katalog vom Server: alle Waehler-Faelle
 // laufen darum gegen den Katalog des neuen Servers (neuerServer), und der
@@ -20,7 +22,7 @@ import {
   utilityOpModel, videoPickerModels, cloudModelsFor,
 } from '../../../stores/cloudCatalogStore'
 import { ALL_ROLES, presetModels, roleForModel } from '../preset-models'
-import { intentPickerModels, STANDARD_UPSCALE } from '../create-studio'
+import { intentPickerModels } from '../create-studio'
 import { neuerServer } from './fixtures/test-catalogs'
 import prices from './fixtures/studio-prices-2026-10-02.json'
 
@@ -29,45 +31,14 @@ const CREDIT_USD = 1e-5
 
 /** Jedes Modell dieser Aufnahme, mit dem Endpunkt, den der Anbieter listet. */
 const NEU: Record<string, string> = {
-  'qwen-image-3-pro': 'alibaba/qwen-image-3.0-pro/text-to-image',
-  'qwen-image-3-pro-edit': 'alibaba/qwen-image-3.0-pro/edit',
-  'qwen-image-3': 'alibaba/qwen-image-3.0/text-to-image',
   'qwen-image-2.1': 'wavespeed-ai/qwen-image-2.1/text-to-image',
   'qwen-image-2.1-edit': 'wavespeed-ai/qwen-image-2.1/edit',
-  'flux-3': 'black-forest-labs/flux-3/text-to-image',
-  'flux-3-edit': 'black-forest-labs/flux-3/image-edit',
-  'flux-2-klein-9b': 'wavespeed-ai/flux-2-klein-9b/text-to-image',
-  'krea-2-large': 'wavespeed-ai/krea-v2-large/text-to-image',
-  'cosmos-3-super': 'nvidia/cosmos-3-super/text-to-image',
-  'ideogram-4.5': 'ideogram-ai/ideogram-v4.5',
-  'ideogram-4.5-edit': 'ideogram-ai/ideogram-v4.5/edit',
-  'hidream-o1': 'wavespeed-ai/hidream-o1-image/text-to-image',
-  'hidream-o1-edit': 'wavespeed-ai/hidream-o1-image/edit',
-  'hunyuan-image-3': 'wavespeed-ai/hunyuan-image-3-instruct/text-to-image',
-  'hunyuan-image-3-edit': 'wavespeed-ai/hunyuan-image-3-instruct/edit',
-  'ernie-image-turbo': 'wavespeed-ai/ernie-image/text-to-image-turbo',
-  'seedvr2-image': 'wavespeed-ai/seedvr2/image',
   'ltx-2.5-t2v': 'wavespeed-ai/ltx-2.5/text-to-video',
   'ltx-2.5-i2v': 'wavespeed-ai/ltx-2.5/image-to-video',
-  'flux-3-t2v': 'black-forest-labs/flux-3/text-to-video',
-  'flux-3-i2v': 'black-forest-labs/flux-3/image-to-video',
-  'flux-3-start-end': 'black-forest-labs/flux-3/start-end-to-video',
-  'flux-3-extend': 'black-forest-labs/flux-3/video-extend',
-  'flux-3-video-edit': 'black-forest-labs/flux-3/video-edit',
-  'cosmos-3-super-i2v': 'nvidia/cosmos-3-super/image-to-video',
-  'skyreels-v4-t2v': 'skywork-ai/skyreels-v4/text-to-video',
-  'skyreels-v4-i2v': 'skywork-ai/skyreels-v4/image-to-video',
-  'skyreels-v4-ref': 'skywork-ai/skyreels-v4/reference-to-video',
-  'kandinsky-5-pro-t2v': 'wavespeed-ai/kandinsky5-pro/text-to-video',
-  'kandinsky-5-pro-i2v': 'wavespeed-ai/kandinsky5-pro/image-to-video',
   'minimax-h3-t2v': 'wavespeed-ai/minimax-h3/text-to-video',
   'minimax-h3-ref': 'wavespeed-ai/minimax-h3/reference-to-video',
   'minimax-h3-video-edit': 'wavespeed-ai/minimax-h3/video-edit',
   'wan-3.0-ref': 'alibaba/wan-3.0/reference-to-video',
-  'wan-3.0-video-edit': 'alibaba/wan-3.0/video-edit',
-  'seedvr2-video': 'wavespeed-ai/seedvr2/video',
-  'davinci-magihuman': 'wavespeed-ai/davinci-magihuman/image-to-video',
-  yue2: 'wavespeed-ai/yue2-3b/text-to-music',
 }
 
 beforeEach(() => {
@@ -76,7 +47,7 @@ beforeEach(() => {
 
 describe('die neuen Modelle aus offenen Familien', () => {
   it('sind alle in der Registrierung und im Katalog des neuen Servers, mit dem Endpunkt des Anbieters', () => {
-    expect(Object.keys(NEU)).toHaveLength(39)
+    expect(Object.keys(NEU)).toHaveLength(8)
     for (const [id, endpoint] of Object.entries(NEU)) {
       expect(STUDIO_MODELS[id], id).toBeDefined()
       expect(STUDIO_MODELS[id].endpoint, id).toBe(endpoint)
@@ -144,9 +115,7 @@ describe('der Preis liegt nie unter dem Einkaufspreis', () => {
     const credits = studioCredits(row.model, options, (row as { seconds?: number }).seconds, (row as { imageCount?: number }).imageCount ?? 1, row.promptLength)
     const einkauf = Math.round(row.usd / CREDIT_USD)
     expect(credits).toBeGreaterThanOrEqual(einkauf)
-    const opts = row.options as { mode?: string; duration?: number }
-    const fast = opts.mode === 'fast'
-    if (fast || EXAKT_AUSNAHME.has(row.model)) expect(credits).toBeLessThanOrEqual(Math.ceil(einkauf * 1.6))
+    if (EXAKT_AUSNAHME.has(row.model)) expect(credits).toBeLessThanOrEqual(Math.ceil(einkauf * 1.6))
     else expect(credits).toBe(einkauf)
   })
 
@@ -163,25 +132,20 @@ describe('der Preis liegt nie unter dem Einkaufspreis', () => {
 describe('der Kunde kann sie dort waehlen, wo sie hingehoeren', () => {
   const ids = (list: { id: string }[]) => list.map((m) => m.id)
 
-  it('Text zu Bild: alle elf im Bildwaehler', () => {
-    const bild = ids(studioOnlyImageModels())
-    for (const id of ['qwen-image-3-pro', 'qwen-image-3', 'qwen-image-2.1', 'flux-3', 'flux-2-klein-9b', 'krea-2-large', 'cosmos-3-super', 'ideogram-4.5', 'hidream-o1', 'hunyuan-image-3', 'ernie-image-turbo']) {
-      expect(bild, id).toContain(id)
-    }
+  it('Text zu Bild: Qwen Image 2.1 steht im Bildwaehler', () => {
+    expect(ids(studioOnlyImageModels())).toContain('qwen-image-2.1')
   })
 
   it('Bearbeiten: die Editoren stehen im Edit-Waehler und laufen ohne Maske', () => {
     const edit = ids(editCapableModels())
-    for (const id of ['qwen-image-3-pro-edit', 'qwen-image-2.1-edit', 'flux-3-edit', 'ideogram-4.5-edit', 'hidream-o1-edit', 'hunyuan-image-3-edit']) {
-      expect(edit, id).toContain(id)
-      expect(modelForOp('image', 'edit', id), id).toBe(id)
-    }
+    expect(edit).toContain('qwen-image-2.1-edit')
+    expect(modelForOp('image', 'edit', 'qwen-image-2.1-edit')).toBe('qwen-image-2.1-edit')
     expect(modelForOp('image', 'edit', 'nonsense')).toBe('qwen-image-2.1-edit')
   })
 
   it('Text zu Video: im Video-Waehler, und eine Wahl bleibt beim Start bestehen', () => {
     const video = ids(videoPickerModels())
-    for (const id of ['ltx-2.5-t2v', 'flux-3-t2v', 'skyreels-v4-t2v', 'kandinsky-5-pro-t2v', 'minimax-h3-t2v']) {
+    for (const id of ['ltx-2.5-t2v', 'minimax-h3-t2v']) {
       expect(video, id).toContain(id)
       expect(modelForOp('video', 'generate', id), id).toBe(id)
     }
@@ -192,27 +156,21 @@ describe('der Kunde kann sie dort waehlen, wo sie hingehoeren', () => {
 
   it('Bild zu Video: im Animate-Waehler, samt der Referenzmodelle', () => {
     const animate = ids(animatePickerModels())
-    for (const id of ['ltx-2.5-i2v', 'flux-3-i2v', 'cosmos-3-super-i2v', 'skyreels-v4-i2v', 'kandinsky-5-pro-i2v', 'davinci-magihuman', 'skyreels-v4-ref', 'minimax-h3-ref', 'wan-3.0-ref']) {
+    for (const id of ['ltx-2.5-i2v', 'minimax-h3-ref', 'wan-3.0-ref']) {
       expect(animate, id).toContain(id)
       expect(modelForOp('video', 'animate', id), id).toBe(id)
     }
     expect(animate).not.toContain('ltx-2.5-t2v')
   })
 
-  it('Verlaengern, Restyle, Upscale und Musik: in der Rolle, die ihre Unterkategorie fuehrt', () => {
-    expect(ids(intentPickerModels('extend'))).toContain('flux-3-extend')
-    expect(ids(intentPickerModels('video_upscale'))).toContain('seedvr2-video')
-    expect(ids(intentPickerModels('music'))).toContain('yue2')
-    expect(ids(presetModels('restyle'))).toEqual(expect.arrayContaining(['wan-ditto', 'flux-3-video-edit', 'minimax-h3-video-edit', 'wan-3.0-video-edit']))
-    expect(ids(presetModels('startend'))).toEqual(['flux-3-start-end'])
+  it('Restyle: MiniMax H3 Video Edit steht neben Wan DITTO', () => {
+    expect(ids(presetModels('restyle'))).toEqual(['wan-ditto', 'minimax-h3-video-edit'])
   })
 
-  it('Bild-Upscale: Standard bleibt vorn, SeedVR2 steht daneben und laeuft als Studio-Modell', () => {
-    const liste = ids(intentPickerModels('upscale'))
-    expect(liste).toEqual([STANDARD_UPSCALE, 'seedvr2-image'])
-    expect(utilityOpModel('image', 'upscale', 'seedvr2-image')).toBe('seedvr2-image')
-    expect(utilityOpModel('image', 'upscale', 'flux-3')).not.toBe('flux-3')
-    expect(utilityOpModel('image', 'removebg', 'seedvr2-image')).not.toBe('seedvr2-image')
+  it('Bild-Upscale hat keinen eigenen Waehler: ein Studio-Bildmodell aus dem Bild-Tab wird umgebogen', () => {
+    expect(intentPickerModels('upscale')).toEqual([])
+    expect(utilityOpModel('image', 'upscale', 'qwen-image-2.1')).not.toBe('qwen-image-2.1')
+    expect(utilityOpModel('image', 'removebg', 'qwen-image-2.1')).not.toBe('qwen-image-2.1')
   })
 
   it('jedes Eingabefeld, das die Oberflaeche nicht fuellt, ist ein Feld mit Vorgabe oder ohne Pflicht', () => {
@@ -247,28 +205,21 @@ describe('der Kunde kann sie dort waehlen, wo sie hingehoeren', () => {
   })
 })
 
-describe('Maske und Groesse', () => {
+describe('Maske', () => {
   it('ein Editor per Anweisung braucht keine Maske, flux-dev braucht eine', () => {
-    for (const id of ['flux-3-edit', 'qwen-image-3-pro-edit', 'hidream-o1-edit', 'minimax-h3-edit', 'qwen-image-edit']) expect(editNeedsMask(id), id).toBe(false)
+    for (const id of ['qwen-image-2.1-edit', 'minimax-h3-edit', 'qwen-image-edit']) expect(editNeedsMask(id), id).toBe(false)
     expect(editNeedsMask('flux-dev')).toBe(true)
-  })
-
-  it('akzeptiert die Seitenverhaeltnisse von Cosmos 3 Super als size, und prueft width*height sonst weiter', () => {
-    expect(studioOptions('cosmos-3-super', 'x', { size: '16:9' }).size).toBe('16:9')
-    expect(() => studioOptions('cosmos-3-super', 'x', { size: '9:9' })).toThrow()
-    expect(studioOptions('hidream-o1', 'x', { size: '1024*2048' }).size).toBe('1024*2048')
-    expect(() => studioOptions('hidream-o1', 'x', { size: '16:9' })).toThrow('width*height')
   })
 })
 
 describe('eine Wahl aus einem anderen Tab startet keinen Lauf ohne Bild', () => {
-  it('Text zu Bild laesst ein Studio-Bildmodell stehen und biegt Editoren und Upscaler um', () => {
-    expect(modelForOp('image', 'generate', 'flux-3')).toBe('flux-3')
+  it('Text zu Bild laesst ein Studio-Bildmodell stehen und biegt Editoren um', () => {
+    expect(modelForOp('image', 'generate', 'qwen-image-2.1')).toBe('qwen-image-2.1')
     expect(modelForOp('image', 'generate', 'z-image')).toBe('z-image')
     expect(modelForOp('image', 'generate', 'chroma')).toBe('chroma')
     // Character-Studio: der LoRA-Endpunkt bleibt, was er ist.
     expect(modelForOp('image', 'generate', 'flux-schnell-lora')).toBe('flux-schnell-lora')
-    for (const edit of ['flux-3-edit', 'qwen-image-edit', 'seedvr2-image', 'minimax-h3-edit']) {
+    for (const edit of ['qwen-image-2.1-edit', 'qwen-image-edit', 'minimax-h3-edit']) {
       expect(modelForOp('image', 'generate', edit), edit).toBe('z-image-turbo')
     }
   })

@@ -49,10 +49,5 @@ export function studioReferenceVideo(): string[] {
 /** Bildbearbeitung per Anweisung, ohne Maske. Das Standbild der Oberflaeche geht
  *  hinein, kein Pinsel noetig. */
 export const STUDIO_EDIT_MODELS: readonly string[] = [
-  'minimax-h3-edit', 'qwen-image-3-edit', 'seedream-5-edit',
-  'qwen-image-3-pro-edit', 'qwen-image-2.1-edit', 'flux-3-edit', 'ideogram-4.5-edit',
-  'hidream-o1-edit', 'hunyuan-image-3-edit',
+  'minimax-h3-edit', 'qwen-image-3-edit', 'seedream-5-edit', 'qwen-image-2.1-edit',
 ]
-
-/** Bild-Upscale: ein Standbild geht hinein, dasselbe mit mehr Pixeln kommt zurueck. */
-export const STUDIO_IMAGE_UPSCALERS: readonly string[] = ['seedvr2-image']

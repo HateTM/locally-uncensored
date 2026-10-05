@@ -119,7 +119,7 @@ export function studioCredits(id: string, options: Record<string,unknown>, measu
   }
   // 'input' zahlt die gemessene Eingabe, 'both' die Eingabe UND die angehaengte
   // Laenge: Seedance berechnet beim Verlaengern den ganzen fertigen Clip.
-  // 'inout' (Video-Edit bei MiniMax H3 und Wan 3.0, am 02.10.2026 an
+  // 'inout' (Video-Edit bei MiniMax H3, am 02.10.2026 an
   // /model/price gemessen): der halbe Satz auf die ganzen Eingabesekunden plus
   // der halbe Satz auf die Ausgabedauer. Ohne `duration` gilt die Eingabelaenge.
   if (m.price.mode === 'input' || m.price.mode === 'both' || m.price.mode === 'inout') {

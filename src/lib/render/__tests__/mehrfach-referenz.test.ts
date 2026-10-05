@@ -12,9 +12,8 @@ import { useCloudCatalogStore } from '../../../stores/cloudCatalogStore'
 import { neuerServer } from './fixtures/test-catalogs'
 
 const CAPS: Record<string, number> = {
-  'minimax-h3-ref': 5, 'wan-3.0-ref': 5, 'skyreels-v4-ref': 3,
-  'qwen-image-2.1-edit': 5, 'qwen-image-3-pro-edit': 3, 'flux-3-edit': 5,
-  'hidream-o1-edit': 3, 'hunyuan-image-3-edit': 2, 'seedream-5-edit': 5,
+  'minimax-h3-ref': 5, 'wan-3.0-ref': 5,
+  'qwen-image-2.1-edit': 5, 'qwen-image-3-edit': 3, 'minimax-h3-edit': 5, 'seedream-5-edit': 5,
 }
 
 beforeEach(() => { useCloudCatalogStore.setState({ models: neuerServer() }) })
@@ -38,16 +37,16 @@ describe('wie viele Fotos ein Modell liest', () => {
   })
 
   it('ein Modell mit einem einzelnen Bildfeld oder ohne Bild bietet keine Leiste', () => {
-    expect(studioPhotoCap('ideogram-4.5-edit')).toBe(0)
+    expect(studioPhotoCap('ltx-2.5-i2v')).toBe(0)
     expect(studioPhotoCap('z-image')).toBe(0)
   })
 
   it('startImageCount zaehlt das Standbild und die Leistenfotos, nie ueber der Grenze', () => {
-    expect(startImageCount('flux-3-edit')).toBe(1)
-    expect(startImageCount('flux-3-edit', 2)).toBe(3)
-    expect(startImageCount('flux-3-edit', 40)).toBe(5)
-    expect(startImageCount('hunyuan-image-3-edit', 4)).toBe(2)
-    expect(startImageCount('ideogram-4.5-edit', 3)).toBe(1)
+    expect(startImageCount('qwen-image-2.1-edit')).toBe(1)
+    expect(startImageCount('qwen-image-2.1-edit', 2)).toBe(3)
+    expect(startImageCount('qwen-image-2.1-edit', 40)).toBe(5)
+    expect(startImageCount('qwen-image-3-edit', 4)).toBe(3)
+    expect(startImageCount('ltx-2.5-i2v', 3)).toBe(1)
     expect(startImageCount('minimax-h3-ref', -2)).toBe(1)
   })
 })
@@ -55,15 +54,15 @@ describe('wie viele Fotos ein Modell liest', () => {
 describe('welches Modell die Leiste meint', () => {
   const pick = (image: string, video: string) => ({ cloudImageModel: image, cloudVideoModel: video, cloudOpModel: '' })
   it('Bearbeiten und Animate loesen wie der Start auf', () => {
-    expect(referenceModel('edit', pick('flux-3-edit', ''))).toBe('flux-3-edit')
+    expect(referenceModel('edit', pick('qwen-image-2.1-edit', ''))).toBe('qwen-image-2.1-edit')
     expect(referenceModel('animate', pick('', 'minimax-h3-ref'))).toBe('minimax-h3-ref')
     expect(referenceModel('animate', pick('', 'wan-3.0-ref'))).toBe('wan-3.0-ref')
   })
   it('ein Modell ohne Liste oder eine andere Unterkategorie zeigt keine Leiste', () => {
-    expect(referenceModel('edit', pick('ideogram-4.5-edit', ''))).toBeUndefined()
+    expect(referenceModel('animate', pick('', 'ltx-2.5-i2v'))).toBeUndefined()
     expect(referenceModel('edit', pick('flux-dev', ''))).toBeUndefined()
-    expect(referenceModel('image', pick('flux-3-edit', 'minimax-h3-ref'))).toBeUndefined()
-    expect(referenceModel('video', pick('flux-3-edit', 'minimax-h3-ref'))).toBeUndefined()
+    expect(referenceModel('image', pick('qwen-image-2.1-edit', 'minimax-h3-ref'))).toBeUndefined()
+    expect(referenceModel('video', pick('qwen-image-2.1-edit', 'minimax-h3-ref'))).toBeUndefined()
   })
 })
 
