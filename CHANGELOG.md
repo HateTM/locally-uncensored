@@ -5,7 +5,7 @@ All notable changes to Locally Uncensored are documented here.
 ## [3.0.5] - unreleased
 
 Create runs LTX 2.5, FastH3 and YuE2 on your own machine, edits several images
-in one go and has 39 more models on LU Cloud. Chat takes any file, and each
+in one go and has five new models on LU Cloud. Chat takes any file, and each
 model in a group chat can have its own persona. Dropdowns stay inside the
 window, and the speech install on Linux works again.
 The open-model counts from 3.0.2 still hold: fourteen video models and seven
@@ -93,22 +93,23 @@ image models in the cloud catalogue.
   The Z-Image Turbo description no longer promises 8 to 15 seconds per image,
   which did not hold on smaller cards. Without a detected card, as on a Mac,
   nothing changes.
-- **LU Cloud: 39 more models from open model families.** The cloud pickers in
-  Create know 39 more models, 18 for images, 20 for video and one for music.
-  Among them are Qwen Image 3.0 and 2.1, FLUX 3, Krea 2 Large, Cosmos 3 Super,
-  Ideogram 4.5, HiDream O1, HunyuanImage 3, LTX 2.5, MiniMax H3, Wan 3.0,
-  SkyReels V4, Kandinsky 5 Pro, SeedVR2 and YuE2. A model shows up once the
-  cloud catalogue lists it. "Open weights" next to a name means this exact
-  version has open weights, "Open family" means its family has them and this
-  version does not.
+- **LU Cloud: Qwen Image 2.1, LTX 2.5, MiniMax H3 and Wan 3.0 Reference.** The
+  cloud pickers in Create have five additions from open model families: Qwen
+  Image 2.1 for images, Qwen Image 2.1 for editing, LTX 2.5, MiniMax H3 and
+  Wan 3.0 Reference. LTX 2.5 makes video from a prompt or from a first frame.
+  MiniMax H3 now also starts from a prompt alone, works from reference photos
+  and edits a clip from an instruction. A model shows up once the cloud
+  catalogue lists it. "Open weights" next to a name means this exact version
+  has open weights, "Open family" means its family has them and this version
+  does not.
 - **LU Cloud: Image and Edit make up to four images per run.** The settings
   have an Images slider from 1 to 4. Each image is its own job at its own
   price, lands in the gallery when it is done, and is refunded alone if it
   fails. The credit counter shows the total before you start.
 - **LU Cloud: reference models take several of your photos.** Models that work
-  from reference photos, such as MiniMax H3 Reference, Wan 3.0 Reference and
-  SkyReels V4 Reference, and the editors that take more than one image now
-  have a strip under the source image for up to five photos.
+  from reference photos, such as MiniMax H3 Reference and Wan 3.0 Reference,
+  and the editors that take more than one image now have a strip under the
+  source image for up to five photos.
 - **Chat takes any file, not only images.** The paperclip, drag and drop and
   paste used to turn everything but images away. They now take any file, up to
   3 per message and 64 MB each. The model gets a description of the file: its

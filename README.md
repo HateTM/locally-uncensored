@@ -43,7 +43,7 @@ Some antivirus engines flag unsigned NSIS installers that download other binarie
 
 Current release: **v3.0.5** (October 2026). Every change since 1.0.0 is in [CHANGELOG.md](CHANGELOG.md).
 
-3.0.5 is about Create: LTX 2.5, FastH3 and YuE2 run on your own machine, Qwen-Image 2.1 gets a transparent background and its prompt enhancer, Edit, Remove Background and Enhance Image take up to 50 images in one go, and LU Cloud has 39 more models from open model families. Chat takes any file, each model in a group chat can have its own persona, dropdowns stay inside the window (issue 149), and the speech install works again on Ubuntu 24.04.
+3.0.5 is about Create: LTX 2.5, FastH3 and YuE2 run on your own machine, Qwen-Image 2.1 gets a transparent background and its prompt enhancer, Edit, Remove Background and Enhance Image take up to 50 images in one go, and LU Cloud adds Qwen Image 2.1, LTX 2.5, MiniMax H3 and Wan 3.0 Reference. Chat takes any file, each model in a group chat can have its own persona, dropdowns stay inside the window (issue 149), and the speech install works again on Ubuntu 24.04.
 
 3.0.4 fixed the Code agent and the agent in chat on LU Cloud: writing a long file no longer ends the run, "continue" picks up where a run stopped instead of starting over, the agent keeps a plan only when you ask for one, and cloud context is 32K by default and can be set per model. It also fixed the bugs reported on GitHub and Discord since 3.0.3 (issues 144 to 147): MiniMax H3 runs as a video model with sound, Edit takes up to three extra images with Qwen-Image 2.1, a missing encoder or VAE is named and offered as a download instead of ending in "Value not in list", the LoRA stack follows the loras folder, and group chat works with every LU Engine model.
 

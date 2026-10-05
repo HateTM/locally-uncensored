@@ -137,7 +137,7 @@ export const RELEASE_NOTES: ReleaseNote[] = [
   // selben Zug auf 3.0.5. 3.0.4 darunter bleibt unveraendert.
   {
     version: '3.0.5',
-    headline: 'Create gets LTX 2.5, FastH3 and YuE2 on your own machine, edits several images in one go and has more models on LU Cloud. Chat takes any file. Dropdowns stay inside the window, and the speech install on Linux works again.',
+    headline: 'Create gets LTX 2.5, FastH3 and YuE2 on your own machine, edits several images in one go and has five new models on LU Cloud. Chat takes any file. Dropdowns stay inside the window, and the speech install on Linux works again.',
     lines: [
       {
         title: 'LTX 2.5, FastH3 and YuE2 run on your own machine.',
@@ -206,8 +206,8 @@ export const RELEASE_NOTES: ReleaseNote[] = [
         title: 'Create on LU Cloud',
         items: [
           {
-            title: '39 more models from open model families.',
-            detail: 'The cloud pickers know 39 more models, 18 for images, 20 for video and one for music. Among them are Qwen Image 3.0 and 2.1, FLUX 3, Krea 2 Large, Cosmos 3 Super, Ideogram 4.5, HiDream O1, HunyuanImage 3, LTX 2.5, MiniMax H3, Wan 3.0, SkyReels V4, Kandinsky 5 Pro, SeedVR2 and YuE2. A model shows up once the cloud catalogue lists it. "Open weights" next to a name means this exact version has open weights, "Open family" means its family has them and this version does not.',
+            title: 'Qwen Image 2.1, LTX 2.5, MiniMax H3 and Wan 3.0 Reference.',
+            detail: 'The cloud pickers in Create have five additions from open model families: Qwen Image 2.1 for images, Qwen Image 2.1 for editing, LTX 2.5, MiniMax H3 and Wan 3.0 Reference. LTX 2.5 makes video from a prompt or from a first frame. MiniMax H3 now also starts from a prompt alone, works from reference photos and edits a clip from an instruction. A model shows up once the cloud catalogue lists it. "Open weights" next to a name means this exact version has open weights, "Open family" means its family has them and this version does not.',
           },
           {
             title: 'Image and Edit make up to four images per run.',
@@ -215,7 +215,7 @@ export const RELEASE_NOTES: ReleaseNote[] = [
           },
           {
             title: 'Reference models take several of your photos.',
-            detail: 'Models that work from reference photos, such as MiniMax H3 Reference, Wan 3.0 Reference and SkyReels V4 Reference, and the editors that take more than one image now have a strip under the source image for up to five photos.',
+            detail: 'Models that work from reference photos, such as MiniMax H3 Reference and Wan 3.0 Reference, and the editors that take more than one image now have a strip under the source image for up to five photos.',
           },
           {
             title: 'Edit starts without a mask on models that need none.',

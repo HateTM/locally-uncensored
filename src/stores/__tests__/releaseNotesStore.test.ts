@@ -415,7 +415,7 @@ describe('the notes table', () => {
       // Mehrere Bilder in einem Zug, Figur aus einem Video, Prompt umschreiben.
       'up to 50 source images', 'save character', 'improve my prompt',
       // Cloud: neue Modelle, Anzahl, Referenzfotos, Edit ohne Maske.
-      '39 more models', 'images slider from 1 to 4', 'up to five photos', 'needs no mask',
+      'five additions from open model families', 'images slider from 1 to 4', 'up to five photos', 'needs no mask',
       // Chat: Dateien und Persona je Gruppenmodell.
       'up to 3 per message and 64 mb each', 'persona picker',
       // Fixes: Linux-Sprache, Aufklappmenues (GitHub 149), Pruefsumme.
