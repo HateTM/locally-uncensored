@@ -105,6 +105,12 @@ export interface CloudMe {
      *  what the invoice contradicts. Absent on older servers = unknown, which
      *  every surface reads as "promise nothing". */
     paidPlan?: boolean
+    /** True while a renewal payment of this account failed and no paid plan
+     *  is active. Independent of status: pack credits keep such an account
+     *  'active' on tier 'starter'. Absent on older servers = false. */
+    pastDue?: boolean
+    /** The plan waiting for that payment (hosted | hosted-pro | hosted-max). */
+    pastDueTier?: string | null
   }
 }
 

@@ -13,6 +13,7 @@ import { refreshCatalog } from '../stores/cloudCatalogStore'
 import { useProviderStore } from '../stores/providerStore'
 import { useSettingsStore } from '../stores/settingsStore'
 import { stopAllBackgroundWork } from '../lib/background-shutdown'
+import { pastDueFromLicense } from '../lib/past-due'
 import type { CloudQuota } from '../lib/render/cloud-jobs'
 
 const REFRESH_MS = 5 * 60_000
@@ -71,7 +72,10 @@ async function probeAccount(): Promise<void> {
       if (stale()) return
       void refreshCatalog()
     }
-    store.setSignedIn({ id: me.user.id, email: me.user.email }, { licenseActive, tier, access, paidPlan, quota })
+    store.setSignedIn(
+      { id: me.user.id, email: me.user.email },
+      { licenseActive, tier, access, paidPlan, ...pastDueFromLicense(me.license), quota },
+    )
     syncChatProvider()
     syncAppMode()
   } catch (err) {
