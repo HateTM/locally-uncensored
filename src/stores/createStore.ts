@@ -1222,6 +1222,10 @@ export const useCreateStore = create<CreateState>()(
         const d = s.mode === 'video'
           ? (MODEL_TYPE_DEFAULTS[classifyModel(s.videoModel)] || MODEL_TYPE_DEFAULTS.unknown)
           : MODEL_TYPE_DEFAULTS[s.imageModelType]
+        // The picked model's own values where it has some: a distilled
+        // checkpoint reset to its family's 25 or 30 steps renders to mush.
+        // LU Cloud renders with its own model, there the family stays.
+        const own = s.backend === 'cloud' ? {} : s.mode === 'video' ? videoModelParams(s.videoModel) : imageModelParams(s)
         set({
           sampler: d.sampler,
           scheduler: d.scheduler,
@@ -1229,6 +1233,7 @@ export const useCreateStore = create<CreateState>()(
           cfgScale: d.cfgScale,
           width: d.width,
           height: d.height,
+          ...own,
           hiresFixEnabled: false,
           hiresScale: 1.5,
           hiresDenoise: 0.5,

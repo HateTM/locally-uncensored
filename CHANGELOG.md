@@ -187,6 +187,12 @@ image models in the cloud catalogue.
   afterwards. The same happened when the app was closed on one of those tabs.
   Each tab now keeps its own values, and a distilled video model keeps its few
   steps instead of the 30 of its model family.
+- **Draft, Standard and High follow the model you picked.** The Quality
+  buttons for images counted from the step count of the model family, so on a
+  checkpoint built for a few steps, such as SD Turbo with 4, Draft meant 15
+  steps and the image came out overcooked. Standard is now the model's own
+  step count, and Draft and High scale from it. "Reset to model defaults" goes
+  back to those values as well, for images and for fast video models.
 - **A failed subscription payment is shown as one.** When a renewal payment
   failed, the account window said "No active plan" and the Cloud window
   offered the plans again, although a new plan cannot be bought until the open

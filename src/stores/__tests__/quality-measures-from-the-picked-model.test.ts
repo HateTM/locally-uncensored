@@ -106,3 +106,29 @@ describe('the other ends', () => {
     expect(values()).toEqual({ steps: 15, cfgScale: 5 })
   })
 })
+
+describe('"Reset to model defaults" goes back to the picked model too', () => {
+  const reset = () => useCreateStore.getState().resetParamsToModelDefaults()
+
+  it('sd_turbo returns to its own 4 steps at CFG 1, not to the 25 of the SD family', () => {
+    useCreateStore.getState().setImageModel('sd_turbo.safetensors', 'sd15')
+    useCreateStore.setState({ steps: 40, cfgScale: 9 })
+    reset()
+    expect(values()).toEqual({ steps: 4, cfgScale: 1 })
+  })
+
+  it('an ordinary checkpoint returns to the values of its family, as before', () => {
+    useCreateStore.getState().setImageModel('dreamshaper_8.safetensors', 'sd15')
+    useCreateStore.setState({ steps: 40, cfgScale: 9 })
+    reset()
+    expect(values()).toEqual({ steps: MODEL_TYPE_DEFAULTS.sd15.steps, cfgScale: MODEL_TYPE_DEFAULTS.sd15.cfgScale })
+  })
+
+  it('a lightning video model returns to its 6 steps at CFG 1', () => {
+    useCreateStore.getState().setIntent('video')
+    useCreateStore.getState().setVideoModel('wan2.2_i2v_lightning_4steps.safetensors')
+    useCreateStore.setState({ steps: 30, cfgScale: 6 })
+    reset()
+    expect(values()).toEqual({ steps: 6, cfgScale: 1 })
+  })
+})
