@@ -31,6 +31,7 @@ import { MONOGRAM, MONOGRAM_INVERT } from '../layout/brand'
 import { AVATAR_SLOT } from './avatar-slot'
 import { MOTION_S } from '../ui/motion'
 import { Hinweis } from '../ui/Hinweis'
+import { RefusalNotice } from './RefusalNotice'
 import { fitTextarea } from '../../lib/fit-textarea'
 
 interface Props {
@@ -54,9 +55,12 @@ interface Props {
   /** Group chat: the persona this participant speaks as, when it has one of
    *  its own. Shown in front of the model name. */
   speakerName?: string
+  /** This answer is the latest one of the chat in which the model declined
+   *  (lib/refusal-detect). The notice with "New chat" stands under it. */
+  declined?: boolean
 }
 
-function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, onApprove, onReject, isLast, isStreaming, speakerName }: Props) {
+function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, onApprove, onReject, isLast, isStreaming, speakerName, declined }: Props) {
   const [copied, setCopied] = useState(false)
   const [isEditing, setIsEditing] = useState(false)
   const [editContent, setEditContent] = useState('')
@@ -585,6 +589,10 @@ function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, o
             ))}
           </div>
         )}
+
+        {/* The model declined: said under the answer, never at the prompt
+            field, and before the action bar so it reads as part of the turn. */}
+        {declined && <RefusalNotice />}
 
         {/* Action bar UNDER the message (David 2026-06-06: "eigene Leiste unter
             der Nachricht" instead of cramped hover-icons in the corner). Bigger

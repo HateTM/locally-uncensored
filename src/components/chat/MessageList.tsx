@@ -10,6 +10,8 @@ import { CompactBlock } from './CompactBlock'
 import { compactionAnchors } from '../../lib/compact-summary'
 import { Hinweis } from '../ui/Hinweis'
 import { TRANSCRIPT_MAX_PX } from './composer-width'
+import { useAgentModeStore } from '../../stores/agentModeStore'
+import { latestRefusalId, refusalNoticeApplies } from '../../lib/refusal-detect'
 
 /**
  * Above this many visible messages the transcript stops paying full layout +
@@ -84,6 +86,12 @@ export function MessageList({ isGenerating, isThisChatGenerating, isLoadingModel
     [groupModels, groupPersonas, personas],
   )
 
+  // Agent mode of THIS chat: a short "I can't ..." there is usually about a
+  // file or a command, so the refusal notice stays out (lib/refusal-detect).
+  const agentModeActive = useAgentModeStore((s) =>
+    conversation ? s.agentModeActive[conversation.id] ?? false : false,
+  )
+
   const lastMessage = conversation?.messages[conversation.messages.length - 1]
   // The approval id is part of the scroll trigger (G31): a run waiting for a
   // decision often adds NO content, so the list stood still while the inline
@@ -136,6 +144,13 @@ export function MessageList({ isGenerating, isThisChatGenerating, isLoadingModel
     (m) => (m.role !== 'system' || !!m.notice) && !m.hidden,
   )
   const lastVisibleId = visibleMessages[visibleMessages.length - 1]?.id
+  // The one answer that carries the refusal notice, if any. The answer that
+  // is still being written is never judged: every long answer is a short one
+  // for a moment.
+  const streamingId = showTyping && lastMessage?.role === 'assistant' ? lastMessage.id : null
+  const declinedId = refusalNoticeApplies(conversation, agentModeActive)
+    ? latestRefusalId(visibleMessages, streamingId)
+    : null
 
   if (skipGate.id !== conversation.id) {
     setSkipGate({
@@ -216,6 +231,7 @@ export function MessageList({ isGenerating, isThisChatGenerating, isLoadingModel
                 pendingApprovalId={pendingApprovalId}
                 onApprove={onApprove}
                 onReject={onReject}
+                declined={message.id === declinedId}
                 speakerName={message.modelId && speakers[message.modelId]?.personaPrompt !== undefined
                   ? speakers[message.modelId].name
                   : undefined}
