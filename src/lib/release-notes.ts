@@ -248,7 +248,7 @@ export const RELEASE_NOTES: ReleaseNote[] = [
           },
           {
             title: 'LM Studio is one line in the local model list.',
-            detail: 'When LM Studio is installed and its server is off, the local model list showed a box with a paragraph of text. It is now a single line with a status dot, the number of models on disk and a small Start button. What Start does to your local chat backend is in the tooltip of the button.',
+            detail: 'When LM Studio is installed and its server is off, the local model list showed a box with a paragraph of text. It is now a single line with a status dot, the number of models on disk and a small Start button. What Start does to your local chat backend is in the tooltip of the button. While the menu is open the line follows the server, so it turns to running once the server is up. The number counts chat models only, without embedding models and vision projectors, so it matches the list after Start.',
           },
           {
             title: 'Five cloud models no longer carry the No refusals mark.',
@@ -262,6 +262,14 @@ export const RELEASE_NOTES: ReleaseNote[] = [
           {
             title: 'Linux: speech to text and Piper install again.',
             detail: 'On Ubuntu 24.04 and other distributions that protect the system Python, installing faster-whisper and Piper ended with "Can not perform a \'--user\' install" when ComfyUI ran in its own Python environment. The installer mistook that environment for the protected system Python and added options pip refuses there. It now recognises the environment and installs into it.',
+          },
+          {
+            title: 'Image settings survive a visit to Music, Lip sync or Motion.',
+            detail: 'Steps, CFG and Quality for images came back changed after you opened Music, Lip sync or Motion in between. Quality on Draft, for example, read High with 50 steps afterwards. The same happened when the app was closed on one of those tabs. Each tab now keeps its own values, and a distilled video model keeps its few steps instead of the 30 of its model family.',
+          },
+          {
+            title: 'A failed subscription payment is shown as one.',
+            detail: 'When a renewal payment failed, the account window said "No active plan" and the Cloud window offered the plans again, although a new plan cannot be bought until the open invoice is paid. Both now say that the last payment failed and have a "Pay open invoice" button that opens your account on lu-labs.ai in the browser. Credits you bought stay usable, also after a plan has ended.',
           },
           {
             title: 'A model download checks its checksum on a retry too.',

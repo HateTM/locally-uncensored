@@ -136,7 +136,10 @@ image models in the cloud catalogue.
   installed and its server is off, the local model list showed a box with a
   paragraph of text. It is now a single line with a status dot, the number of
   models on disk and a small Start button. What Start does to your local chat
-  backend is in the tooltip of the button.
+  backend is in the tooltip of the button. While the menu is open the line
+  follows the server, so it turns to running once the server is up. The number
+  counts chat models only, without embedding models and vision projectors, so
+  it matches the list after Start.
 
 ### Changed
 
@@ -177,6 +180,18 @@ image models in the cloud catalogue.
   one model no longer carry over to the next one. In Music, the length slider
   and the Lyrics or Style field show only where the model reads them, and a
   tool without a prompt field sends no leftover prompt.
+- **Image settings survive a visit to Music, Lip sync or Motion.** Steps, CFG
+  and Quality for images came back changed after you opened Music, Lip sync or
+  Motion in between. Quality on Draft, for example, read High with 50 steps
+  afterwards. The same happened when the app was closed on one of those tabs.
+  Each tab now keeps its own values, and a distilled video model keeps its few
+  steps instead of the 30 of its model family.
+- **A failed subscription payment is shown as one.** When a renewal payment
+  failed, the account window said "No active plan" and the Cloud window
+  offered the plans again, although a new plan cannot be bought until the open
+  invoice is paid. Both now say that the last payment failed and have a "Pay
+  open invoice" button that opens your account on lu-labs.ai in the browser.
+  Credits you bought stay usable, also after a plan has ended.
 - **A model download checks its checksum on a retry too.** After a failed
   download, Retry and Resume started the file again without its SHA-256 and
   expected size, so the second attempt was not verified. Both are kept now. A
