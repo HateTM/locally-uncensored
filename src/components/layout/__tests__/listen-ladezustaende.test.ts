@@ -46,6 +46,7 @@ const DISCOVER = codeOnly(read('components', 'models', 'DiscoverModels.tsx'))
 // und ihr Ladezustand ist deshalb auch nur noch einmal da.
 const CIVITAI = codeOnly(read('components', 'models', 'CivitaiSearchPanel.tsx'))
 const SELECTOR = codeOnly(read('components', 'models', 'ModelSelector.tsx'))
+const CLOUD_PICKER = codeOnly(read('components', 'models', 'CloudModelPicker.tsx'))
 const SETTINGS = codeOnly(read('components', 'settings', 'SettingsPage.tsx'))
 const CSS = read('index.css')
 
@@ -84,11 +85,18 @@ describe('der Modellwaehler kann waehrend des Ladens nichts mehr behaupten', () 
   it('„No models available" haengt an inventoryLoaded, nicht nur an der Laenge', () => {
     // Das ist der eigentliche Befund an dieser Stelle: der Zustand fehlte
     // nicht nur, er war durch eine FALSCHE Aussage besetzt.
-    expect(SELECTOR).toContain('{inventoryLoaded && textModels.length === 0 && (')
-    const at = SELECTOR.indexOf('No models available')
+    // Seit 3.0.5 steht der Satz EINMAL, in `emptyList`, und beide Listen
+    // zeigen ihn nur hinter dem Gate: die lokale direkt, die Cloud-Liste ueber
+    // `loading`, das CloudModelPicker vor `empty` prueft.
+    expect(SELECTOR.split('No models available</p>').length - 1).toBe(1)
+    const at = SELECTOR.indexOf('const emptyList = (')
     expect(at).toBeGreaterThan(0)
-    // Der Gate steht davor, nicht irgendwo.
-    expect(SELECTOR.lastIndexOf('inventoryLoaded && textModels.length === 0', at)).toBeGreaterThan(0)
+    expect(SELECTOR.indexOf('No models available</p>', at) - at).toBeLessThan(200)
+    expect(SELECTOR.split('emptyList').length - 1, 'emptyList wird an genau zwei Stellen gezeigt').toBe(3)
+    expect(SELECTOR).toContain('{inventoryLoaded && textModels.length === 0 && emptyList}')
+    expect(SELECTOR).toContain('loading={!inventoryLoaded}')
+    expect(SELECTOR).toContain('empty={emptyList}')
+    expect(CLOUD_PICKER).toContain('{!loading && rows.length === 0 && empty}')
   })
 
   it('das Signal kommt aus dem Store, nicht aus einem zweiten lokalen Flag', () => {
