@@ -153,8 +153,8 @@ function sameStringSet(prev: Set<string>, next: string[]): boolean {
 // returns nothing and LM Studio is silently dropped from the dropdown.
 // v2.4.4 added a "Start LM Studio server" hint to onboarding, but the
 // chat picker (where users actually look for their models) never got
-// the same treatment. This banner closes that gap. Polls
-// `lmstudio_server_status` on dropdown open; renders inline when LM
+// the same treatment. This banner closes that gap. Asks
+// `lmstudio_server_status` while the dropdown is open; renders inline when LM
 // Studio is detected on disk (lms.exe present OR models in
 // ~/.lmstudio/models/) AND its server isn't running. Clicking "Start
 // Server" hits the same Tauri command the Settings panel uses, then
@@ -171,9 +171,17 @@ export interface LmStudioServerStatus {
   running: boolean
   port: number
   lms_present: boolean
+  /** Any GGUF in LM Studio's models folder. */
   models_detected: boolean
+  /** The models the chat picker lists once the server runs: no embedding
+   *  models, no vision projectors, a split model once. */
   model_count: number
 }
+
+/** How often the line asks the server while the menu is open. */
+const LMSTUDIO_STATUS_POLL_MS = 1500
+/** How long "starting" stands before the Start button comes back. */
+const LMSTUDIO_START_WAIT_MS = 30_000
 
 // One line with a state dot, a short sentence and a text button (David,
 // 05.10.2026). It used to be a box of three text blocks and a full-width
@@ -188,55 +196,92 @@ function LmStudioStatusLine({ onStarted }: { onStarted: () => void }) {
   // tooltip of the button, the line itself stays one line.
   const replacesBuiltinEngine = useProviderStore((s) => adoptionReplacesBuiltinEngine(s.providers.openai))
 
+  // The line follows the server for as long as the menu is open. It used to
+  // ask once on open and for six seconds after "Start": a server that needed
+  // longer came up, its models reached the list, and the line above them went
+  // on saying "server off" (Windows box, 05.10.2026).
+  const refreshRef = useRef<() => Promise<void>>(async () => {})
+  const startAsked = useRef(false)
+  const onStartedRef = useRef(onStarted)
+  useEffect(() => { onStartedRef.current = onStarted }, [onStarted])
   useEffect(() => {
     let cancelled = false
-    backendCall<LmStudioServerStatus>('lmstudio_server_status')
-      .then(s => { if (!cancelled) setStatus(s) })
-      .catch(() => { /* not Tauri / endpoint missing → just don't render */ })
-    return () => { cancelled = true }
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let wasRunning: boolean | null = null
+    let following = false
+    let asked = 0
+    const refresh = async () => {
+      clearTimeout(timer)
+      const mine = ++asked
+      const fresh = await backendCall<LmStudioServerStatus>('lmstudio_server_status').catch(() => null)
+      // A newer question is on its way (the click on "Start" asks at once):
+      // that one answers and keeps the rhythm.
+      if (cancelled || mine !== asked) return
+      // Not Tauri, endpoint missing, or no LM Studio on this machine: there
+      // is nothing to follow, so the line stays away and nothing keeps asking.
+      // One answer that fails later on is not that: the line keeps what it
+      // last knew and asks again.
+      const detected = !!fresh && (fresh.lms_present || fresh.models_detected)
+      if (!fresh && following) timer = setTimeout(() => void refresh(), LMSTUDIO_STATUS_POLL_MS)
+      if (!fresh || !detected) return
+      following = true
+      const cameUp = fresh.running && wasRunning === false
+      wasRunning = fresh.running
+      if (cameUp) {
+        // After a click on "Start" this is the moment the line promised: the
+        // models have to appear. A running server is only half of that. The
+        // picker lists ENABLED provider slots, so without the slot the models
+        // stay invisible and the button leads into a dead end (Nebenbefund 4,
+        // R8 re-measure). Same call the BackendSelector makes, no
+        // LM-Studio-only path. A server someone started elsewhere takes no
+        // slot: nobody asked for that here.
+        if (startAsked.current) {
+          startAsked.current = false
+          const update = lmStudioSlotUpdate(useProviderStore.getState().providers.openai)
+          if (update) {
+            useProviderStore.getState().setProviderConfig('openai', update)
+            // Opus review, R13D follow-up: this click is the deliberate
+            // pick `adoptionReplacesBuiltinEngine` already warns about
+            // above, not an eviction bug, so the missing-engine notice
+            // must not fire because of it. See lib/builtin-engine-presence.ts.
+            if (update.managed === false) useProviderStore.getState().setEngineOptedOut(true)
+          }
+        }
+        setStarting(false)
+        onStartedRef.current()
+      }
+      setStatus(fresh)
+      timer = setTimeout(() => void refresh(), LMSTUDIO_STATUS_POLL_MS)
+    }
+    refreshRef.current = refresh
+    void refresh()
+    return () => { cancelled = true; clearTimeout(timer) }
   }, [])
+
+  // "Starting" is a promise with an end: a server that has not answered by
+  // then gets its Start button back. The line keeps following it either way.
+  useEffect(() => {
+    if (!starting) return
+    const timer = setTimeout(() => setStarting(false), LMSTUDIO_START_WAIT_MS)
+    return () => clearTimeout(timer)
+  }, [starting])
 
   // Render only when LM Studio is on disk but its server is off. If
   // running, models are already in the list; if neither lms.exe nor any
   // models are present, the user just doesn't have LM Studio.
-  const detected = !!status && (status.lms_present || status.models_detected)
-  if (!status || status.running || !detected) return null
+  if (!status || status.running) return null
 
   const handleStart = async (e: React.MouseEvent) => {
     e.stopPropagation()
     if (starting) return
     setStarting(true)
     setStartError('')
+    startAsked.current = true
     try {
       await backendCall('start_lmstudio_server')
-      // The CLI takes a second or two to bind 1234, poll status
-      // briefly so the line replaces itself with the models list
-      // instead of leaving the spinner spinning forever.
-      for (let i = 0; i < 8; i++) {
-        await new Promise(r => setTimeout(r, 750))
-        const fresh = await backendCall<LmStudioServerStatus>('lmstudio_server_status').catch(() => null)
-        if (fresh) {
-          setStatus(fresh)
-          if (fresh.running) {
-            // A running server is only half of what the line promises. The
-            // picker lists ENABLED provider slots, so without this the models
-            // stay invisible and the button leads into a dead end
-            // (Nebenbefund 4, R8 re-measure). Same call the BackendSelector
-            // makes, no LM-Studio-only path.
-            const update = lmStudioSlotUpdate(useProviderStore.getState().providers.openai)
-            if (update) {
-              useProviderStore.getState().setProviderConfig('openai', update)
-              // Opus review, R13D follow-up: this click is the deliberate
-              // pick `adoptionReplacesBuiltinEngine` already warns about
-              // above, not an eviction bug, so the missing-engine notice
-              // must not fire because of it. See lib/builtin-engine-presence.ts.
-              if (update.managed === false) useProviderStore.getState().setEngineOptedOut(true)
-            }
-            onStarted()
-            break
-          }
-        }
-      }
+      // The CLI takes a moment to bind 1234. Ask right away, the line then
+      // keeps asking on its own until the server answers.
+      await refreshRef.current()
     } catch (e) {
       // Tauris `invoke` lehnt mit einem STRING ab (die Rust-Seite gibt
       // `Result<_, String>` zurueck), ein `e.message` haette im ausgelieferten
@@ -244,8 +289,8 @@ function LmStudioStatusLine({ onStarted }: { onStarted: () => void }) {
       // Projekt genau diese Frage beantwortet (lib/error-text.ts): String,
       // Error oder sonst etwas.
       const detail = detailOf(e)
+      startAsked.current = false
       setStartError(detail ? detail.slice(0, 80) : 'Start failed')
-    } finally {
       setStarting(false)
     }
   }

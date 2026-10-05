@@ -36,7 +36,7 @@ vi.mock('../../../api/ollama', () => ({
   unloadAllModels: vi.fn(async () => {}),
 }))
 const backendCall = vi.fn(async (_cmd: string): Promise<unknown> => null)
-vi.mock('../../../api/backend', () => ({ backendCall: (cmd: string) => backendCall(cmd) }))
+vi.mock('../../../api/backend', () => ({ backendCall: (cmd: string) => backendCall(cmd), isTauri: () => false }))
 vi.mock('../../../api/builtin-ensure', () => ({ diagnoseBuiltinEngine: vi.fn(async () => null) }))
 
 const { ModelSelector, lmStudioLineText, lmStudioStartTitle } = await import('../ModelSelector')
@@ -65,6 +65,9 @@ async function open(status: unknown, mode: 'local' | 'cloud' = 'local') {
   useSettingsStore.setState({ settings: { ...DEFAULT_SETTINGS, appMode: mode } })
   render(createElement(ModelSelector))
   await act(async () => { fireEvent.click(screen.getByLabelText('Select chat model')) })
+  // The selector loads its list on mount and on open. What counts below is a
+  // reload the line asked for.
+  fetchModels.mockClear()
   return { setStatus: (s: unknown) => { serverStatus = s } }
 }
 
@@ -148,13 +151,13 @@ describe('Start', () => {
   it('starts the server, hands LM Studio the slot and reloads the list, as before', async () => {
     vi.useFakeTimers()
     const probe = await open(OFF)
-    probe.setStatus(RUNNING)
     await act(async () => { fireEvent.click(startButton()) })
     expect(backendCall).toHaveBeenCalledWith('start_lmstudio_server')
     expect(line()!.getAttribute('data-state')).toBe('starting')
     expect(line()!.querySelector('.st')!.textContent).toBe('LM Studio server starting')
     expect(screen.queryByRole('button', { name: 'Start' })).toBeNull()
-    await act(async () => { await vi.advanceTimersByTimeAsync(800) })
+    probe.setStatus(RUNNING)
+    await act(async () => { await vi.advanceTimersByTimeAsync(1600) })
     expect(fetchModels).toHaveBeenCalled()
     const openai = useProviderStore.getState().providers.openai
     expect(openai.managed).toBe(false)
@@ -176,5 +179,102 @@ describe('Start', () => {
     expect(el.querySelector('.st')!.textContent).toBe('LM Studio server did not start')
     expect(el.querySelector('.st')!.getAttribute('title')).toBe('lms: command not found')
     expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy()
+  })
+})
+
+// Windows box, 05.10.2026: after "Start" the models came into the list, and
+// the line above them kept saying "server off" for as long as the menu stayed
+// open. It asked the server once on open and for six seconds after the click.
+describe('the line follows the server while the menu is open', () => {
+  const statusCalls = () => backendCall.mock.calls.filter(([cmd]) => cmd === 'lmstudio_server_status').length
+
+  it('a server that needs longer than a few seconds still takes the line away and brings its models', async () => {
+    vi.useFakeTimers()
+    const probe = await open(OFF)
+    await act(async () => { fireEvent.click(startButton()) })
+    await act(async () => { await vi.advanceTimersByTimeAsync(12_000) })
+    expect(line()!.getAttribute('data-state')).toBe('starting')
+    expect(fetchModels).not.toHaveBeenCalled()
+    probe.setStatus(RUNNING)
+    await act(async () => { await vi.advanceTimersByTimeAsync(1600) })
+    expect(line()).toBeNull()
+    expect(fetchModels).toHaveBeenCalled()
+    expect(useProviderStore.getState().providers.openai.baseUrl).toContain('1234')
+  })
+
+  it('gives the Start button back after the wait, and still follows a server that comes late', async () => {
+    vi.useFakeTimers()
+    const probe = await open(OFF)
+    await act(async () => { fireEvent.click(startButton()) })
+    await act(async () => { await vi.advanceTimersByTimeAsync(31_000) })
+    expect(line()!.getAttribute('data-state')).toBe('off')
+    expect(startButton()).toBeTruthy()
+    probe.setStatus(RUNNING)
+    await act(async () => { await vi.advanceTimersByTimeAsync(1600) })
+    expect(line()).toBeNull()
+    expect(useProviderStore.getState().providers.openai.managed).toBe(false)
+  })
+
+  it('a server started somewhere else takes the line away, reloads the list and takes no slot', async () => {
+    vi.useFakeTimers()
+    const probe = await open(OFF)
+    probe.setStatus(RUNNING)
+    await act(async () => { await vi.advanceTimersByTimeAsync(1600) })
+    expect(line()).toBeNull()
+    expect(fetchModels).toHaveBeenCalledTimes(1)
+    const openai = useProviderStore.getState().providers.openai
+    expect(openai.managed).toBe(true)
+    expect(openai.baseUrl).toContain('8127')
+  })
+
+  it('a server that stops brings the line back, with the count of that moment', async () => {
+    vi.useFakeTimers()
+    const probe = await open(RUNNING)
+    expect(line()).toBeNull()
+    probe.setStatus({ ...OFF, model_count: 3 })
+    await act(async () => { await vi.advanceTimersByTimeAsync(1600) })
+    expect(line()!.querySelector('.st')!.textContent).toBe('LM Studio server off, 3 models on disk')
+    // Nothing came up, so nothing is reloaded.
+    expect(fetchModels).not.toHaveBeenCalled()
+  })
+
+  it('one failed answer does not end the following', async () => {
+    vi.useFakeTimers()
+    const probe = await open(OFF)
+    backendCall.mockImplementationOnce(async () => { throw 'lmstudio_server_status task: cancelled' })
+    await act(async () => { await vi.advanceTimersByTimeAsync(1600) })
+    expect(line()!.getAttribute('data-state')).toBe('off')
+    probe.setStatus(RUNNING)
+    await act(async () => { await vi.advanceTimersByTimeAsync(1600) })
+    expect(line()).toBeNull()
+  })
+
+  it('asks once and then leaves it when LM Studio is not on this machine', async () => {
+    vi.useFakeTimers()
+    await open({ running: false, port: 1234, lms_present: false, models_detected: false, model_count: 0 })
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
+    expect(statusCalls()).toBe(1)
+  })
+
+  it('asks once and then leaves it where the question itself fails (no Tauri)', async () => {
+    vi.useFakeTimers()
+    backendCall.mockImplementation(async () => { throw 'not running (e2e)' })
+    useSettingsStore.setState({ settings: { ...DEFAULT_SETTINGS, appMode: 'local' } })
+    render(createElement(ModelSelector))
+    await act(async () => { fireEvent.click(screen.getByLabelText('Select chat model')) })
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
+    expect(line()).toBeNull()
+    expect(statusCalls()).toBe(1)
+  })
+
+  it('stops asking when the menu closes', async () => {
+    vi.useFakeTimers()
+    await open(OFF)
+    await act(async () => { await vi.advanceTimersByTimeAsync(3200) })
+    const before = statusCalls()
+    expect(before).toBeGreaterThan(1)
+    cleanup()
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
+    expect(statusCalls()).toBe(before)
   })
 })
