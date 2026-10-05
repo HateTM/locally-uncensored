@@ -33,36 +33,50 @@ export interface CodexConfirmRequest {
   cloudReason: boolean
 }
 
+interface Waiting {
+  req: CodexConfirmRequest
+  resolve: (allow: boolean) => void
+}
+
 interface CodexConfirmState {
+  /** The request on the card: the oldest one still waiting. */
   pending: CodexConfirmRequest | null
-  /** Resolver for the awaited approval. Null when nothing is pending. */
+  /** Resolver of that request. Null when nothing is pending. */
   resolve: ((allow: boolean) => void) | null
+  /** Every request waiting for an answer, oldest first. */
+  queue: Waiting[]
   ask: (req: CodexConfirmRequest, signal?: AbortSignal) => Promise<boolean>
   answer: (allow: boolean) => void
 }
 
+/** The card shows the head of the queue. */
+const head = (queue: Waiting[]) => ({ queue, pending: queue[0]?.req ?? null, resolve: queue[0]?.resolve ?? null })
+
 export const useCodexConfirmStore = create<CodexConfirmState>((set, get) => ({
   pending: null,
   resolve: null,
+  queue: [],
 
   ask: (req, signal) =>
     new Promise<boolean>((resolve) => {
       // Audit A4: Stop while the dialog was open never resolved this promise,
       // so the run's finally never ran and the chat stayed wedged. An abort
-      // answers "no" and takes the dialog down with it.
+      // answers "no" and takes the card down with it.
       if (signal?.aborted) {
         resolve(false)
         return
       }
-      // A second request while one is open would strand the first resolver and
-      // hang that tool call forever. Deny the older one and take the new.
-      const prev = get().resolve
-      if (prev) prev(false)
-      set({ pending: req, resolve })
+      // A second request while one is open waits behind it (bug hunt
+      // 01.10.2026, C4). It used to answer the OLDER one "no" and take its
+      // place: a command the user never saw was refused in their name, and
+      // the run went on as if they had said no. Two runs in two conversations,
+      // or a run and its sub-agent, ask at the same time routinely.
+      const entry: Waiting = { req, resolve }
+      set(head([...get().queue, entry]))
       signal?.addEventListener(
         'abort',
         () => {
-          if (get().resolve === resolve) set({ pending: null, resolve: null })
+          set(head(get().queue.filter((w) => w !== entry)))
           resolve(false)
         },
         { once: true },
@@ -70,8 +84,8 @@ export const useCodexConfirmStore = create<CodexConfirmState>((set, get) => ({
     }),
 
   answer: (allow) => {
-    const { resolve } = get()
-    set({ pending: null, resolve: null })
-    resolve?.(allow)
+    const [first, ...rest] = get().queue
+    set(head(rest))
+    first?.resolve(allow)
   },
 }))

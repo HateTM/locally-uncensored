@@ -1,4 +1,4 @@
-import { useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { useId, useRef, useState, type ReactNode } from 'react'
 import { useDismissOnEscape } from '../../hooks/useDismissOnEscape'
 import { ChevronDown, Check, Loader2, AlertTriangle } from 'lucide-react'
 import { useModelStore } from '../../stores/modelStore'
@@ -14,36 +14,12 @@ import { useActiveContextWindow } from '../../hooks/useActiveContextWindow'
 // hier eine eigene Rechnung und im Fuellstand daneben eine zweite, und beide
 // zeigten denselben Wert verschieden (Gegenprobe G2, 04.09.2026).
 import { formatContextWindow } from '../../lib/formatters'
+import { DEFAULT_SEND_WINDOW_TOKENS } from '../../lib/send-window'
 import { ENGINE_DEFAULT_CTX } from '../../lib/builtin-ctx'
 import { SOURCE_LABEL, withStoredWindow } from '../../lib/context-source'
-import { platzFuerPopover, type PopoverPlatz } from '../../lib/popover-placement'
+import { usePopoverPlatz } from '../../hooks/usePopoverPlatz'
 
 const PRESETS = [4096, 8192, 16384, 32768, 65536, 131072]
-
-/** `mt-1` / `mb-1` in Zahlen, damit die Rechnung dasselbe kennt wie die Klasse. */
-const ABSTAND = 4
-/** Luft zur Kante der abschneidenden Flaeche. */
-const LUFT = 8
-
-/**
- * Die Flaeche, die dieses Popover wirklich abschneidet.
- *
- * Nicht das Fenster: im Chat liegt darueber ein `<main>` mit `overflow-hidden`
- * (die abgerundete Pane), und dessen Unterkante liegt gemessen 9 px hoeher.
- * Wer gegen `window.innerHeight` rechnet, landet in genau diesen 9 px, also im
- * Geschnittenen. Gesucht ist der erste Vorfahr, der nicht `visible` ist; gibt
- * es keinen, ist es das Fenster.
- */
-function abschneidendeFlaeche(el: Element): { oben: number; unten: number } {
-  for (let p = el.parentElement; p; p = p.parentElement) {
-    const cs = getComputedStyle(p)
-    if (cs.overflowY !== 'visible' || cs.overflowX !== 'visible') {
-      const r = p.getBoundingClientRect()
-      return { oben: r.top, unten: r.bottom }
-    }
-  }
-  return { oben: 0, unten: window.innerHeight }
-}
 
 /**
  * Context-window picker for the active LOCAL model. Sets `contextWindowOverride`
@@ -52,7 +28,8 @@ function abschneidendeFlaeche(el: Element): { oben: number; unten: number } {
  *   - LM Studio: `lms load -c <N>` (unload + reload, context is load-time there).
  *   - Built-in:  ctx lives in settings.builtinEngine (expert tuning), the
  *                engine relaunches with the new -c via swapBundledModel.
- * Hidden for cloud models (their context is fixed and not adjustable here).
+ * Cloud models: their own window is fixed, so the pick there is the send
+ * window per model (settings.cloudSendWindowByModel), saved without a reload.
  *
  * D-S06, „Zwei Kontextanzeigen 24px nebeneinander in verschiedener Notation:
  * ‚32/8.2k' und ‚ctx 8K' → eine."
@@ -101,52 +78,12 @@ export function ContextDropdown({ children }: { children?: ReactNode }) {
    * Fest nach oben zu kippen waere der falsche Ausgang. Derselbe Knopf steht
    * im Code-Bereich (`CodexView`) in einer Kopfzeile, dort ist oben kein Platz
    * und unten reichlich. Deshalb wird gemessen, und zwar gegen die Flaeche,
-   * die tatsaechlich schneidet. Die Entscheidung selbst steht in
-   * `lib/popover-placement` und hat dort ihre eigenen Tests, denn in der
-   * Testumgebung dieses Hauses (`environment: 'node'`) gibt es kein Layout.
-   *
-   * `useLayoutEffect` und nicht `useEffect`: die Messung braucht die gerenderte
-   * Liste, und die Korrektur muss vor dem Bild sitzen, sonst blitzt die Liste
-   * einmal an der falschen Stelle auf.
+   * die tatsaechlich schneidet. Seit GitHub #149 misst das nicht mehr dieses
+   * Bauteil selbst, sondern `usePopoverPlatz`, derselbe Haken wie fuer jedes
+   * andere Aufklappmenue der App.
    */
-  const ankerRef = useRef<HTMLDivElement>(null)
   const listeRef = useRef<HTMLDivElement>(null)
-  const [platz, setPlatz] = useState<PopoverPlatz | null>(null)
-  useLayoutEffect(() => {
-    if (!open) { setPlatz(null); return }
-    const messen = () => {
-      const anker = ankerRef.current
-      const liste = listeRef.current
-      if (!anker || !liste) return
-      const r = anker.getBoundingClientRect()
-      const grenze = abschneidendeFlaeche(anker)
-      /* Die App liegt unter einem `zoom: var(--ui-scale)` (index.css:518), und
-       * die beiden Messwege zaehlen darunter verschieden:
-       * `getBoundingClientRect` liefert SICHTBARE Pixel, `offsetHeight` und
-       * `scrollHeight` die CSS-Pixel des Elements. Gemessen bei --ui-scale
-       * 1,15: dieselbe Liste 111,5 gegen 97. Wer beides mischt, deckelt 15
-       * Prozent zu grosszuegig, und die Liste ragt wieder heraus, nur weniger.
-       * Also alles in die CSS-Pixel der Liste umrechnen; `maxHoehe` faellt
-       * damit in der Einheit an, in der es gleich als `max-height` steht.
-       */
-      const skala = liste.offsetHeight > 0 ? liste.getBoundingClientRect().height / liste.offsetHeight : 1
-      setPlatz(platzFuerPopover({
-        ankerOben: r.top / skala,
-        ankerUnten: r.bottom / skala,
-        grenzeOben: grenze.oben / skala,
-        grenzeUnten: grenze.unten / skala,
-        // `scrollHeight` und nicht `offsetHeight`: sobald eine Hoehe gesetzt
-        // ist, misst `offsetHeight` die Deckelung und nicht den Inhalt, und
-        // die naechste Messung schriebe den Deckel fest.
-        inhaltHoehe: liste.scrollHeight,
-        abstand: ABSTAND,
-        luft: LUFT,
-      }))
-    }
-    messen()
-    window.addEventListener('resize', messen)
-    return () => window.removeEventListener('resize', messen)
-  }, [open])
+  const platz = usePopoverPlatz(listeRef, open)
   const [busy, setBusy] = useState(false)
   // Reload failure, surfaced instead of swallowed: the engine's start error
   // (out of memory for the new ctx, port held by a stranger) is actionable,
@@ -163,11 +100,16 @@ export function ContextDropdown({ children }: { children?: ReactNode }) {
   // in `contextWindowByModel`, im SELBEN Speicher wie die beiden anderen
   // (settingsStore), nur unter einem Schluessel statt in einem festen Feld.
   const byModel = useSettingsStore((s) => s.settings.contextWindowByModel)
+  const cloudPicks = useSettingsStore((s) => s.settings.cloudSendWindowByModel)
+  const globalSendWindow = useSettingsStore((s) => s.settings.codexSendWindowTokens)
+  const cloud = ctx.provider === 'cloud'
   const selected = ctx.provider === 'builtin'
     ? builtinCtx
     : ctx.provider === 'custom'
       ? (ctx.windowKey ? byModel?.[ctx.windowKey] ?? 0 : 0)
-      : override
+      : cloud
+        ? (ctx.windowKey ? cloudPicks?.[ctx.windowKey] ?? 0 : 0)
+        : override
   // Gibt es ueberhaupt einen Fuellstand zu zeigen? Genau die Bedingung, unter
   // der `TokenCounter` `null` zurueckgibt. Bewusst ein BOOLEAN als Selektor:
   // ein Abo auf `s.conversations` wuerde diesen Knopf bei jedem Streaming-Flush
@@ -178,6 +120,10 @@ export function ContextDropdown({ children }: { children?: ReactNode }) {
 
   // Nicht verstellbar (Cloud): kein Regler, aber der Fuellstand bleibt stehen.
   if (!activeModel || !ctx.adjustable) return <>{children}</>
+
+  // Hinweis erst, wenn der Nutzer ueber den Standard gegangen ist, vorher
+  // nicht (David 30.09.2026). Grau, kein Gelb (Regel vom 04.09.).
+  const raised = cloud && ctx.sendWindow > DEFAULT_SEND_WINDOW_TOKENS
 
   /*
    * Die Liste endet an der Decke, und die Decke ist der groesste Eintrag.
@@ -190,7 +136,10 @@ export function ContextDropdown({ children }: { children?: ReactNode }) {
    * Voreinstellungen darueber fallen weg.
    */
   const cap = ctx.modelMax > 0 ? Math.max(ctx.modelMax, 4096) : 0
-  const options = PRESETS.filter((p) => (cap > 0 ? p < cap : true))
+  // A cloud step carries the system prompt and the tool catalogue before any
+  // history (about 5k to 8k tokens), so the two smallest rungs could not hold
+  // a single turn there.
+  const options = PRESETS.filter((p) => (cap > 0 ? p < cap : true) && (!cloud || p >= 16384))
   const showMax = cap > 0
   /*
    * Der Haken sitzt auf dem, was WIRKLICH gilt. Eine gespeicherte Wahl ueber
@@ -201,6 +150,20 @@ export function ContextDropdown({ children }: { children?: ReactNode }) {
 
   const apply = async (value: number) => {
     setOpen(false)
+    /*
+     * Cloud model: its own window is fixed, the pick is how much of the chat
+     * each step SENDS (and pays for), saved per model. Nothing to reload, the
+     * next request reads it through sendWindowFor. 0 = Auto (the default).
+     */
+    if (cloud) {
+      if (!ctx.windowKey) return
+      const next = { ...(useSettingsStore.getState().settings.cloudSendWindowByModel ?? {}) }
+      if (value > 0) next[ctx.windowKey] = value
+      else delete next[ctx.windowKey]
+      updateSettings({ cloudSendWindowByModel: next })
+      window.dispatchEvent(new Event('lu-context-reloaded'))
+      return
+    }
     /*
      * Eigener OpenAI-kompatibler Server: die Zahl ist eine Angabe DARUEBER,
      * was der Server geladen hat, kein Befehl AN ihn. Sein `-c` steht in
@@ -278,12 +241,14 @@ export function ContextDropdown({ children }: { children?: ReactNode }) {
     }`
 
   return (
-    <div ref={ankerRef} className="relative">
+    <div className="relative">
       <button
         onClick={() => setOpen((o) => !o)}
         disabled={busy}
         title={
-          ctx.provider === 'custom'
+          cloud
+            ? 'Context sent per step: how much of this chat the model sees on every step. More remembers more and costs more per step.'
+            : ctx.provider === 'custom'
             ? `Context window: ${SOURCE_LABEL[ctx.source]}. This server decides its own context; pick the value it actually runs with so the counter and the request budget match it.`
             : `Context window: ${ctx.provider === 'lmstudio' ? "LM Studio's loaded context" : ctx.provider === 'builtin' ? "the LU Engine's loaded context" : 'Ollama num_ctx'}. Changing it reloads the model so it takes effect now.`
         }
@@ -317,10 +282,11 @@ export function ContextDropdown({ children }: { children?: ReactNode }) {
         <span id={labelId} className="sr-only">Context window</span>
         {busy ? <Loader2 size={9} className="animate-spin" /> : null}
         {applyError && !busy ? <AlertTriangle size={9} className="text-red-400" /> : null}
+        {raised && !applyError && !busy ? <AlertTriangle size={9} className="text-gray-400" aria-label="Larger context costs more" /> : null}
         {/* Der Fuellstand IST die Beschriftung. Nur wenn es keinen gibt (leerer
             Chat), steht hier wieder das Fenster allein. */}
         <span id={valueId}>
-          {hasFill ? children : <span>ctx {formatContextWindow(ctx.contextWindow)}</span>}
+          {hasFill ? children : <span>ctx {formatContextWindow(cloud ? ctx.sendWindow : ctx.contextWindow)}</span>}
         </span>
         <ChevronDown size={8} className={`transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
@@ -347,13 +313,13 @@ export function ContextDropdown({ children }: { children?: ReactNode }) {
               laufen. */}
           <div
             ref={listeRef}
-            style={platz ? { maxHeight: platz.maxHoehe } : undefined}
+            style={platz.style}
             className={`absolute right-0 z-50 min-w-[140px] rounded-lg lu-elevated p-1 flex flex-col gap-0.5 overflow-y-auto scrollbar-thin ${
-              platz?.nachOben ? 'bottom-full mb-1' : 'top-full mt-1'
+              platz.nachOben ? 'bottom-full mb-1' : 'top-full mt-1'
             }`}
           >
             <button onClick={() => apply(0)} className={rowCls(selectedNow === 0)}>
-              <span>Auto{ctx.provider === 'ollama' ? ` · ${formatContextWindow(effectiveContextWindow(ctx.modelMax, 0))}` : ctx.provider === 'builtin' ? ` · ${formatContextWindow(ENGINE_DEFAULT_CTX)}` : ctx.provider === 'custom' && ctx.source !== 'user' ? ` · ${formatContextWindow(ctx.contextWindow)}` : ''}</span>
+              <span>Auto{ctx.provider === 'ollama' ? ` · ${formatContextWindow(effectiveContextWindow(ctx.modelMax, 0))}` : ctx.provider === 'builtin' ? ` · ${formatContextWindow(ENGINE_DEFAULT_CTX)}` : ctx.provider === 'custom' && ctx.source !== 'user' ? ` · ${formatContextWindow(ctx.contextWindow)}` : cloud ? ` · ${formatContextWindow(globalSendWindow)}` : ''}</span>
               {selectedNow === 0 && <Check size={10} />}
             </button>
             {options.map((p) => (
@@ -369,7 +335,11 @@ export function ContextDropdown({ children }: { children?: ReactNode }) {
               </button>
             )}
             <div className="mt-0.5 px-2 pt-1 border-t border-gray-100 dark:border-white/[0.06] text-[0.5rem] text-gray-400 leading-snug">
-              {ctx.provider !== 'custom'
+              {raised
+                ? <span className="flex items-start gap-1"><AlertTriangle size={9} className="shrink-0 mt-px" />Once the chat is longer than {formatContextWindow(DEFAULT_SEND_WINDOW_TOKENS)}, every message sends more and costs more credits.</span>
+                : cloud
+                ? 'How much of the chat each message sends. Saved for this model.'
+                : ctx.provider !== 'custom'
                 ? 'Reloads the model on change.'
                 : (ctx.clampedFrom ?? 0) > 0
                   ? `Your saved ${formatContextWindow(ctx.clampedFrom ?? 0)} is more than this server runs, so ${formatContextWindow(ctx.contextWindow)} is used. Start the server larger to use it.`

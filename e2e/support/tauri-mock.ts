@@ -610,7 +610,15 @@ export function tauriMockInit(opts: TauriMockOptions) {
         return Promise.resolve({ content: key ? files[key] : '', encoding: 'utf8' })
       }
       case 'fs_write':
-        record('__E2E_TOOL_CALLS__', { cmd, path: m?.path })
+        record('__E2E_TOOL_CALLS__', { cmd, path: m?.path, content: m?.content })
+        return Promise.resolve({ ok: true, path: m?.path })
+      case 'fs_write_bytes':
+        // A chat attachment on its way into the working folder. The bytes
+        // themselves are not kept, only how many base64 characters arrived.
+        record('__E2E_TOOL_CALLS__', {
+          cmd, path: m?.path, offset: m?.offset, last: m?.last,
+          base64Length: String(m?.base64 ?? '').length,
+        })
         return Promise.resolve({ ok: true, path: m?.path })
       case 'fs_list':
         record('__E2E_TOOL_CALLS__', { cmd, path: m?.path })

@@ -150,10 +150,22 @@ describe('the header shows the folder, so it also gives it back', () => {
     act(() => {
       useCodexStore.getState().setWorkingDirectory(WINDOWS_PATH)
       useCodexStore.getState().beginSend()
+      useUIStore.getState().setExplorerCollapsed(true)
     })
     await show()
     const lock = screen.getByTestId('codex-workdir-lock')
     expect(lock.textContent).toContain('Wait for it to finish or press Stop')
+  })
+
+  it('says it once: with the explorer open, only the explorer does', async () => {
+    // Both lines stood next to each other in the UX pass 30.09.2026. The
+    // explorer's own line is covered by its tests (explorer-workdir-lock).
+    act(() => {
+      useCodexStore.getState().setWorkingDirectory(WINDOWS_PATH)
+      useCodexStore.getState().beginSend()
+    })
+    await show()
+    expect(screen.queryByTestId('codex-workdir-lock')).toBeNull()
   })
 
   it('and shows no lock line while nothing holds the folder (negative control)', async () => {

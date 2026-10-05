@@ -33,15 +33,25 @@ describe('ModelRowMarks', () => {
     expect(screen.getByText('No refusals')).toBeTruthy()
   })
 
-  // K12 (3.0.1): the Discord report was "can't find it", not "it's wrong",
-  // plain text at the smallest size on a crowded row, no icon at all. An
-  // icon is the cheapest signal that survives a quick scan of the list; the
-  // text itself and the typography ladder step stay unchanged (see the
-  // comment on the mark in ModelRowMarks.tsx).
-  it('carries a findable icon, not just plain text (K12)', () => {
+  // K12 (3.0.1): the Discord report was "can't find it", not "it's wrong":
+  // plain text at the smallest size on a crowded row. First answered with an
+  // icon and bold type; since the picker of 3.0.5 the mark is a tag of its
+  // own, framed by a hairline and set in the one accent, and the picker has a
+  // chip that narrows the list to the marked models.
+  it('is a framed tag in the accent, not plain text (K12)', () => {
     render(<ModelRowMarks model={{ unfiltered: 'full' }} />)
-    const mark = screen.getByText('No refusals').closest('[data-mark="unfiltered"]')
-    expect(mark?.querySelector('svg')).toBeTruthy()
+    const mark = screen.getByText('No refusals')
+    expect(mark.getAttribute('data-mark')).toBe('unfiltered')
+    expect(mark.className).toContain('lu-picker-tag')
+    expect(mark.className).toContain('is-accent')
+    expect(mark.getAttribute('title')).toContain('Measured')
+  })
+
+  it('in a picker row shows the measured mark only, the allowance stands behind the question mark', () => {
+    signIn(true)
+    render(<ModelRowMarks model={{ unfiltered: 'full', flash }} row />)
+    expect(screen.getByText('No refusals')).toBeTruthy()
+    expect(screen.queryByText(FLASH_MARK_LABEL)).toBeNull()
   })
 
   it('stays silent on partial and on a model with nothing measured', () => {

@@ -4,6 +4,7 @@ import {
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import type { CreateBackend, CreateIntent } from '../../../stores/createStore'
+import { MUSIC_PLACEHOLDER } from '../../../lib/render/music-ui'
 
 export interface IntentMeta {
   id: CreateIntent
@@ -135,7 +136,7 @@ export const INTENTS: IntentMeta[] = [
   },
   {
     id: 'music', label: 'Music', short: 'Music', icon: Music,
-    placeholder: 'Describe the track. Genre, mood, tempo, instruments…',
+    placeholder: MUSIC_PLACEHOLDER.style,
     needsSource: false, needsPrompt: true, allowsMask: false, isVideo: false,
     cloudOnly: true, hasLocalLane: true, requiresModels: 'audio',
     examples: [
@@ -170,6 +171,15 @@ export const INTENTS: IntentMeta[] = [
 export const INTENT_MAP: Record<CreateIntent, IntentMeta> =
   Object.fromEntries(INTENTS.map((i) => [i.id, i])) as Record<CreateIntent, IntentMeta>
 
+/** Does the view on screen show a prompt field? Composer draws the field under
+ *  this rule and both starts (cloud and local) send a prompt under the same
+ *  one: a view without the field must never send the text left over from
+ *  another tab. Character Studio's use surface is a plain image generate and
+ *  has one. */
+export function intentTakesPrompt(intent: CreateIntent, characterUse = false): boolean {
+  return INTENT_MAP[intent].needsPrompt || characterUse
+}
+
 /**
  * The intents that have a REAL local pipeline on an MLX host (Apple Silicon
  * Mac). Every local lane above is a ComfyUI graph, and the Mac has no ComfyUI
@@ -195,10 +205,18 @@ const MLX_LOCAL_INTENTS: ReadonlySet<CreateIntent> = new Set<CreateIntent>(['ima
  * need a ComfyUI node or a ComfyUI-staged source image, so leaving them
  * selectable is a dead affordance that either errors on submit or — worse, the
  * MLX case — silently drops the source and returns an unrelated fresh image.
+ *
+ * `cloudFeatures` is the setting "Show Cloud features in Local mode". Off, the
+ * local bar carries no cloud teaser at all: a tool that cannot run on this
+ * machine is left out, the same way the Mac leaves out what MLX cannot do.
+ * Until 3.0.5 the switch only took the LU Cloud rows out of the model
+ * pickers, and Enhance and Erase kept their cloud tag and kept opening the
+ * Cloud sheet (the box, 04.10.2026).
  */
-export function visibleIntents(backend: CreateBackend, mlxHost: boolean): IntentMeta[] {
-  if (backend === 'cloud' || !mlxHost) return INTENTS
-  return INTENTS.filter((m) => MLX_LOCAL_INTENTS.has(m.id) || m.cloudOnly === true)
+export function visibleIntents(backend: CreateBackend, mlxHost: boolean, cloudFeatures: boolean): IntentMeta[] {
+  if (backend === 'cloud') return INTENTS
+  const shown = mlxHost ? INTENTS.filter((m) => MLX_LOCAL_INTENTS.has(m.id) || m.cloudOnly === true) : INTENTS
+  return cloudFeatures ? shown : shown.filter((m) => !isIntentLocked(m, backend, mlxHost))
 }
 
 /**
@@ -223,5 +241,5 @@ export function isIntentLocked(meta: IntentMeta, backend: CreateBackend, mlxHost
  */
 export function isIntentAvailable(id: CreateIntent, backend: CreateBackend, mlxHost: boolean): boolean {
   const meta = INTENT_MAP[id]
-  return visibleIntents(backend, mlxHost).includes(meta) && !isIntentLocked(meta, backend, mlxHost)
+  return visibleIntents(backend, mlxHost, true).includes(meta) && !isIntentLocked(meta, backend, mlxHost)
 }

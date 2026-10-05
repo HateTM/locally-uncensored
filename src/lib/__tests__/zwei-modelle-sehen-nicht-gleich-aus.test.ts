@@ -104,6 +104,6 @@ describe('verdrahtet', () => {
 
   it('und der Knopf im Eingabefeld traegt keinen Pfad mehr', () => {
     expect(lies('components/models/ModelSelector.tsx'))
-      .toContain('shortModelLabel(displayModelName(gezeigtesModell)')
+      .toContain('modelDisplayLabel(models, gezeigtesModell)')
   })
 })

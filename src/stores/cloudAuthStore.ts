@@ -27,11 +27,18 @@ export interface CloudAccount {
    * und das verspricht nichts (siehe lib/flash-entitlement).
    */
   paidPlan?: boolean | null
+  /** A renewal payment failed and no paid plan is active. Says nothing about
+   *  licenseActive: pack credits keep an unpaid account working. */
+  pastDue?: boolean
+  /** The plan that is waiting for that payment, null otherwise. */
+  pastDueTier?: string | null
   quota: CloudQuota | null
 }
 
 interface CloudAuthState extends CloudAccount {
   paidPlan: boolean | null
+  pastDue: boolean
+  pastDueTier: string | null
   /** 'probing' until the keychain session restore + first /api/me resolve. */
   status: 'probing' | 'signed-out' | 'signed-in'
   user: CloudUser | null
@@ -48,12 +55,22 @@ export const useCloudAuthStore = create<CloudAuthState>()((set) => ({
   tier: null,
   access: true,
   paidPlan: null,
+  pastDue: false,
+  pastDueTier: null,
   quota: null,
 
   setSignedOut: () =>
-    set({ status: 'signed-out', user: null, licenseActive: false, tier: null, access: true, paidPlan: null, quota: null }),
+    set({
+      status: 'signed-out', user: null, licenseActive: false, tier: null, access: true,
+      paidPlan: null, pastDue: false, pastDueTier: null, quota: null,
+    }),
   setSignedIn: (user, account) =>
-    set({ status: 'signed-in', user, ...account, paidPlan: account.paidPlan ?? null }),
+    set({
+      status: 'signed-in', user, ...account,
+      paidPlan: account.paidPlan ?? null,
+      pastDue: account.pastDue === true,
+      pastDueTier: account.pastDue === true ? (account.pastDueTier ?? null) : null,
+    }),
   setQuota: (quota) => set({ quota }),
 }))
 

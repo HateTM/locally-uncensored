@@ -29,20 +29,22 @@ import {
 } from '../preset-models'
 import { CREATE_PRESETS } from '../create-presets'
 import { STUDIO_MODELS } from '../studio-contract'
-import { CLOUD_MODEL_SEED } from '../cloud-models'
 import { cloudModelById, cloudModelSupportsOp, useCloudCatalogStore } from '../../../stores/cloudCatalogStore'
 import { videoDurations } from '../video-duration'
+import { neuerServer } from './fixtures/test-catalogs'
 
 // Review B1 (Runde 2): `presetModels()` is what the Preset Workshop (P6)
 // calls directly, and the workshop is only ever reachable when the live
 // catalog already announces Studio (`quote_required`, PresetShelf.tsx hides
 // itself otherwise). This whole file tests that reachable state, so it
-// seeds one, the same way create-studio.test.ts does for the Composer's
-// OWN gate. Without this, `allPresetModels()`'s "a classic id yields to its
-// live studio twin" skip (preset-models.ts) turns off by default and every
-// twin pair here would double up.
+// seeds the catalog of the newest server (every studio model listed, with
+// tier and weights), the same way create-studio.test.ts does for the
+// Composer's OWN gate. Studio members are offered per model since 02.10.2026
+// (`studioKnown`): a catalog that lacks one hides it, and the "a classic id
+// yields to its live studio twin" skip only fires for a twin the server lists.
+// alter-server.test.ts holds the opposite state.
 beforeEach(() => {
-  useCloudCatalogStore.setState({ models: [...CLOUD_MODEL_SEED, { id: 'test-studio-marker', label: 'x', kind: 'image', quote_required: true }] })
+  useCloudCatalogStore.setState({ models: neuerServer() })
 })
 
 // Die Ops, die die Submit-Route pro Art annimmt. Spiegel von SUPPORTED_OPS in
@@ -183,6 +185,6 @@ describe('jedes waehlbare Modell faehrt seinen Schritt', () => {
 
   it('genau die Rollen ohne Alternative zeigen keine Auswahl', () => {
     const ohne = ALL_ROLES.filter((r) => !roleHasChoice(r))
-    expect(ohne.sort()).toEqual(['angles', 'presenter', 'restyle'])
+    expect(ohne.sort()).toEqual(['angles', 'presenter'])
   })
 })

@@ -1,3 +1,4 @@
+import { chatBackendsBack } from '../../lib/chat-backends-gate'
 import { resolveMessageAttachments } from '../../lib/chat-attachments'
 /**
  * Ollama Provider, wraps existing ollama.ts into the ProviderClient interface.
@@ -120,6 +121,8 @@ export class OllamaProvider implements ProviderClient {
     // llama.cpp does, and a strict one raises instead of improvising. See
     // providers/normalize-system.ts for the whole contract.
     messages = await resolveMessageAttachments(messages)
+    // A Create render may have moved the chat model out (vram-handoff).
+    await chatBackendsBack()
     const ollamaMessages = applyTemplateContract(messages, {
       toolRole: 'text',
       alternate: true,
@@ -292,6 +295,8 @@ export class OllamaProvider implements ProviderClient {
     // only sends one after Ollama itself reported the `tools` capability for
     // this model (/api/show, see lib/tool-support.ts).
     messages = await resolveMessageAttachments(messages)
+    // A Create render may have moved the chat model out (vram-handoff).
+    await chatBackendsBack()
     const ollamaMessages = applyTemplateContract(messages, {
       toolRole: tools.length > 0 ? 'native' : 'text',
       alternate: tools.length === 0,

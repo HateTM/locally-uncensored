@@ -47,6 +47,12 @@ export interface StageGateInput {
   mlxMissing: { image: boolean; video: boolean } | null
   /** ComfyUI-Sonde: null solange sie laeuft. */
   connected: boolean | null
+  /** Ein ComfyUI-Prozess laeuft, hat den Port aber noch nicht gebunden
+   *  (comfyui_status.starting). Gegenprobe 02.10.2026: in genau diesem Fenster
+   *  sagte die Sonde `false`, und die Buehne bot einen 6,5-GB-Download an,
+   *  waehrend oben "ComfyUI is starting up." stand und die Modelle laengst da
+   *  waren. Ein Klick haette Juggernaut ein zweites Mal geladen. */
+  comfyStarting?: boolean
   modelsLoaded: boolean
   /** Wie viele Modelle diese Spur tatsaechlich anbieten kann. */
   laneModelCount: number
@@ -71,7 +77,7 @@ export function stageShowsSetupCard(i: StageGateInput): boolean {
   if (macMissing) return true
   return (
     i.mlxMissing === null && i.backend === 'local' && !!i.requiresModels && (
-      i.connected === false ||
+      (i.connected === false && !i.comfyStarting) ||
       (i.connected === true && i.modelsLoaded && i.laneModelCount === 0)
     )
   )

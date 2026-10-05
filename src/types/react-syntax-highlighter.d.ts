@@ -37,6 +37,8 @@ declare module 'react-syntax-highlighter/dist/esm/prism-light' {
     style?: Record<string, CSSProperties>
     /** Merged onto the generated `<pre>`. */
     customStyle?: CSSProperties
+    /** Props for the inner <code> element. */
+    codeTagProps?: { style?: CSSProperties; className?: string }
     /** The source to highlight. */
     children: string | string[]
   }

@@ -434,6 +434,7 @@ export class AnthropicProvider implements ProviderClient {
                 name: data.content_block.name || '',
                 input: '',
               })
+              if (data.content_block.name) yield { content: '', toolProgress: { name: data.content_block.name, argsChars: 0 }, done: false }
             }
             break
           }
@@ -452,7 +453,10 @@ export class AnthropicProvider implements ProviderClient {
               // gefuellt wird — dieselbe Regel wie oben, dieselbe Funktion.
               const key = data.index ?? keyForUnindexedBlock(toolUseBlocks)
               const block = toolUseBlocks.get(key)
-              if (block) block.input += delta.partial_json
+              if (block) {
+                block.input += delta.partial_json
+                if (block.name) yield { content: '', toolProgress: { name: block.name, argsChars: block.input.length }, done: false }
+              }
             }
             break
           }

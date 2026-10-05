@@ -2,8 +2,11 @@ import { useRef, useState, useSyncExternalStore } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { UploadCloud, ImagePlus, Scissors, Wand2, Sparkles, X, Loader2, Download, AlertTriangle, Image as ImageIcon, Film } from 'lucide-react'
 import { useCreateStore, type GalleryItem } from '../../../stores/createStore'
+import { createRunModel } from '../../../lib/render/create-studio'
+import { musicText } from '../../../lib/render/music-ui'
 import { useCreateExp } from './CreateContext'
 import { INTENT_MAP } from './intents'
+import { editNeedsMask, defaultCloudModel, modelForOp } from '../../../stores/cloudCatalogStore'
 import { stageShowsSetupCard, laneModelCount } from './stageGate'
 import { GeneratingView, ResultView } from './OutputView'
 import { EmptyState } from '../ui/EmptyState'
@@ -21,6 +24,17 @@ import { InstallCancelled } from '../../../lib/bundle-install'
 import { isMlxImageHost } from '../../../api/mlx-image'
 import { bundleForVideoIntent } from '../../../api/comfyui'
 import { getVideoBundles } from '../../../api/discover'
+import { lipsyncFitLine } from './lipsyncFit'
+import { useGraphicsCardGb } from '../../../hooks/useGraphicsMemory'
+import { ReferenceStrip } from './ReferenceStrip'
+import { BatchStrip, useBatchPickers } from './BatchStrip'
+import { addBatchFiles, useBatchOffered } from './batchRun'
+import { filesFromDrop } from './batchFiles'
+import { DEFAULT_CUTOUT_MODEL_SIZE } from '../../../api/cutout-model'
+import { useReferenceSlots } from './referenceSlots'
+import { SavedCharacterChips } from './SavedCharacters'
+import { loadPhotosAsReferences, sendPhotosToStudio } from './characterPhotos'
+import { MIN_TRAIN_IMAGES, maxTrainImages } from '../../../lib/train-image-cap'
 
 interface Props {
   displayed?: GalleryItem
@@ -35,12 +49,18 @@ interface Props {
    *  as onEditResult above. */
   onAnimateResult?: (item: GalleryItem) => void
   onFullscreen: (item: GalleryItem) => void
+  /** Pick frames of a finished video and save them as a character. */
+  onSaveCharacter?: (item: GalleryItem) => void
+  /** ComfyUI is coming up: no setup card in that window (./stageGate). */
+  comfyStarting?: boolean
 }
 
-export function Stage({ displayed, onOpenMaskEditor, onEditResult, onAnimateResult, onFullscreen }: Props) {
+export function Stage({ displayed, onOpenMaskEditor, onEditResult, onAnimateResult, onFullscreen, onSaveCharacter, comfyStarting }: Props) {
   const intent = useCreateStore((s) => s.intent())
   const meta = INTENT_MAP[intent]
-  const isGenerating = useCreateStore((s) => s.isGenerating)
+  // A batch over several source images is one stretch of work: between two of
+  // its images nothing is rendering, and the Stage must not flash back.
+  const isGenerating = useCreateStore((s) => s.isGenerating || s.batchRun !== null)
   const source = useCreateStore((s) => s.source)
   const sourceSetAt = useCreateStore((s) => s.sourceSetAt)
   const setPrompt = useCreateStore((s) => s.setPrompt)
@@ -76,6 +96,7 @@ export function Stage({ displayed, onOpenMaskEditor, onEditResult, onAnimateResu
     requiresModels: meta.requiresModels,
     mlxMissing,
     connected,
+    comfyStarting,
     modelsLoaded,
     laneModelCount: laneModelCount(intent, meta.requiresModels, {
       image: imageModelList, video: videoModelList, audio: audioModelList,
@@ -89,6 +110,12 @@ export function Stage({ displayed, onOpenMaskEditor, onEditResult, onAnimateResu
 
   const characterTab = useCreateStore((s) => s.characterTab)
   const characterTrain = intent === 'character' && characterTab === 'train'
+  // The example chips of Music are style descriptions. Where the prompt of a
+  // cloud model is the lyrics, a chip would be sung word for word, so that
+  // model shows none. Local music keeps them: its prompt is always the style.
+  const musicIsLyrics = useCreateStore((s) =>
+    s.backend === 'cloud' && musicText(createRunModel('music', { image: '', video: '', op: s.cloudOpModel })).main === 'lyrics')
+  const examples = intent === 'music' && musicIsLyrics ? [] : meta.examples
 
   // A bundle is not usable until ALL of its files are down, and the lane list
   // refills the moment the diffusion model alone lands. Measured on the box
@@ -124,6 +151,8 @@ export function Stage({ displayed, onOpenMaskEditor, onEditResult, onAnimateResu
         onFullscreen={() => onFullscreen(displayed)}
         onSendToEditor={displayed.type === 'image' && onEditResult ? () => onEditResult(displayed) : undefined}
         onAnimate={displayed.type === 'image' && onAnimateResult ? () => onAnimateResult(displayed) : undefined}
+        onSaveCharacter={displayed.type === 'video' && onSaveCharacter ? () => onSaveCharacter(displayed) : undefined}
+        footer={meta.needsSource && source ? <ResultSourceActions /> : undefined}
       />
     )
   } else {
@@ -140,9 +169,9 @@ export function Stage({ displayed, onOpenMaskEditor, onEditResult, onAnimateResu
     // Weiss — den Text daneben faengt `index.css:863-868` ab, das Bild nicht.
     body = (
       <EmptyState icon={Sparkles} logoSrc={MONOGRAM} logoClassName={MONOGRAM_INVERT} title={teachTitle(intent)}>
-        {meta.examples.length > 0 && (
+        {examples.length > 0 && (
           <div className="flex flex-wrap justify-center gap-1.5 pt-1">
-            {meta.examples.map((ex) => (
+            {examples.map((ex) => (
               <button
                 key={ex}
                 onClick={() => setPrompt(ex)}
@@ -203,6 +232,12 @@ function InputSlot() {
   const inputRef = useRef<HTMLInputElement>(null)
   const [drag, setDrag] = useState(false)
   const [loading, setLoading] = useState(false)
+  // Edit, Remove Background and Enhance Image take several images at once
+  // where no mask is needed (lib/batch-edit).
+  const batchOffered = useBatchOffered()
+  // A model that reads several photos of a figure can start from a saved
+  // character (lib/saved-characters) instead of a file.
+  const referenceSlots = useReferenceSlots()
 
   // David 2026-07-10: ops never auto-adopt a gallery image — instead the slot
   // offers the recent gallery images as an EXPLICIT pick, next to drag&drop
@@ -243,6 +278,15 @@ function InputSlot() {
     }
   }
 
+  // More than one file: the list. One file: the plain single source.
+  const handleFiles = async (files: File[]) => {
+    if (files.length === 0) return
+    if (!batchOffered || files.length === 1) return handleFile(files[0])
+    setLoading(true)
+    try { await addBatchFiles(files) } finally { setLoading(false) }
+  }
+  const { inputs: batchInputs, pickFiles, pickFolder } = useBatchPickers((files) => { void handleFiles(files) })
+
   return (
     // Scroll-safe centering: `m-auto` centres the column when there's room and
     // collapses to a scroll when the dropzone + gallery strip exceed a short
@@ -251,14 +295,13 @@ function InputSlot() {
     <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin flex flex-col">
       <div className="m-auto w-full max-w-sm flex flex-col items-center p-6">
         <div
-          onClick={() => inputRef.current?.click()}
+          onClick={() => (batchOffered ? pickFiles() : inputRef.current?.click())}
           onDragOver={(e) => { e.preventDefault(); setDrag(true) }}
           onDragLeave={() => setDrag(false)}
           onDrop={(e) => {
             e.preventDefault()
             setDrag(false)
-            const f = e.dataTransfer.files[0]
-            if (f) { void handleFile(f); return }
+            if (e.dataTransfer.files.length) { void filesFromDrop(e.dataTransfer).then(handleFiles); return }
             const item = gallery.find((g) => g.id === e.dataTransfer.getData(GALLERY_DRAG_TYPE))
             if (item && !loading) void adoptFromGallery(item)
           }}
@@ -279,9 +322,38 @@ function InputSlot() {
           <div className="text-center">
             <div className="t-title text-gray-300">{meta.id === 'removebg' ? 'Drop an image to cut out' : meta.id === 'animate' ? 'Drop an image to animate' : 'Drop an image to edit'}</div>
             <div className="t-body text-gray-600">or click to browse · PNG, JPG, WebP</div>
+            {batchOffered && <div className="t-body text-gray-600">Pick several to give them all the same run</div>}
           </div>
           <input ref={inputRef} type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f) }} />
         </div>
+        {batchOffered && (
+          <>
+            {batchInputs}
+            <button
+              onClick={pickFolder}
+              disabled={loading}
+              className="mt-2 t-control text-gray-500 hover:text-gray-300 underline underline-offset-2 transition-colors"
+            >
+              or choose a folder of images
+            </button>
+          </>
+        )}
+        {referenceSlots > 0 && (
+          <div className="mt-4 w-full">
+            <SavedCharacterChips
+              label="or start from a saved character"
+              disabled={loading}
+              title={(c) => `Load the photos of ${c.name}`}
+              onPick={(c) => {
+                setLoading(true)
+                setError(null)
+                void loadPhotosAsReferences(c.name, c.photos)
+                  .catch((err: unknown) => setError(`Could not load the photos: ${err instanceof Error ? err.message : String(err)}`))
+                  .finally(() => setLoading(false))
+              }}
+            />
+          </div>
+        )}
         {galleryImages.length > 0 && (
           <div className="mt-4 w-full">
             <div className="t-label text-gray-600 mb-2 text-center">or pick from your gallery</div>
@@ -313,14 +385,33 @@ function SourcePreview({ onOpenMaskEditor }: { onOpenMaskEditor: () => void }) {
   const setMask = useCreateStore((s) => s.setMask)
   const intent = useCreateStore((s) => s.intent())
   const meta = INTENT_MAP[intent]
+  const backend = useCreateStore((s) => s.backend)
+  const cloudImageModel = useCreateStore((s) => s.cloudImageModel)
+  // A cloud instruction editor (qwen-image-edit, every studio editor) takes no
+  // mask: same model and same rule as the Create button in the Composer.
+  const noMask = backend === 'cloud' && intent === 'edit' &&
+    !editNeedsMask(modelForOp('image', 'edit', cloudImageModel || defaultCloudModel('image')?.id || ''))
+  const batchCount = useCreateStore((s) => s.batchSources.length)
+  const batchOffered = useBatchOffered()
+  // The same run over several images: no mask (it belongs to one image), and
+  // the list below replaces "Change image".
+  const batchOn = batchOffered && batchCount > 1
 
   // Zombie render: an intent switch drops the source in the same store update
   // that swaps this component out, but the child subscription can fire first.
   if (!source) return null
 
   return (
-    <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin flex flex-col">
-      <div className="m-auto flex flex-col items-center p-6">
+    <div
+      className="flex-1 min-h-0 overflow-y-auto scrollbar-thin flex flex-col"
+      onDragOver={(e) => { if (batchOffered && e.dataTransfer.types.includes('Files')) e.preventDefault() }}
+      onDrop={(e) => {
+        if (!batchOffered || !e.dataTransfer.files.length) return
+        e.preventDefault()
+        void filesFromDrop(e.dataTransfer).then(addBatchFiles)
+      }}
+    >
+      <div className="m-auto flex flex-col items-center p-6 max-w-full">
         <div className="relative">
           <img src={source.url} alt="source" className={cn('max-h-[52vh] max-w-full object-contain rounded-[var(--radius-panel)] border border-white/[0.06]', intent === 'removebg' && 'lu-checker')} />
           {mask && (
@@ -334,20 +425,48 @@ function SourcePreview({ onOpenMaskEditor }: { onOpenMaskEditor: () => void }) {
             <X size={14} />
           </button>
         </div>
-        <div className="flex items-center gap-2 mt-4">
-          {meta.allowsMask && (
-            <Button variant="secondary" icon={Wand2} onClick={onOpenMaskEditor}>{mask ? 'Edit mask' : 'Paint mask'}</Button>
-          )}
-          <ChangeImageButton onChange={(r) => setSource(r)} />
-        </div>
+        <ReferenceStrip />
+        {!batchOn && (
+          <div className="flex items-center gap-2 mt-4">
+            {meta.allowsMask && !noMask && (
+              <Button variant="secondary" icon={Wand2} onClick={onOpenMaskEditor}>{mask ? 'Edit mask' : 'Paint mask'}</Button>
+            )}
+            <ChangeImageButton onChange={(r) => setSource(r)} />
+          </div>
+        )}
+        <BatchStrip />
         <p className="t-body text-gray-600 mt-3 text-center max-w-sm">
-          {meta.id === 'removebg' ? 'Hit Create to cut out the subject and export a transparent PNG.'
+          {batchOn ? (
+            meta.id === 'removebg' ? `Hit Create to cut out all ${batchCount} images.`
+              : meta.id === 'upscale' ? `Hit Create to upscale all ${batchCount} images.`
+              : `Write your prompt below, then Create. All ${batchCount} images get the same edit.`
+          ) : meta.id === 'removebg' ? 'Hit Create to cut out the subject and export a transparent PNG.'
             : meta.id === 'upscale' ? 'Hit Create to upscale the image.'
             : meta.id === 'eraser' ? 'Paint a mask over the object to remove, then hit Create.'
+            : noMask ? 'Write the edit prompt below, then Create. This model needs no mask.'
             : meta.allowsMask ? 'Leave the mask empty to restyle the whole image, or paint an area to change just that. Write your prompt below, then Create.'
             : 'Describe the motion below, then Create.'}
         </p>
       </div>
+    </div>
+  )
+}
+
+/**
+ * Under a finished result on a tool that works from a source image: the same
+ * way to the next image that the source preview offers before the run. The
+ * box, 04.10.2026: after a cutout the only way to load another image was to
+ * leave the tool and come back. "Change image" puts the new image on the
+ * Stage; the list under it adds more for one run over all of them.
+ */
+function ResultSourceActions() {
+  const setSource = useCreateStore((s) => s.setSource)
+  const batchCount = useCreateStore((s) => s.batchSources.length)
+  const batchOn = useBatchOffered() && batchCount > 1
+  return (
+    <div className="flex flex-col items-center mt-3" data-testid="result-source-actions">
+      {!batchOn && <ChangeImageButton onChange={(r) => setSource(r)} />}
+      <BatchStrip />
     </div>
   )
 }
@@ -430,7 +549,7 @@ const CAP_COPY = {
   rmbg: {
     icon: Scissors,
     title: 'Background removal needs a one-time download',
-    description: 'The AI cutout runs fully locally (ComfyUI-RMBG). This installs the node now. The ~300 MB cutout model downloads automatically on your first cutout.',
+    description: `The AI cutout runs fully locally (ComfyUI-RMBG). This installs the node now. The ${DEFAULT_CUTOUT_MODEL_SIZE} cutout model downloads automatically on your first cutout.`,
   },
   'inpaint-nodes': {
     icon: Wand2,
@@ -461,31 +580,24 @@ const BUSY_DESCRIPTION = {
 
 function CapabilityCard({ cap }: { cap: 'rmbg' | 'inpaint-nodes' | 'dwpose' }) {
   const { installCapability } = useCreateExp()
-  const [installing, setInstalling] = useState(false)
-  const [status, setStatus] = useState('')
-  const [err, setErr] = useState<string | null>(null)
-  const abortRef = useRef<AbortController | null>(null)
+  // The run lives outside the card, like a bundle install: a failure must
+  // still be readable after a trip to another mode (the box, 03.10.2026: the
+  // reason for a failed node pack install was gone on the first mode switch).
+  // It stays until the user closes it or tries again.
+  const runKey = `capability:${cap}`
+  const { status, err, running: installing } = useSyncExternalStore(subscribeInstallRuns, () => getInstallRun(runKey))
   const copy = CAP_COPY[cap]
 
-  const run = async () => {
-    const ac = new AbortController()
-    abortRef.current = ac
-    setInstalling(true); setErr(null); setStatus('Starting…')
-    try {
-      // On success the capability flips true and Stage swaps this card for the input slot.
-      await installCapability(cap, setStatus, ac.signal)
-    } catch (e) {
+  // On success the capability flips true and Stage swaps this card for the input slot.
+  const run = () => startInstallRun(runKey, (onStatus, signal) =>
+    installCapability(cap, onStatus, signal).catch((e: unknown) => {
       // A cancel is a decision, not a failure: say so plainly and add the one
       // thing that is not obvious, that the node install itself finishes in the
       // background because there is nothing to roll back.
-      setErr(e instanceof InstallCancelled
-        ? 'Cancelled. Any node install already running finishes on its own in the background.'
-        : e instanceof Error ? e.message : String(e))
-    } finally {
-      setInstalling(false)
-      abortRef.current = null
-    }
-  }
+      throw e instanceof InstallCancelled
+        ? new Error('Cancelled. Any node install already running finishes on its own in the background.')
+        : e
+    }))
 
   return (
     <EmptyState
@@ -496,8 +608,8 @@ function CapabilityCard({ cap }: { cap: 'rmbg' | 'inpaint-nodes' | 'dwpose' }) {
     >
       <InstallCardBody
         run={run} installing={installing} status={status} err={err}
-        onDismiss={() => setErr(null)}
-        onCancel={() => abortRef.current?.abort()}
+        onDismiss={() => clearInstallRun(runKey)}
+        onCancel={() => cancelInstallRun(runKey)}
       />
     </EmptyState>
   )
@@ -542,7 +654,11 @@ const BUNDLE_COPY = {
   lipsync: {
     icon: Film,
     title: 'Local talking characters need a one-time download',
-    description: 'This sets up the Wan 2.2 S2V model plus its audio encoder (~20 GB total). Comfortable on 12 GB VRAM; smaller cards offload and render slower.',
+    // What it says about the graphics card is added below from the bundle's
+    // own verdict (lipsyncFitLine). The sentence that stood here said
+    // "Comfortable on 12 GB VRAM" while the same bundle's card in the Model
+    // Manager said "Tight on your 12 GB card".
+    description: 'This sets up the Wan 2.2 S2V model plus its audio encoder (~20 GB total).',
   },
   motion: {
     icon: Film,
@@ -573,9 +689,10 @@ function ModelInstallCard({ kind }: { kind: 'image' | 'video' | 'audio' | 'lipsy
   const mac = isMlxImageHost()
   const copy = (mac && (kind === 'image' || kind === 'video')) ? MAC_BUNDLE_COPY[kind] : BUNDLE_COPY[kind]
   // The Mac lane runs its own MLX stack and has no ComfyUI bundle to name.
+  const cardGb = useGraphicsCardGb()
   const description = (kind === 'video' && !mac)
     ? copy.description + videoBundleLine(intent)
-    : copy.description
+    : kind === 'lipsync' ? copy.description + lipsyncFitLine(cardGb) : copy.description
 
   const run = () => startInstallRun(kind, (onStatus, signal) =>
     installModelBundle(kind, onStatus, signal).catch((e: unknown) => {
@@ -642,12 +759,18 @@ function TrainSetBoard() {
           className="flex-1 rounded-xl border-2 border-dashed border-white/10 hover:border-white/25 transition-colors flex flex-col items-center justify-center gap-2 text-gray-500 hover:text-gray-300"
         >
           <UploadCloud size={28} />
-          <div className="t-body">Drop 4 to 30 photos of your character here</div>
+          <div className="t-body">Drop {MIN_TRAIN_IMAGES} to {maxTrainImages(backend)} photos of your character here</div>
           <div className="t-label text-gray-600">
             One person or character, varied angles and lighting works best
           </div>
         </button>
-      ) : (
+      ) : null}
+      <SavedCharacterChips
+        label={trainImages.length === 0 ? 'or start from a saved character' : 'Add the photos of a saved character'}
+        title={(c) => `Add the ${c.photos.length} photos of ${c.name}`}
+        onPick={(c) => sendPhotosToStudio(c.name, c.photos)}
+      />
+      {trainImages.length === 0 ? null : (
         <>
           <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin">
             <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
@@ -675,7 +798,7 @@ function TrainSetBoard() {
             </div>
           </div>
           <div className="t-label text-gray-500 text-center shrink-0">
-            {trainImages.length}/30 photos. {backend === 'cloud'
+            {trainImages.length}/{maxTrainImages(backend)} photos. {backend === 'cloud'
               ? 'Training runs in the cloud and lands the character on your shelf.'
               : 'Training runs on your GPU and lands the character in your local LoRAs.'}
           </div>

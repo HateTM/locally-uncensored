@@ -8,7 +8,7 @@ import { stripNonCanonicalTags } from './personas.js'
   // same model behaviour follows us onto mobile. Tests in
   // src/api/__tests__/tool-description-parity.test.ts pin this parity.
   var AGENT_TOOLS = [
-    {name:'todo_write', description:'Write and update the plan for a multi-step task. The list is shown to the user live, so it is how they follow a long run. USE FIRST when a task needs more than about three tool calls, then send it again after each step. Send the COMPLETE list every time: it replaces the previous one, it does not merge.',
+    {name:'todo_write', description:'Write and update the plan the user asked for. The list is shown to the user live. NEVER send it as a step of its own: send an update together with your next real tool call. Send the COMPLETE list every time: it replaces the previous one, it does not merge.',
      parameters:[{name:'todos',type:'array',description:'The complete plan, in order. Replaces the previous list.',required:true}]},
     {name:'web_search', description:'Search the web via the configured provider (Brave, Tavily, or auto). Returns a ranked list of {title, url, snippet}. Snippets are teasers, not answers: PREFER web_fetch on the promising URLs for the real content. DO NOT run more than 3 similar queries per turn, refine instead of re-searching.',
      parameters:[{name:'query',type:'string',description:'The search query string',required:true},

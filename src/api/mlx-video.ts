@@ -3,7 +3,7 @@
  * (`commands::video`) spawns `python -m mlx_video.<family>.generate` as a
  * subprocess directly, no separate lu-bridge daemon. Ported from
  * uselu/apps/web/api/video.ts; the transport is a direct Tauri `invoke` via
- * `invokeMedia` (see mlx-image.ts) and progress is exposed for the frontend
+ * `invokeMedia` (api/mlx-invoke) and progress is exposed for the frontend
  * to poll.
  *
  * Hard rule: this is the Mac local video backend, NOT ComfyUI. Only Apple
@@ -11,18 +11,9 @@
  * elsewhere so the UI can dim/skip it.
  */
 import { backendCall } from './backend'
+import { invokeMedia } from './mlx-invoke'
 import type { ClassifiedModel, ModelType } from './comfyui'
 import { siGbToBytes } from '../lib/formatters'
-
-/** See the `invokeMedia` doc comment in `mlx-image.ts` — the Rust wrappers
- *  take a single `args: serde_json::Value` param, so the payload must be
- *  nested under an `args` key. */
-async function invokeMedia<T = unknown>(
-  command: string,
-  args?: Record<string, unknown>,
-): Promise<T> {
-  return backendCall<T>(command, { args: args ?? {} })
-}
 
 export interface VideoStatus {
   available: boolean

@@ -31,6 +31,8 @@ const KANDIDATEN = [
   // Paritaet gegen einen aelteren Katalog zu pruefen und das nicht zu merken.
   resolve(process.cwd(), '../lu-300-web'),
   resolve(process.cwd(), '../lu-300-web-katalog'),
+  // Das Zwillingspaar der Create-Worktrees (lu-create-sota/desktop und /web).
+  resolve(process.cwd(), '../web'),
 ]
 const WEB = KANDIDATEN.find((p) => existsSync(resolve(p, 'apps/web/lib/render/cloud-models.ts')))
 if (!WEB) {
@@ -61,6 +63,8 @@ interface WebZeile {
   i2v?: boolean
   adult?: boolean
   ops?: boolean
+  tier?: string
+  weights?: string
 }
 
 /** Die Eintraege aus CLOUD_MODELS des Webs, ohne TypeScript zu laden. */
@@ -84,6 +88,8 @@ function webKatalog(): WebZeile[] {
       i2v: /i2v: (true|false)/.exec(roh)?.[1] === 'true' ? true : /i2v: false/.test(roh) ? false : undefined,
       adult: /adult: true/.test(roh),
       ops: /ops: \[/.test(roh),
+      tier: /tier: '(\w+)'/.exec(roh)?.[1],
+      weights: /weights: '([\w-]+)'/.exec(roh)?.[1],
     })
   }
   return out
@@ -147,6 +153,23 @@ describe.skipIf(!WEB)('Katalogparitaet Desktop gegen Web', () => {
     const seed = klassischSeed.filter((m) => m.kind === 'video')
     expect(seed.map((m) => m.id)).toEqual(web.map((m) => m.id))
     expect(seed.map((m) => m.label)).toEqual(web.map((m) => m.label))
+  })
+
+  it('fuehrt Stufe und Herkunft jedes klassischen und spezialisierten Eintrags wie das Web', () => {
+    // Seit 02.10.2026 sortieren und beschriften die Waehler danach. Der Notvorrat
+    // ist die Liste ohne Netz und darf hier nicht von der Wahrheit abweichen.
+    const web = webKatalog().filter((m) => m.tier !== undefined)
+    expect(web.length).toBeGreaterThan(40)
+    for (const w of web) {
+      const s = CLOUD_MODEL_SEED.find((m) => m.id === w.id)
+      if (!s) continue
+      expect({ tier: s.tier, weights: s.weights }, w.id).toEqual({ tier: w.tier, weights: w.weights })
+    }
+    // Und jeder Eintrag des Notvorrats steht im Web, mit beiden Feldern.
+    for (const s of CLOUD_MODEL_SEED) {
+      const w = web.find((m) => m.id === s.id)
+      expect(w, s.id).toBeDefined()
+    }
   })
 
   it('traegt bei den erwachsenenfaehigen Endpunkten das entschiedene Markenwort', () => {

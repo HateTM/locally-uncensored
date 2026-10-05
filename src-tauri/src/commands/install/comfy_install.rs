@@ -29,14 +29,14 @@ use crate::state::AppState;
 use crate::os_error;
 use super::comfy_job::{finished_notice, requirements_fallback_log};
 use super::env_check::verify_and_heal_environment;
-use super::pip::{pip_install_streaming_with_retry_raw, requirements_failure_reason_for, should_retry_in_user_site};
+use super::pip::{pip_install_streaming_with_retry_raw, requirements_failure_reason_for};
 
 use super::children::TrackedInstallerChild;
 use super::comfy_job::{ComfyJob, COMFY_JOB};
 use super::comfy_job::comfy_job_busy_message;
 use super::pip::pip_install_streaming_with_retry_cancellable;
 use super::torch::plan_pytorch_install;
-use super::venv::{create_comfyui_venv, is_pep668_protected, restore_orphaned_venv_if_needed};
+use super::venv::{create_comfyui_venv, restore_orphaned_venv_if_needed};
 #[cfg(target_os = "windows")]
 use super::git::{windows_git_install_hint, windows_git_probe, WindowsGitState};
 #[cfg(target_os = "windows")]
@@ -454,16 +454,12 @@ pub fn install_comfyui(
             return;
         }
 
-        // Bug E (rzgrozt — Arch GH #32 comment, 2026-05-08): if the system
-        // Python is PEP 668 protected (Arch, Debian 12+, Fedora 38+, Ubuntu
-        // 23.04+), a bare `python -m pip install ...` exits with
-        // `error: externally-managed-environment` and leaves the user with
-        // a half-cloned ComfyUI dir and no diagnostic. Detect the marker
-        // file via the system Python, then create a venv inside the
-        // ComfyUI folder and use the venv's Python for every subsequent
-        // pip step. The launcher in `process.rs` mirrors this check and
-        // prefers the venv when starting ComfyUI, so the user gets a
-        // consistent isolated environment without ever touching pacman.
+        // Bug E (rzgrozt, Arch GH #32 comment, 2026-05-08) was the first
+        // reason ComfyUI got a venv of its own: a PEP 668 protected system
+        // Python refuses `pip install` outright. Since 3.0.4 every fresh
+        // install builds one (see the build below). The launcher in
+        // `process.rs` prefers the venv when starting ComfyUI, so the user
+        // gets one isolated environment without touching the system Python.
         // A venv that is already there wins over everything below. The
         // launcher starts ComfyUI out of it (process.rs) and update_comfyui
         // installs into it, so an installer that reached past it would put the
@@ -530,9 +526,8 @@ pub fn install_comfyui(
             // Runs BEFORE `create_comfyui_venv`/PEP-668 detection so a
             // healthy choice never gets discarded for one that cannot serve
             // torch (Nachbesserung 6).
-            // No existing venv yet: `create_comfyui_venv` below may build one
-            // from this exact interpreter (only skipped when PEP 668 is not
-            // in effect), so the strict probe applies.
+            // No existing venv yet: `create_comfyui_venv` below builds one
+            // from this exact interpreter, so the strict probe applies.
             let chosen_python = match super::torch::choose_torch_python(&python_bin, torch_index.as_deref(), &torch_package_refs, "press Install ComfyUI again", true) {
                 super::torch::TorchPythonDecision::Proceed => python_bin.clone(),
                 super::torch::TorchPythonDecision::UseInstead { path, .. } => {
@@ -550,38 +545,41 @@ pub fn install_comfyui(
                     return;
                 }
             };
-            if is_pep668_protected(&chosen_python) {
-                update(
-                    "installing",
-                    "Python is PEP 668 protected (Arch / Debian 12+ / Fedora 38+ / \
-                     Ubuntu 23.04+). Creating an isolated venv at ComfyUI/venv so \
-                     pip can install PyTorch + ComfyUI deps without touching your \
-                     system Python …",
-                );
-                match create_comfyui_venv(&target_dir, &chosen_python, Some(&cancel_flag)) {
-                    Ok(venv_py) => {
-                        let p = venv_py.to_string_lossy().to_string();
-                        update(
-                            "installing",
-                            &format!("venv ready, using {} for the install.", p),
-                        );
-                        p
-                    }
-                    // A cancel the user asked for is not a failed install. Without
-                    // this arm the new cancel path inside `create_comfyui_venv`
-                    // would arrive here as the card "Installing ComfyUI did not
-                    // finish", over a run that stopped because they said so.
-                    Err(e) if e == "cancelled" => {
-                        update("cancelled", "Install cancelled while the venv was being created.");
-                        return;
-                    }
-                    Err(e) => {
-                        update("error", &format!("venv creation failed.\n\n{}", e));
-                        return;
-                    }
+            // Always a venv of its own, on every platform. Without one,
+            // Windows and macOS put PyTorch and every ComfyUI package into the
+            // user's system Python, next to whatever other software had
+            // installed there. nosferatue412 (Discord 2026-09-22, Windows 11,
+            // RX 9060 XT): the environment check died on "python.exe - Bad
+            // Image" for a ROCm DLL in Python312\Lib\site-packages that came
+            // from another install. Linux already did this whenever PEP 668
+            // locked the system Python (Bug E, GH #32). A venv also needs no
+            // administrator for a python.org install under Program Files.
+            update(
+                "installing",
+                "Creating an isolated Python environment at ComfyUI/venv, so PyTorch and \
+                 the ComfyUI packages never mix with other Python software on this machine …",
+            );
+            match create_comfyui_venv(&target_dir, &chosen_python, Some(&cancel_flag)) {
+                Ok(venv_py) => {
+                    let p = venv_py.to_string_lossy().to_string();
+                    update(
+                        "installing",
+                        &format!("venv ready, using {} for the install.", p),
+                    );
+                    p
                 }
-            } else {
-                chosen_python
+                // A cancel the user asked for is not a failed install. Without
+                // this arm the new cancel path inside `create_comfyui_venv`
+                // would arrive here as the card "Installing ComfyUI did not
+                // finish", over a run that stopped because they said so.
+                Err(e) if e == "cancelled" => {
+                    update("cancelled", "Install cancelled while the venv was being created.");
+                    return;
+                }
+                Err(e) => {
+                    update("error", &format!("venv creation failed.\n\n{}", e));
+                    return;
+                }
             }
         };
 
@@ -658,49 +656,22 @@ pub fn install_comfyui(
                 }
                 Err(f) => {
                     let diagnosis = f.diagnosis.clone();
-                    // A python.org install under Program Files has an
-                    // admin-only site-packages, and without a venv the first
-                    // wheel that is not already there dies on it. The same
-                    // escape the custom node path has used since 2026-07-19,
-                    // and only where no venv was built: a venv rejects --user.
-                    // Decided on the RAW stderr: the diagnosis keeps only the
-                    // first 400 characters of the log, and pip prints the
-                    // permission line at the end of a long one.
-                    let retried = if should_retry_in_user_site(
-                        effective_python != python_bin,
-                        &f.stderr,
-                    ) {
-                        update(
-                            "installing",
-                            "The dependencies could not be written to the shared site-packages. \
-                             Retrying into the per user site, which needs no administrator.",
-                        );
-                        let mut user_args = req_args.clone();
-                        user_args.push("--user");
-                        pip_install_streaming_with_retry_cancellable(&user_args, &effective_python, 2, &install_status, Some(&cancel_flag)).is_ok()
-                    } else {
-                        false
-                    };
-                    if retried {
-                        update("installing", "Dependencies installed successfully.");
-                    } else {
-                        // Not fatal on its own: the import check below decides
-                        // whether the environment can actually start. What is
-                        // gone is the old "non-critical" verdict, which called
-                        // a broken environment a finished one.
-                        println!("[Install] Requirements install warning: {}", diagnosis);
-                        let reason = requirements_failure_reason_for(&f);
-                        let folder = target_dir.display().to_string();
-                        requirements_fallback = Some((folder.clone(), reason));
-                        update("installing", &requirements_fallback_log(&folder, reason));
-                        update(
-                            "installing",
-                            &format!(
-                                "Not every dependency installed. Checking what is really missing.\n\n{}",
-                                diagnosis
-                            ),
-                        );
-                    }
+                    // Not fatal on its own: the import check below decides
+                    // whether the environment can actually start. What is
+                    // gone is the old "non-critical" verdict, which called
+                    // a broken environment a finished one.
+                    println!("[Install] Requirements install warning: {}", diagnosis);
+                    let reason = requirements_failure_reason_for(&f);
+                    let folder = target_dir.display().to_string();
+                    requirements_fallback = Some((folder.clone(), reason));
+                    update("installing", &requirements_fallback_log(&folder, reason));
+                    update(
+                        "installing",
+                        &format!(
+                            "Not every dependency installed. Checking what is really missing.\n\n{}",
+                            diagnosis
+                        ),
+                    );
                 }
             }
         }

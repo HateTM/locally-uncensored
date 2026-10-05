@@ -77,7 +77,7 @@ describe('the opt-in, for the user who wants the cloud confirm back', () => {
 
 describe('wiring in useAgentChat', () => {
   it('the cloud arm rides ON TOP of the permission level, never replaces it', () => {
-    expect(agent).toContain("const needsApproval = permLevel !== 'auto' || cloudShellConfirm")
+    expect(agent).toContain("const needsApproval = (permLevel !== 'auto' || cloudShellConfirm)")
   })
 
   it('the gate reads the SAME shared helper and setting as the Code tab', () => {

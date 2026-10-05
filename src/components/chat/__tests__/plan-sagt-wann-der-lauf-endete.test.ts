@@ -85,7 +85,7 @@ describe('die Leiste fragt beide Laufquellen, nicht nur eine', () => {
     // nichts mehr laeuft, ist kein halber Fehler, sondern ruhig. Die Aussage
     // des Tests ist dieselbe geblieben und haengt jetzt an der Bewegung
     // statt an der Farbe: es dreht sich nur, was wirklich laeuft.
-    expect(src).toMatch(/runActive \? 'text-blue-400 animate-spin' : HINWEIS_TEXT\.ruhig/)
+    expect(src).toMatch(/runActive \? 'text-gray-600 dark:text-gray-300 animate-spin' : HINWEIS_TEXT\.ruhig/)
     // Und es gibt genau EINE Drehung in der Datei, sonst koennte daneben ein
     // zweiter Kreisel stehen, den kein Lauf mehr anhaelt.
     expect(src.match(/animate-spin/g) ?? []).toHaveLength(1)

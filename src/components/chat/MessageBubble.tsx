@@ -1,8 +1,11 @@
 import { ChatAttachment } from './ChatAttachment'
+import { ChatFileChip } from './ChatFileChip'
+import { FILE_ONLY_TEXT } from '../../lib/chat-files'
 import { motion } from 'framer-motion'
 import { User, Copy, Check, Pencil, RefreshCw, X, Wrench, Trash2, Scissors, Unlink } from 'lucide-react'
 import { useState, useRef, useEffect, useMemo, memo } from 'react'
 import { MarkdownRenderer } from './MarkdownRenderer'
+import { closeOpenMarkdown } from '../../lib/streaming-markdown'
 import { ThinkingBlock } from './ThinkingBlock'
 import { ToolCallBand } from './ToolCallBand'
 import { ReflectionBlock } from './ReflectionBlock'
@@ -11,6 +14,7 @@ import { VramSwitchCard } from './VramSwitchCard'
 import { SpeakerButton } from './SpeakerButton'
 import { ChatArtifactCard } from './ChatArtifactCard'
 import { displayModelName } from '../../api/providers/model-name'
+import { modelDisplayLabel } from '../../lib/model-label'
 import type { Message } from '../../types/chat'
 import { stripModelNoise } from '../../lib/strip-model-noise'
 import { truncationNotice } from '../../lib/answer-notes'
@@ -27,6 +31,7 @@ import { MONOGRAM, MONOGRAM_INVERT } from '../layout/brand'
 import { AVATAR_SLOT } from './avatar-slot'
 import { MOTION_S } from '../ui/motion'
 import { Hinweis } from '../ui/Hinweis'
+import { RefusalNotice } from './RefusalNotice'
 import { fitTextarea } from '../../lib/fit-textarea'
 
 interface Props {
@@ -47,9 +52,15 @@ interface Props {
   isLast?: boolean
   /** This bubble is the one currently streaming — hides its action bar. */
   isStreaming?: boolean
+  /** Group chat: the persona this participant speaks as, when it has one of
+   *  its own. Shown in front of the model name. */
+  speakerName?: string
+  /** This answer is the latest one of the chat in which the model declined
+   *  (lib/refusal-detect). The notice with "New chat" stands under it. */
+  declined?: boolean
 }
 
-function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, onApprove, onReject, isLast, isStreaming }: Props) {
+function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, onApprove, onReject, isLast, isStreaming, speakerName, declined }: Props) {
   const [copied, setCopied] = useState(false)
   const [isEditing, setIsEditing] = useState(false)
   const [editContent, setEditContent] = useState('')
@@ -69,6 +80,11 @@ function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, o
     activeConversationId ? s.agentModeActive[activeConversationId] ?? false : false
   )
   const activeModel = useModelStore((s) => s.activeModel)
+  // The catalogue's name for the model that wrote this turn ("Kimi K2.6"), the
+  // same one the picker shows. A string, so the selector stays stable.
+  const answeredByName = useModelStore((s) =>
+    message.modelId ? modelDisplayLabel(s.models, message.modelId) : '',
+  )
   const toggleAgentMode = useAgentModeStore((s) => s.toggleAgentMode)
   const userAvatarDataUrl = useSettingsStore((s) => s.settings.userAvatarDataUrl)
   // Chat Tools (v2.5.3) gives plain chat web/file/image/video WITHOUT Agent Mode.
@@ -149,7 +165,9 @@ function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, o
   }, [isEditing])
 
   const handleCopy = () => {
-    navigator.clipboard.writeText(message.content)
+    // A message with files copies what was typed, not the file summaries the
+    // model received along with it.
+    navigator.clipboard.writeText(isUser && message.files?.length ? (message.displayContent ?? message.content) : message.content)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }
@@ -305,8 +323,8 @@ function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, o
           // der Fehler in einem Wort: der volle Name ist der Modellname, die
           // Kennung davor ist unsere Adresse. Wer den Zeiger auf der Zeile
           // ruhen liess, bekam sie zu sehen, obwohl sie ihm nichts sagt.
-          <div title={displayModelName(message.modelId)} className="t-mono text-gray-500 dark:text-gray-400 pl-1">
-            {displayModelName(message.modelId)}
+          <div title={displayModelName(message.modelId)} data-testid="answered-by" className="t-mono text-gray-500 dark:text-gray-400 pl-1">
+            {speakerName ? `${speakerName} · ${answeredByName}` : answeredByName}
           </div>
         )}
         {/* Thinking block — auto-expands while this (last) turn is still
@@ -331,9 +349,7 @@ function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, o
                     b.phase === 'reflection' ||
                     (b.phase === 'answer' && b.content.trim()) ||
                     // G21-2: per-round thoughts render chronologically between
-                    // the calls. The transient "Analyzing..." placeholder is a
-                    // thinking block too and shows as a live bubble until the
-                    // round's first token replaces it.
+                    // the calls.
                     (b.phase === 'thinking' && b.content.trim()),
                 )
                 .sort((a, b) => a.timestamp - b.timestamp),
@@ -387,7 +403,7 @@ function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, o
                   return (
                     <div key={block.id} className="px-1 py-0.5">
                       <div className={'text-[0.8rem] leading-relaxed' + (isStreaming && istSchluss ? ' lu-caret' : '')}>
-                        <MarkdownRenderer content={clean} />
+                        <MarkdownRenderer content={isStreaming && istSchluss ? closeOpenMarkdown(clean) : clean} />
                       </div>
                     </div>
                   )
@@ -401,6 +417,15 @@ function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, o
             an actual model swap is in flight; gated to the last assistant
             message so a swap shows only in the active turn. */}
         {!isUser && isLast && <VramSwitchCard />}
+
+        {/* Attached files: a chip each, the bytes are not in the chat. */}
+        {message.files && message.files.length > 0 && (
+          <div className="flex gap-1 flex-wrap">
+            {message.files.map((file, i) => (
+              <ChatFileChip key={`${file.sha256}-${i}`} file={file} />
+            ))}
+          </div>
+        )}
 
         {/* Image attachments */}
         {message.images && message.images.length > 0 && (
@@ -446,9 +471,14 @@ function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, o
                 <button onClick={cancelEdit} className="p-0.5 rounded hover:bg-red-500/20 text-red-400 transition-colors"><X size={11} /></button>
               </div>
             </div>
+          ) : isUser && message.files?.length && message.displayContent === FILE_ONLY_TEXT ? (
+            // Nothing was typed: the chips below are the whole message.
+            null
           ) : isUser ? (
             // Slash command: show the short "/commit" (displayContent), not the
             // long expanded instruction held in content (which drives the model).
+            // The same holds for a message with files: content carries their
+            // summaries for the model, the bubble shows what was typed.
             <p className="text-[0.78rem] leading-relaxed text-gray-800 dark:text-gray-200 whitespace-pre-wrap">{message.displayContent || message.content}</p>
           ) : (
             // Answer-blocks (when present) already rendered the per-iteration
@@ -467,7 +497,9 @@ function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, o
                 // kein Zustand, kein Timer, keine Subscription, also auch
                 // kein Rerender, den der Stream nicht ohnehin ausloest.
                 <div className={'text-[0.78rem] leading-relaxed' + (isStreaming ? ' lu-caret' : '')}>
-                  <MarkdownRenderer content={cleanContent} />
+                  {/* While it streams, an open ` or ** is closed for the frame
+                      (lib/streaming-markdown.ts); the stored text is untouched. */}
+                  <MarkdownRenderer content={isStreaming ? closeOpenMarkdown(cleanContent) : cleanContent} />
                   {/* Cut-off marker: a turn the model did not finish on its own
                       terms (length budget / dropped connection). The benchmark
                       screen has always flagged cut-offs; the chat did not, so a
@@ -557,6 +589,10 @@ function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, o
             ))}
           </div>
         )}
+
+        {/* The model declined: said under the answer, never at the prompt
+            field, and before the action bar so it reads as part of the turn. */}
+        {declined && <RefusalNotice />}
 
         {/* Action bar UNDER the message (David 2026-06-06: "eigene Leiste unter
             der Nachricht" instead of cramped hover-icons in the corner). Bigger

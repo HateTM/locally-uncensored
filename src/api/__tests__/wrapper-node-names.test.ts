@@ -81,6 +81,29 @@ const CORE_NODES = new Set([
   // nodes_mask (InvertMask), nodes_compositing (JoinImageWithAlpha); all answer
   // /object_info on ComfyUI 0.35 (2026-09-29).
   'LoadBackgroundRemovalModel', 'RemoveBackground', 'InvertMask', 'JoinImageWithAlpha',
+  // BasicGuider, BasicScheduler, KSamplerSelect, RandomNoise and
+  // SamplerCustomAdvanced: comfy_extras/nodes_custom_sampler.py; the two
+  // MiniMax H3 encode nodes: comfy_extras/nodes_minimax_h3.py, listed in
+  // nodes.py's extras. Both read in ComfyUI master on 2026-10-01.
+  'BasicGuider', 'BasicScheduler', 'KSamplerSelect', 'RandomNoise', 'SamplerCustomAdvanced',
+  'MiniMaxH3ImageToVideo', 'MiniMaxH3ReferenceToVideo',
+  // Read in Comfy-Org/ComfyUI at tag v0.38.0 on 2026-10-02 (schema node_id of
+  // each, the file in brackets, the first release that has it):
+  //   LTX 2.5, all in comfy_extras/nodes_lt.py unless noted:
+  //     LTXVConditioning, LTXVDualCFGGuider (0.32.0, the version marker),
+  //     LTXVImgToVideoInplace, LTXVPreprocess, LTXVConcatAVLatent,
+  //     LTXVSeparateAVLatent; LTXVEmptyLatentAudio and LTXVAudioVAEDecode
+  //     [nodes_lt_audio.py]; LTXVLatentUpsampler [nodes_lt_upsampler.py];
+  //     LatentUpscaleModelLoader [nodes_hunyuan.py]; ManualSigmas
+  //     [nodes_custom_sampler.py].
+  //   FastH3: MiniMaxH3SigmaShift [nodes_minimax_h3.py], BlockSparseAttention
+  //     [nodes_sparse_attention.py, 0.35.0].
+  //   YuE2: YuE2GenerateMusic, EmptyYuE2LatentAudio [nodes_yue2.py, 0.36.0].
+  'LTXVConditioning', 'LTXVDualCFGGuider', 'LTXVImgToVideoInplace', 'LTXVPreprocess', 'LTXVConcatAVLatent',
+  'LTXVSeparateAVLatent', 'LTXVEmptyLatentAudio', 'LTXVAudioVAEDecode', 'LTXVLatentUpsampler',
+  'LatentUpscaleModelLoader', 'ManualSigmas',
+  'MiniMaxH3SigmaShift', 'BlockSparseAttention',
+  'YuE2GenerateMusic', 'EmptyYuE2LatentAudio',
   // lora
   'LoraLoader', 'LoraLoaderModelOnly',
   // decode + image ops
@@ -130,6 +153,8 @@ function emittedClassTypes(): string[] {
   const src = readFileSync(BUILDER_SRC, 'utf8')
   const out = new Set<string>()
   for (const m of src.matchAll(/class_type:\s*'([A-Za-z0-9_]+)'/g)) out.add(m[1])
+  // The LTX 2.5 builder adds nodes through a local add('Class', {...}) helper.
+  for (const m of src.matchAll(/\badd\('([A-Za-z0-9_]+)',/g)) out.add(m[1])
   return [...out].sort()
 }
 

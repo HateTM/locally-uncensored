@@ -1,4 +1,4 @@
-import { parseUnifiedDiff } from '../../lib/diff'
+import { parseUnifiedDiff, displayPath } from '../../lib/diff'
 
 interface Props {
   /** Raw unified-diff string as produced by `computeUnifiedDiff`. */
@@ -9,6 +9,9 @@ interface Props {
    * collapse into a "+N more" line.
    */
   maxLines?: number
+  /** False where the surrounding card already names the file and shows the
+   *  counts (StagedChangesPanel); the path row is then left out. */
+  showPath?: boolean
 }
 
 /**
@@ -16,18 +19,20 @@ interface Props {
  * not a full code editor — we colour add/remove/context lines and
  * surface the per-hunk header so the user can see where edits landed.
  */
-export function DiffView({ diff, maxLines = 200 }: Props) {
+export function DiffView({ diff, maxLines = 200, showPath = true }: Props) {
   if (!diff) return null
+  // The ---/+++ lines only repeat the path the row above already shows.
   const parsed = parseUnifiedDiff(diff)
+  parsed.lines = parsed.lines.filter((l) => l.kind !== 'header')
   const truncated = parsed.lines.length > maxLines
   const lines = truncated ? parsed.lines.slice(0, maxLines) : parsed.lines
   const hiddenCount = parsed.lines.length - lines.length
 
   return (
     <div className="rounded border border-white/10 bg-black/30 overflow-hidden">
-      {(parsed.added > 0 || parsed.removed > 0) && (
+      {showPath && (parsed.added > 0 || parsed.removed > 0) && (
         <div className="flex items-center justify-between px-2 py-1 border-b border-white/5 text-[0.55rem] font-mono">
-          <span className="text-gray-500 truncate">{parsed.path || 'diff'}</span>
+          <span className="text-gray-500 truncate">{displayPath(parsed.path) || 'diff'}</span>
           <span className="flex gap-2 shrink-0">
             {parsed.added > 0 && (
               <span className="text-emerald-400">+{parsed.added}</span>
@@ -40,13 +45,6 @@ export function DiffView({ diff, maxLines = 200 }: Props) {
       )}
       <pre className="t-micro leading-relaxed font-mono overflow-auto scrollbar-thin max-h-[300px]">
         {lines.map((l, i) => {
-          if (l.kind === 'header') {
-            return (
-              <div key={i} className="px-2 text-gray-600">
-                {l.text}
-              </div>
-            )
-          }
           if (l.kind === 'hunk') {
             return (
               <div

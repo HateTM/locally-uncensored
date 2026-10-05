@@ -1,12 +1,13 @@
 import { backendCall, fetchExternal } from "./backend"
 import { readComfyFolderLists, filterPartialFiles, refreshComfyModels } from "./comfyui"
 import { COMPONENT_REGISTRY, type ComponentSpec, type ComponentRequirements } from './component-registry'
-import { clearNodeCache } from "./comfyui-nodes"
+import { clearNodeCache, getAllNodeInfo } from "./comfyui-nodes"
 import { restartComfyForNewNodes } from "./comfy-restart"
 import type { ProviderId } from "./providers/types"
 import { log } from "../lib/logger"
 import { useWorkflowStore } from "../stores/workflowStore"
 import { waitForModelsVisible } from "../lib/bundle-install"
+import { bundleBytesToFetch } from "../lib/bundle-state"
 import type { DownloadProgress } from "../types/downloads"
 import { asNumber, asRecordArray, asString, asStringArray, isRecord, prop, propPath } from "../types/json-guards"
 import type { DiscoverModel, ModelBundle } from "./model-bundles"
@@ -297,6 +298,16 @@ export function remoteBundleNotice(bundleName: string, r: RemoteBundleReport): s
 
 // ─── Custom Node Installation ───
 
+/** Is the file on disk the catalog's file? `check_model_sizes` only says "plausibly
+ *  there" (50 % of the catalog estimate). Where the catalog knows the byte count
+ *  exactly (`sizeBytes`), a file of the same name and another size is a repack from
+ *  another mirror, not this model, so it must not count as installed: Get is
+ *  offered again and the downloader's own size check fetches the right file. */
+export function onDiskMatchesCatalog(file: { sizeBytes?: number }, check: { complete: boolean; actualBytes?: number } | undefined): boolean {
+  if (!check?.complete) return false
+  return file.sizeBytes == null || check.actualBytes === file.sizeBytes
+}
+
 /** Check if ALL files in a bundle are completely downloaded (size validated) */
 export async function checkBundleInstalled(bundle: ModelBundle): Promise<boolean> {
   try {
@@ -310,7 +321,8 @@ export async function checkBundleInstalled(bundle: ModelBundle): Promise<boolean
     if (files.length === 0) return false
     const results: Array<{ filename: string; exists: boolean; actualBytes: number; complete: boolean }> =
       await backendCall('check_model_sizes', { files })
-    return results.every(r => r.complete)
+    const byName = new Map(results.map(r => [r.filename, r]))
+    return bundle.files.filter(f => f.subfolder && f.filename).every(f => onDiskMatchesCatalog(f, byName.get(f.filename!)))
   } catch {
     return false
   }
@@ -318,7 +330,17 @@ export async function checkBundleInstalled(bundle: ModelBundle): Promise<boolean
 
 /** Check multiple bundles at once, returns map of bundle name → installed status */
 export async function checkBundlesInstalled(bundles: ModelBundle[]): Promise<Record<string, boolean>> {
+  return (await checkBundlesOnDisk(bundles)).installed
+}
+
+/** What the disk says about a list of bundles: which bundles are installed, and
+ *  which of their files are there already. The second half is what a card needs
+ *  to announce only what it will really fetch: bundles share files, so "Get"
+ *  on a three file bundle is often one file (the box, 03.10.2026). A file
+ *  counts by the same rule `installBundleComplete` skips it by. */
+export async function checkBundlesOnDisk(bundles: ModelBundle[]): Promise<{ installed: Record<string, boolean>; files: Set<string> }> {
   const result: Record<string, boolean> = {}
+  const files = new Set<string>()
   // Collect ALL files from ALL bundles into a single batch request
   const allFiles: Array<{ subfolder: string; filename: string; expectedBytes: number; bundleName: string }> = []
   for (const bundle of bundles) {
@@ -332,7 +354,7 @@ export async function checkBundlesInstalled(bundles: ModelBundle[]): Promise<Rec
       })
     }
   }
-  if (allFiles.length === 0) return result
+  if (allFiles.length === 0) return { installed: result, files }
 
   try {
     const checkFiles = allFiles.map(f => ({ subfolder: f.subfolder, filename: f.filename, expectedBytes: f.expectedBytes }))
@@ -340,10 +362,13 @@ export async function checkBundlesInstalled(bundles: ModelBundle[]): Promise<Rec
       await backendCall('check_model_sizes', { files: checkFiles })
 
     // Map results back to bundles
-    const fileStatus = new Map(results.map(r => [r.filename, r.complete]))
+    const fileStatus = new Map(results.map(r => [r.filename, r]))
     for (const bundle of bundles) {
       const bundleFiles = bundle.files.filter(f => f.filename)
-      result[bundle.name] = bundleFiles.length > 0 && bundleFiles.every(f => fileStatus.get(f.filename!) === true)
+      for (const f of bundleFiles) {
+        if (onDiskMatchesCatalog(f, fileStatus.get(f.filename!))) files.add(f.filename!)
+      }
+      result[bundle.name] = bundleFiles.length > 0 && bundleFiles.every(f => onDiskMatchesCatalog(f, fileStatus.get(f.filename!)))
     }
   } catch {
     // If check fails (e.g. no ComfyUI), all bundles are not installed
@@ -431,7 +456,7 @@ export async function checkBundlesInstalled(bundles: ModelBundle[]): Promise<Rec
     }
   }
 
-  return result
+  return { installed: result, files }
 }
 
 /** Base identity of a model file: basename only (ComfyUI enums can carry
@@ -563,7 +588,9 @@ export async function installCustomNodes(nodeKeys: string[], opts: CustomNodeIns
       }
       try {
         opts.onProgress?.(`Installing ${entry.name}…`)
-        const result = await backendCall('install_custom_node', { repoUrl: entry.repo, nodeName: entry.name })
+        const result = await backendCall('install_custom_node', {
+          repoUrl: entry.repo, nodeName: entry.name, ...(entry.commit ? { commit: entry.commit } : {}),
+        })
         assertNodeInstallOk(result, entry.name)
         log.info(`[discover] Installed custom node: ${entry.name}`)
       } catch (err) {
@@ -661,31 +688,47 @@ async function runVisibilityConfirmation(filename: string): Promise<void> {
   }
 }
 
-/** One gibibyte, the unit the catalog's `sizeGB` and every size message use. */
-const GIB = 1_073_741_824
+/**
+ * ONE space check for the whole bundle, before the first byte moves.
+ *
+ * Every file starts its own transfer and every transfer checked the free
+ * space on its own, so a four file bundle passed the same free bytes four
+ * times over and then filled the drive between them. The sum is the only
+ * honest question, and it has to be asked before anything starts: refusing
+ * file three after files one and two have written 20 GB helps nobody. Throws
+ * with the numbers (how much is short, the download, the free space) when the
+ * missing files plus the reserve do not fit.
+ */
+export async function assertBundleFits(bundle: ModelBundle, installed: ReadonlySet<string>): Promise<void> {
+  const pending = bundleBytesToFetch(bundle, installed)
+  if (pending.bytes <= 0 || !pending.subfolder) return
+  const verdict = await checkDownloadSpace({ subfolder: pending.subfolder }, pending.bytes)
+  if (verdict && !verdict.fits) {
+    throw new Error(verdict.message || `${bundle.name} does not fit on this drive.`)
+  }
+}
 
 /**
- * How many bytes this bundle still has to fetch, and where they land.
+ * The node packs of `keys` the running ComfyUI has not loaded.
  *
- * Pure, so the sum can be tested without a drive. Files already on disk are
- * left out — re-checking space for a file that is not going to be fetched would
- * refuse installs that fit perfectly well. `totalSizeGB` is the fallback when
- * the per-file sizes are missing: a rough number is a far better plan than
- * planning for nothing, and it is only ever used to refuse, never to promise.
+ * The box, 03.10.2026: a click on Get for a GGUF bundle pulled ComfyUI-GGUF
+ * again and restarted ComfyUI, with the pack loaded all along and nothing on
+ * the surface saying so. A pack whose nodes are registered needs neither. One
+ * that is on disk and failed to import is not loaded, so it still gets the
+ * install that heals it. With ComfyUI not answering nobody can tell, and
+ * every pack counts as missing, as before.
  */
-export function bundleBytesToFetch(
-  bundle: ModelBundle,
-  installed: Set<string>,
-): { bytes: number; subfolder?: string; files: number } {
-  const pending = bundle.files.filter(
-    f => f.downloadUrl && f.filename && f.subfolder && !installed.has(f.filename),
-  )
-  if (pending.length === 0) return { bytes: 0, files: 0 }
-  const known = pending.reduce((sum, f) => sum + (f.sizeGB ? f.sizeGB * GIB : 0), 0)
-  // Not one file states a size: fall back to the bundle total, minus nothing,
-  // because we cannot tell which part of it is already there.
-  const bytes = known > 0 ? known : (bundle.totalSizeGB || 0) * GIB
-  return { bytes: Math.round(bytes), subfolder: pending[0].subfolder, files: pending.length }
+export async function nodePacksNotLoaded(keys: string[]): Promise<string[]> {
+  let registered: Set<string>
+  try {
+    registered = new Set(Object.keys(await getAllNodeInfo()))
+  } catch {
+    return keys
+  }
+  return keys.filter((key) => {
+    const entry = CUSTOM_NODE_REGISTRY[key]
+    return !entry || !entry.requiredNodes.every((node) => registered.has(node))
+  })
 }
 
 export async function installBundleComplete(bundle: ModelBundle): Promise<{ remote?: RemoteBundleReport }> {
@@ -702,10 +745,14 @@ export async function installBundleComplete(bundle: ModelBundle): Promise<{ remo
       .filter(f => f.subfolder && f.filename)
       .map(f => ({ subfolder: f.subfolder!, filename: f.filename!, expectedBytes: f.sizeGB ? Math.round(f.sizeGB * 1_073_741_824) : 0 }))
     if (checkFiles.length > 0) {
-      const results: Array<{ filename: string; exists: boolean; complete: boolean }> =
+      const results: Array<{ filename: string; exists: boolean; actualBytes?: number; complete: boolean }> =
         await backendCall('check_model_sizes', { files: checkFiles })
+      const byName = new Map(bundle.files.map(f => [f.filename, f]))
       for (const r of results) {
-        if (r.complete) installedFiles.add(r.filename)
+        // A same-named file of another size is not ours: leave it out of the set
+        // so the download starts, and download_model refetches on the size
+        // mismatch (judge_existing).
+        if (onDiskMatchesCatalog(byName.get(r.filename) ?? {}, r)) installedFiles.add(r.filename)
       }
     }
   } catch { /* can't check · download everything */ }
@@ -755,20 +802,7 @@ export async function installBundleComplete(bundle: ModelBundle): Promise<{ remo
   // it ran "lazily", which was not true, the request always goes out).
   const judgeable = judgeableFolders()
 
-  // ONE space check for the whole bundle, before the first byte moves.
-  //
-  // Every file starts its own transfer and every transfer checked the free
-  // space on its own, so a four file bundle passed the same free bytes four
-  // times over and then filled the drive between them. The sum is the only
-  // honest question, and it has to be asked before anything starts: refusing
-  // file three after files one and two have written 20 GB helps nobody.
-  const pendingBytes = bundleBytesToFetch(bundle, installedFiles)
-  if (pendingBytes.bytes > 0 && pendingBytes.subfolder) {
-    const verdict = await checkDownloadSpace({ subfolder: pendingBytes.subfolder }, pendingBytes.bytes)
-    if (verdict && !verdict.fits) {
-      throw new Error(verdict.message || `${bundle.name} does not fit on this drive.`)
-    }
-  }
+  await assertBundleFits(bundle, installedFiles)
 
   // Step 1: Start downloads only for files NOT already installed
   for (const file of bundle.files) {
@@ -810,7 +844,10 @@ export async function installBundleComplete(bundle: ModelBundle): Promise<{ remo
   // (T-67), and its restart was a hand-rolled sleep that could not tell a
   // ComfyUI LU owns from one it does not.
   if (bundle.customNodes && bundle.customNodes.length > 0 && !target.remote) {
-    void installCustomNodes([...bundle.customNodes], { keepGoing: true, restart: true })
+    // Only the packs ComfyUI has not loaded: installing one that is there
+    // restarts ComfyUI for nothing (nodePacksNotLoaded).
+    void nodePacksNotLoaded([...bundle.customNodes])
+      .then((missing) => (missing.length > 0 ? installCustomNodes(missing, { keepGoing: true, restart: true }) : undefined))
       .catch((err) => log.warn('[discover] Custom node install/restart failed', { err }))
   }
 
@@ -1643,12 +1680,20 @@ export function lookupFileMeta(filename: string): FileMeta | null {
       return {
         url: m.downloadUrl,
         subfolder: m.subfolder,
-        expectedBytes: m.sizeGB ? Math.round(m.sizeGB * GIB) : undefined,
+        expectedBytes: m.sizeGB ? Math.round(m.sizeGB * 1_073_741_824) : undefined,
         sha256: m.sha256,
       }
     }
   }
   return null
+}
+
+/** The catalog's digest and byte count for `filename`, but only when the catalog
+ *  names the SAME address. For callers that build a download from a registry
+ *  entry and would otherwise start it without the digest. */
+export function catalogDigestFor(filename: string, url: string): { sha256?: string; expectedBytes?: number } {
+  const cat = lookupFileMeta(filename)
+  return cat && cat.url === url ? { sha256: cat.sha256, expectedBytes: cat.expectedBytes } : {}
 }
 
 /** Every filename the catalog can name. Used to turn an orphaned partial's
@@ -1734,6 +1779,8 @@ export function catalogAddresses(): CatalogAddress[] {
     add(req.vae?.downloadUrl, `COMPONENT_REGISTRY.${type}.vae`)
     add(req.clip?.downloadUrl, `COMPONENT_REGISTRY.${type}.clip`)
     add(req.clipSecondary?.downloadUrl, `COMPONENT_REGISTRY.${type}.clipSecondary`)
+    add(req.audioVae?.downloadUrl, `COMPONENT_REGISTRY.${type}.audioVae`)
+    add(req.upscaler?.downloadUrl, `COMPONENT_REGISTRY.${type}.upscaler`)
   }
 
   return [...byUrl].map(([url, where]) => ({ url, where: [...where] }))
@@ -1862,6 +1909,10 @@ function civitaiItemToResult(
   if (type === 'Checkpoint' && (name.includes('flux') || name.includes('wan') || name.includes('hunyuan'))) {
     subfolder = 'diffusion_models'
   }
+  // A GGUF quant is a bare diffusion model whatever its name says, and the
+  // only loader that lists .gguf (ComfyUI-GGUF's UnetLoaderGGUF) reads
+  // diffusion_models/unet. In checkpoints/ nothing ever saw it.
+  if (type === 'Checkpoint' && isGgufFile(filename)) subfolder = 'diffusion_models'
 
   const filename = asString(prop(file, 'name'))
     || `${(itemName ?? '').replace(/[^a-zA-Z0-9._-]/g, '_')}.safetensors`
@@ -1974,6 +2025,33 @@ export async function getCivitaiModelVersion(
     log.warn('[discover] CivitAI version lookup failed', { versionId, err })
     return null
   }
+}
+
+/** A GGUF quant, read by the ComfyUI-GGUF pack and by nothing else. */
+export function isGgufFile(filename: string | undefined): boolean {
+  return /\.gguf$/i.test(filename ?? '')
+}
+
+/**
+ * Download a CivitAI hit, and for a GGUF quant make sure ComfyUI can read it.
+ *
+ * A curated bundle installs the ComfyUI-GGUF pack along with its files; a
+ * CivitAI hit had no such step, so a GGUF from the search downloaded fine and
+ * stayed invisible. The pack is installed only when this ComfyUI lacks its
+ * loader (installing restarts ComfyUI, which a running render would not
+ * survive), in the background so the download is never held up, and never
+ * for a ComfyUI on another machine, whose packs this one cannot touch.
+ */
+export async function startCivitaiDownload(model: { downloadUrl?: string; filename?: string; subfolder?: string }): Promise<void> {
+  if (!model.downloadUrl || !model.filename || !model.subfolder) return
+  await startModelDownload(model.downloadUrl, model.subfolder, model.filename)
+  if (!isGgufFile(model.filename)) return
+  const target = await comfyModelTarget()
+  if (target.remote) return
+  const nodes = await getAllNodeInfo().catch(() => null)
+  if (nodes && 'UnetLoaderGGUF' in nodes) return
+  void installCustomNodes(['gguf'], { keepGoing: true, restart: true })
+    .catch((err) => log.warn('[discover] ComfyUI-GGUF install for a CivitAI GGUF failed', { err }))
 }
 
 export async function searchCivitaiModels(

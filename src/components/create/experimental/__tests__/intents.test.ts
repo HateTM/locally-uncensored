@@ -13,13 +13,13 @@ import { LOCAL_LANE_OPS } from '../../../../stores/createStore'
 // musubi trainer runtime (trainer.rs), so its train lane is local now too.
 /** The pills the bar shows, in order. */
 const shown = (backend: 'local' | 'cloud', mlxHost: boolean) =>
-  visibleIntents(backend, mlxHost).map((m) => m.id)
+  visibleIntents(backend, mlxHost, true).map((m) => m.id)
 /** The pills a user can actually select (no cloud-teaser lock). */
 const unlocked = (backend: 'local' | 'cloud', mlxHost: boolean) =>
-  visibleIntents(backend, mlxHost).filter((m) => !isIntentLocked(m, backend, mlxHost)).map((m) => m.id)
+  visibleIntents(backend, mlxHost, true).filter((m) => !isIntentLocked(m, backend, mlxHost)).map((m) => m.id)
 /** The pills shown as locked, cloud-tagged teasers. */
 const teasers = (backend: 'local' | 'cloud', mlxHost: boolean) =>
-  visibleIntents(backend, mlxHost).filter((m) => isIntentLocked(m, backend, mlxHost)).map((m) => m.id)
+  visibleIntents(backend, mlxHost, true).filter((m) => isIntentLocked(m, backend, mlxHost)).map((m) => m.id)
 
 describe('intent cloud gating', () => {
   it('upscale and eraser stay hosted-only (no local lane)', () => {

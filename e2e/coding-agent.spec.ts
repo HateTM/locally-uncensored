@@ -306,3 +306,89 @@ test('the plan the model writes shows up above the composer and tracks progress'
   const calls = await toolCalls(page)
   expect(calls.filter((c) => c.cmd === 'todo_write')).toEqual([])
 })
+
+test('file_edit: several edits in one call, one of them with the indentation off, land in one write', async ({ page }) => {
+  // 01.10.2026: every failed edit on a paid model was "read again, retry",
+  // two more full-context round trips. The model here sends two changes in one
+  // call, and copies the first with an indentation the file does not have.
+  await bootAgentMode(page, [
+    {
+      text: 'patching',
+      toolCalls: [{
+        name: 'file_edit',
+        args: {
+          path: 'big.ts',
+          edits: [
+            { old_string: '    line 10\n    line 11', new_string: '    LINE TEN\n    LINE ELEVEN' },
+            { old_string: 'line 150', new_string: 'LINE 150' },
+          ],
+        },
+      }],
+    },
+    { text: 'EDITS_DONE' },
+  ])
+
+  await instruct(page, 'rename line 10, 11 and 150 in big.ts')
+  await expect(page.getByRole('main').getByText('EDITS_DONE')).toBeVisible({ timeout: 30_000 })
+
+  const writes = (await toolCalls(page)).filter((c) => c.cmd === 'fs_write')
+  expect(writes).toHaveLength(1)
+  const content = String(writes[0].raw.content)
+  expect(content).toContain('line 9\nLINE TEN\nLINE ELEVEN\nline 12')
+  expect(content).toContain('line 149\nLINE 150\nline 151')
+})
+
+/**
+ * Customer case 30.09.2026 (swift_maple90, Windows desktop), second mail: "if
+ * i go to any other tabs like setting or somewhere task is stopped and start
+ * from begining again". The spec above only walked Code → Models → back. This
+ * walks the customer's way, into Settings, in both loops, and checks the two
+ * halves of the complaint separately: the run keeps working while the user is
+ * away, and every later request still carries the steps before the switch.
+ */
+const bodies = (page: Page) =>
+  page.evaluate(() => ((window as unknown as { __E2E_CHAT_BODIES__?: string[] }).__E2E_CHAT_BODIES__ ?? []).slice())
+
+async function awayToSettingsAndBack(page: Page) {
+  const header = page.getByRole('banner')
+  const before = (await toolCalls(page)).length
+  await header.getByRole('button', { name: 'Settings' }).click()
+  await page.waitForTimeout(2_500)
+  const whileAway = (await toolCalls(page)).length
+  await header.getByRole('button', { name: 'Chat' }).click()
+  return { before, whileAway }
+}
+
+for (const mode of ['code', 'agent'] as const) {
+  test(`${mode}: a run keeps going through a trip to Settings and does not start over`, async ({ page }) => {
+    const turns: Turn[] = Array.from({ length: 60 }, (_, i) => ({
+      text: `step ${i + 1}`,
+      toolCalls: [{ name: 'file_read', args: { path: `src/file-${i}.ts` } }],
+    }))
+    if (mode === 'code') await boot(page, turns)
+    else await bootAgentMode(page, turns)
+
+    await instruct(page, 'walk the whole source tree')
+    await expect.poll(async () => (await toolCalls(page)).length, { timeout: 20_000 }).toBeGreaterThan(2)
+
+    const { before, whileAway } = await awayToSettingsAndBack(page)
+    // Not stopped while the user looked at Settings.
+    expect(whileAway).toBeGreaterThan(before)
+
+    // Back in the chat the run is still the same run: Stop is offered and it
+    // keeps working.
+    await expect(page.getByRole('button', { name: /Stop/i })).toBeVisible({ timeout: 20_000 })
+    const back = (await toolCalls(page)).length
+    await expect.poll(async () => (await toolCalls(page)).length, { timeout: 20_000 }).toBeGreaterThan(back)
+
+    // Not started over: the newest request still carries the first step.
+    const all = await bodies(page)
+    expect(all[all.length - 1]).toContain('src/file-0.ts')
+    // And the instruction went out once, not a second time as a fresh run.
+    const lastMsgs = JSON.parse(all[all.length - 1]).messages as Array<{ role: string; content: unknown }>
+    const asks = lastMsgs.filter((m) => m.role === 'user' && String(m.content).includes('walk the whole source tree'))
+    expect(asks.length).toBe(1)
+
+    await page.getByRole('button', { name: /Stop/i }).click()
+  })
+}

@@ -28,6 +28,8 @@ import { useAgentTaskStore } from '../stores/agentTaskStore'
 import { useAgentGoalStore, renderGoalSection } from '../stores/agentGoalStore'
 import { endLoopUnlessRearmed, useAgentLoopStore } from '../stores/agentLoopStore'
 import { beginRun, isRunStopped, stopRun } from '../lib/run-stop'
+import { REJECTED_CALL_FOR_MODEL } from '../lib/rejected-call'
+import { noteStoppedIfEmpty } from '../lib/stopped-note'
 import { CODEX_CONFIRM_TOOLS, renderApprovalPreview } from './codexShellGate'
 import { buildHermesToolPrompt, buildHermesToolResult, buildHermesToolCall, parseHermesToolCalls, stripToolCallTags, hasToolCallTags } from '../api/hermes-tool-calling'
 import { streamProviderTurn, type StreamedProviderTurn } from '../lib/provider-stream'
@@ -37,6 +39,9 @@ import { resolveChatWorkspaceSlug } from '../api/workspace-slug'
 import { codexModeKnobs, type CodexMode } from '../lib/codex-mode'
 import { CODEX_PLAN_SYSTEM_PROMPT } from '../lib/codex-plan-prompt'
 import { resolveWorkspace } from '../api/agents/workspace-resolve'
+import { useChatNoticeStore, CHAT_NOTICE_MS } from '../stores/chatNoticeStore'
+import { copyFailedMessage, fileMessageFields, placeChatFiles, type ChatFileInput } from '../lib/chat-files'
+import type { FileAttachment } from '../types/chat'
 import { useAgentModeStore } from '../stores/agentModeStore'
 import { loadLurules, renderRulesSection } from '../lib/lurules'
 import {
@@ -55,23 +60,23 @@ import { useStagedChangesStore, flushStagedPersist } from '../stores/stagedChang
 import { log } from '../lib/logger'
 import type { AgentToolCall } from '../types/agent-mode'
 import { isThinkingCompatible, isPlainTextPlanner } from '../lib/model-compatibility'
-import type { ChatMessage, ToolCall, ToolDefinition } from '../api/providers/types'
-import { executeParallel, applyResultToToolCall, APPROVE_ALL, type ExecutionRequest } from '../api/agents/tool-executor'
+import type { ChatMessage, ToolCall, ToolCallProgress, ToolDefinition } from '../api/providers/types'
+import { useRunActivityStore, toolProgressActivity } from '../stores/runActivityStore'
+import { executeParallel, applyResultToToolCall, resultFailed, APPROVE_ALL, type ExecutionRequest } from '../api/agents/tool-executor'
 import { useToolAuditStore } from '../stores/toolAuditStore'
 import { makeInTurnCacheLookup } from '../api/agents/in-turn-cache'
 import { explainError as explainToolError } from '../api/agents/error-hints'
 import { budgetFromSettings } from '../api/agents/budget'
 import { settleThinking } from '../lib/thinking-stripper'
 import { openPlanGap, planReconcileSteer, PLAN_RECONCILE_BUDGET } from '../lib/plan-reconcile'
-import { PlanStaleness, planStalenessSteer } from '../lib/plan-staleness'
 import { planResumeAnchor } from '../lib/plan-resume'
 import { useTodoStore } from '../stores/todoStore'
 import { httpStatusOf } from '../lib/http-status'
-import { asString, errorText, prop } from '../types/json-guards'
+import { asString, errorText, isRecord, prop } from '../types/json-guards'
 import type { ToolArgs } from '../api/mcp/types'
 import { CREDITS_EXHAUSTED_MESSAGE } from '../lib/credits-exhausted'
 import { streamOllamaChatWithTools } from '../lib/ollama-stream-tools'
-import { canonicalToolName } from '../lib/loose-tool-parse'
+import { repairToolCall } from '../lib/loose-tool-parse'
 import { selectRelevantTools, selectRelevantToolsAsync, SMALL_MODEL_MAX_TOOLS, gateCreateTools, wantsMediaTools, isGatedTool } from '../lib/tool-selection'
 import { generateEmbeddings } from '../api/rag'
 import { truncateToolResult } from '../lib/truncate-tool-result'
@@ -79,7 +84,7 @@ import { toolCallCapMs, raceWithToolTimeout, SHELL_EXECUTE_DEFAULT_TIMEOUT_MS } 
 import { getModelMaxTokens, estimateTokens } from '../lib/context-compaction'
 import { capToLearnedWindow, contextOverflowOf, learnSendWindow, shrunkSendWindow } from './codex/context-overflow'
 import { buildRequestMessages, trimWorkingHistory, decayRestoredToolResult, isToolResult } from '../lib/context-decay'
-import { effectiveSendWindow } from '../lib/send-window'
+import { effectiveSendWindow, sendWindowFor } from '../lib/send-window'
 import { sendsToALanBackend } from '../lib/lan-openai-slot'
 import { useSendSizeStore } from '../stores/sendSizeStore'
 import { resolveAgentNumCtx } from '../lib/agent-num-ctx'
@@ -104,17 +109,26 @@ import { shouldDowngradeThinking, engineDeniedThinking } from './codex/thinking-
 import { recoverToolCallsFromContent } from './codex/tool-call-recovery'
 import { codexStallVerdict } from './codex/stall-verdict'
 import { createStagedWriter } from './codex/staged-writes'
-import { codexCutoffNote } from './codex/turn-cutoff'
+import { codexCutoffNote, dropCutOffCall } from './codex/turn-cutoff'
 import { codexToolDiff, codexEventKind } from './codex/tool-result-view'
 import { capHiddenToolHistory } from './codex/hidden-history'
 import { withHouseConduct } from '../lib/system-prompt'
+import { gatePlanTool, planToolAllowed } from '../lib/plan-gate'
 
-// No-op diagnostic hook. Kept as a call site so future debugging can swap
-// this for a file logger without re-editing every iter-point in the loop.
-// Release builds must not write to the user's filesystem; if you need
-// traces, gate on a build-time env flag or a settings toggle.
-function diagLog(_tag: string, _data: unknown): void {
-  /* release: no-op */
+// Why a run ended, or was pushed on, belongs in the support log. This used to
+// be a no-op, and the customer case of 30.09.2026 (936k credits, "never
+// finished one task") had nothing to read on the customer's machine: which
+// guard ended each run was unknowable. The run-shaping tags go out as warn,
+// which logger.ts mirrors into the rolling log file; the per-step trace stays
+// on debug (console only). No payload carries message text, only counters,
+// reasons and lengths.
+const RUN_EVENT_TAGS: ReadonlySet<string> = new Set([
+  'break-no-toolcalls', 'budget-halt', 'context-overflow-retry', 'continue-nudge',
+  'loop-guard-halt', 'loop-guard-steer', 'outer-catch', 'plan-reconcile-steer', 'turn-cut-off',
+])
+function diagLog(tag: string, data: Record<string, unknown>): void {
+  if (RUN_EVENT_TAGS.has(tag)) log.warn(`codex.${tag}`, data)
+  else log.debug(`codex.${tag}`, data)
 }
 
 // Review-mode system prompt (B13). In review mode this REPLACES the base
@@ -143,17 +157,19 @@ AUTONOMY CONTRACT (read carefully):
 
 Workflow per task:
 1. Understand the task (optional brief sentence)
-2. If it needs more than about three tool calls, call todo_write with the whole plan BEFORE step 3. The user sees that list live and it is how they follow a long run.
-3. Explore the codebase, file_list / file_read / file_search
-4. Implement ALL required changes, file_edit to change existing files, file_write for new ones; as many calls as needed in one go
-5. Verify, shell_execute to run tests, lint, or build
-6. Only THEN write a short summary of what you did
+2. Explore the codebase, file_list / file_read / file_search
+3. Implement ALL required changes, file_edit to change existing files, file_write for new ones
+4. Verify, shell_execute to run tests, lint, or build
+5. Only THEN write a short summary of what you did
 
-Keeping the plan current: after each step call todo_write again with the COMPLETE list, the finished item as completed and the next one as in_progress. Exactly one item is in_progress at a time, and nothing is completed before it actually succeeded. A plan that stops updating is worse than no plan.
+Work in batches. Every step resends the whole conversation, so each round trip costs the user real money:
+- Put independent tool calls into ONE response: read all the files you need at once, run several searches at once, make several edits at once.
+- Never spend a step on bookkeeping alone. If a todo_write tool is offered, send the updated list in the same response as your next real tool call, never on its own.
+- Do not re-read a file you already read unless it changed since.
 
 Rules:
 - Always read a file before modifying it
-- To CHANGE part of an existing file, use file_edit (replace a UNIQUE old_string with new_string), it is far cheaper and safer than rewriting the whole file with file_write, and never truncates a large file. Use file_write only to CREATE a new file or fully replace one. If file_edit reports the old_string is missing or not unique, read the file and retry with more surrounding lines.
+- To CHANGE part of an existing file, use file_edit (replace a UNIQUE old_string with new_string), it is far cheaper and safer than rewriting the whole file with file_write, and never truncates a large file. Use file_write only to CREATE a new file or fully replace one. Several changes to the same file go into ONE file_edit call as \`edits\`. If file_edit reports the old_string is missing or not unique, read the file and retry with more surrounding lines.
 - PATHS: use paths relative to the working directory shown below (e.g. \`package.json\`, \`src/app.ts\`, \`.\` for the current folder). Never start a path with \`/\` or a drive letter (\`C:\\\`), that escapes the workspace and fails.
 - Chain tool calls: after each tool result, if there is another step left, IMMEDIATELY call the next tool
 - If a command fails, diagnose and retry with a different approach, don't hand back to the user unless truly stuck
@@ -183,11 +199,11 @@ const CODEX_ASSET_LINE = `- Asset generation: when the task needs an image or a 
 const CODEX_SYSTEM_PROMPT_LEAN = `You are a coding agent in LU. Use tools to do the work, never guess file contents.
 
 Rules:
-- More than about three steps? Call todo_write first with the plan, and again after each step with the complete list. The user watches it.
+- Put independent tool calls into one response (several reads or edits at once). Every step costs the user money.
 - Read a file before you edit it.
 - To change an existing file use file_edit (replace a unique old_string with new_string), not file_write. Use file_write only to create a new file.
 - PATHS: use relative paths (e.g. \`package.json\`, \`.\`). Never start with \`/\` or a drive letter, it escapes the workspace and fails.
-- Emit the tool call as your FIRST output, no "Okay, let me…" preamble. One step at a time, as valid JSON.
+- Emit the tool call as your FIRST output, no "Okay, let me…" preamble. Valid JSON.
 - After each tool result, if more steps remain, immediately call the next tool. Do not narrate "I will now…" and then stop.
 - When the task is done and verified, reply with one short sentence. Never end with only raw JSON or a bare code block.`
 
@@ -330,6 +346,12 @@ export function useCodex() {
        * Verlauf stuende sonst ein Satz, den der Mensch nie geschrieben hat.
        */
       hiddenUser?: boolean
+      /**
+       * Files attached to this instruction (3.0.5). They are copied into the
+       * working folder of the run before the first step, so the file and
+       * shell tools can open the real bytes. See lib/chat-files.ts.
+       */
+      files?: ChatFileInput[]
     },
   ) => {
     const { activeModel } = useModelStore.getState()
@@ -382,6 +404,7 @@ export function useCodex() {
     let convId = store.activeConversationId
     if (!convId) {
       convId = store.createConversation(activeModel, persona?.systemPrompt || '', 'codex')
+      useCodexStore.getState().startConversationMode(convId)
     }
 
     // ── Re-entry guard (double-submit), PER CONVERSATION ─────────────────
@@ -400,6 +423,12 @@ export function useCodex() {
     }
     const runToken = Symbol('codex-run')
     activeCodexRuns.set(convId, runToken)
+    // A brand-new instruction clears a previous stop; a /loop pass inherits it,
+    // which is what makes Stop end the LOOP and not just the pass in flight.
+    // Cleared HERE, in the same beat as the claim: cleared after the awaits
+    // below, it wiped a Stop pressed right after Send and the run went on as if
+    // nothing had been pressed (Gegenprobe 01.10.2026).
+    if (!opts?.loop) beginRun(convId)
     // A wrapping try/catch, not just the identity-checked cleanup deep in the
     // body's own finally (below): the body has many awaited calls BEFORE that
     // inner try (resolveChatWorkspaceSlug, runCompactForConversation,
@@ -428,9 +457,6 @@ export function useCodex() {
       async (heldLocalLane) => {
 
     const memoryScope = store.conversations.find(c => c.id === convId)?.memoryScope
-    // A brand-new instruction clears a previous stop; a /loop pass inherits it,
-    // which is what makes Stop end the LOOP and not just the pass in flight.
-    if (!opts?.loop) beginRun(convId)
 
     // Mode of THIS conversation (plan 2.6.6, C1). A pick made while the
     // previous run was still going has been parked; a send is where it takes
@@ -584,10 +610,29 @@ export function useCodex() {
       id: uuid(), type: 'instruction', content: instruction, timestamp: Date.now(),
     })
 
+    // Attached files go into the folder this run works in, the same one the
+    // lock above names, and the message tells the model their paths. A copy
+    // that fails never stops the run: the model then gets the summary alone
+    // and the line above the transcript says so.
+    let attachedFiles: FileAttachment[] | undefined
+    if (opts?.files?.length) {
+      const placed = await placeChatFiles(opts.files, {
+        chatId: workspaceSlug,
+        ...(runWorkspace?.kind === 'folder' && runWorkspace.path ? { workingDirectory: runWorkspace.path } : {}),
+      })
+      attachedFiles = placed.files
+      if (placed.failed.length) {
+        useChatNoticeStore.getState().show('file-attach', copyFailedMessage(placed.failed), 'ruhig', CHAT_NOTICE_MS)
+      }
+    }
+
     // Add user message to chat store. For a slash command the UI shows the raw
     // "/cmd args" (displayContent) while the model receives the expansion.
     useChatStore.getState().addMessage(convId, {
-      id: uuid(), role: 'user', content: instruction, timestamp: Date.now(),
+      id: uuid(), role: 'user', timestamp: Date.now(),
+      // With files: the instruction plus one summary block per file, and the
+      // typed text as what the transcript shows.
+      ...fileMessageFields(instruction, attachedFiles, 'workspace'),
       ...(displayInstruction ? { displayContent: displayInstruction } : {}),
       ...(opts?.hiddenUser ? { hidden: true } : {}),
     })
@@ -669,7 +714,6 @@ export function useCodex() {
       settings: {
         codexConfirmShell: settings.codexConfirmShell,
         codexCloudConfirmOptIn: settings.codexCloudConfirmOptIn,
-        codexStageMode: settings.codexStageMode,
         codexReviewMode: settings.codexReviewMode,
       },
       providerId,
@@ -817,7 +861,7 @@ export function useCodex() {
     // started and the next standalone tool call inherits its jail root.
     if (!conv) { endAgentRun(run); activeCodexRuns.delete(convId); return }
 
-    void diagLog('pre-loop', {
+    diagLog('pre-loop', {
       activeModel, providerId, strategy, workDir,
       systemPromptLen: systemPrompt.length,
       systemPromptHead: systemPrompt.slice(0, 500),
@@ -883,11 +927,11 @@ export function useCodex() {
     // from a history whose newest todo_write may have aged out or fallen off
     // the 60-message persist cap below. Last in the array, so the stable head
     // a prefix cache matches stays byte-identical (plan A5), and BEFORE
-    // messagesStartLen so the anchor is never persisted back into the chat.
+    // the run log starts, so the anchor is never persisted back into the chat.
     if (convId) {
       const resume = planResumeAnchor(useTodoStore.getState().getTodos(convId))
       if (resume) {
-        void diagLog('plan-resume-anchor', { done: resume.gap.done, total: resume.gap.total })
+        diagLog('plan-resume-anchor', { done: resume.gap.done, total: resume.gap.total })
         messages.push({ role: 'user', content: resume.text })
       }
     }
@@ -925,7 +969,23 @@ export function useCodex() {
       }
     }
 
-    const messagesStartLen = messages.length
+    // What this run adds, by identity instead of by index. `messages` gets
+    // trimmed during a long run (trimWorkingHistory), so an index taken here
+    // pointed into the wrong place at the end: the persisted chain lost its
+    // older steps and the ledger with them, and "continue" started over
+    // (customer case swift_maple90, 30.09.2026). `runLog` keeps every message
+    // the run itself pushed, in order; a copy the trim makes (the pinned task
+    // with its ledger) is not the run's own and is kept out.
+    const notRunOwn = new Set<ChatMessage>(messages)
+    const runLog: ChatMessage[] = []
+    const logged = new Set<ChatMessage>()
+    const logRun = () => {
+      for (const m of messages) {
+        if (notRunOwn.has(m) || logged.has(m)) continue
+        logged.add(m)
+        runLog.push(m)
+      }
+    }
 
     // Setup
     const abort = new AbortController()
@@ -939,19 +999,30 @@ export function useCodex() {
     // delegate_task threads this straight back into runInLane instead of
     // guessing it holds the lane.
     run.heldLocalLane = heldLocalLane
-    setIsRunning(true)
-    codexStore.setThreadStatus(convId, 'running')
-    // Bind the generating flag to THIS conversation so the typing indicator +
-    // realtime counter show only in the coding chat that's actually running,
-    // not in every chat the user switches to (David 2026-06-12). Cleared below.
-    useGenerationStore.getState().setGenerating(convId, true)
+    // A Stop that landed before this controller existed had nothing to abort
+    // and already released the slot, so the finally below will not undo what
+    // is set here: marking the run as running now left "Working" counting with
+    // nothing behind it. The stop is recorded, so the run ends here without a
+    // request (Gegenprobe 01.10.2026).
+    const stoppedBeforeStart = isRunStopped(convId) || activeCodexRuns.get(convId) !== runToken
+    if (stoppedBeforeStart) abort.abort()
+    if (!stoppedBeforeStart) {
+      setIsRunning(true)
+      codexStore.setThreadStatus(convId, 'running')
+      // Bind the generating flag to THIS conversation so the typing indicator +
+      // realtime counter show only in the coding chat that's actually running,
+      // not in every chat the user switches to (David 2026-06-12). Cleared below.
+      useGenerationStore.getState().setGenerating(convId, true)
+    }
+    // A run that threw mid-call left its label behind; this run starts clean.
+    useRunActivityStore.getState().setActivity(convId, null)
     // Register the abort in the STORE, not just in hook refs (audit A2). The
     // Code view unmounts on a tab switch and the remounted hook starts with
     // empty refs — before this, a run that survived the switch had no working
     // Stop button and a second instruction could start a parallel loop on the
     // same conversation. With the store aborter, stopCodex (any instance) and
     // chat deletion both reach the real controller. Cleared in finally.
-    useGenerationStore.getState().registerAborter(convId, () => {
+    if (!stoppedBeforeStart) useGenerationStore.getState().registerAborter(convId, () => {
       abort.abort()
       // Blocker 4 (review-lanes.md): scoped to THIS conversation's own media
       // generation. Passed bare (no arg) this used to cancel whichever
@@ -1135,9 +1206,6 @@ export function useCodex() {
       // from the nudges above, because a nudge fires on an EMPTY turn while
       // this fires on a turn that claims to be done.
       let planReconcilesRemaining = PLAN_RECONCILE_BUDGET
-      // PlanBar lag: batches of real work without a todo_write while the plan
-      // has open items earn one bounded mid-run steer to report progress.
-      const planStaleness = new PlanStaleness()
       // Raised from 20 → 50 (v2.3.7): large refactors across 10+ files
       // legitimately need >20 tool calls. Budget still caps via
       // agentMaxToolCalls/agentMaxIterations.
@@ -1166,6 +1234,7 @@ export function useCodex() {
         budget.addIteration()
         const bx = budget.exceeded()
         if (bx.kind !== 'none') {
+          diagLog('budget-halt', { iter: i, kind: bx.kind })
           useChatStore.getState().updateMessageContent(
             convId!,
             assistantMsg.id,
@@ -1237,7 +1306,7 @@ export function useCodex() {
         const sendWindow = capToLearnedWindow(effectiveSendWindow({
           providerId,
           modelWindow: numCtx,
-          sendWindowTokens: settings.codexSendWindowTokens,
+          sendWindowTokens: sendWindowFor(settings, activeModel),
           capEnabled: decayOn,
           smallModelMode: settings.smallModelMode,
           localBackend: sendsToALanBackend(providerId),
@@ -1256,7 +1325,10 @@ export function useCodex() {
           // moves every step is a prompt prefix that is never the same twice.
           // Whole messages are dropped here, never shortened: decay stays on
           // the send copy alone, so the store keeps every result complete.
+          logRun()
+          const beforeTrim = new Set(messages)
           messages = trimWorkingHistory(messages, sendWindow, { enabled: decayOn, hysteresis: decayOn }).messages
+          for (const m of messages) if (!beforeTrim.has(m)) notRunOwn.add(m)
           const built = buildRequestMessages(messages, {
             budgetTokens: sendWindow,
             enabled: decayOn,
@@ -1409,7 +1481,16 @@ export function useCodex() {
             : !isLocalModelByName(activeModel)
               ? codexTools
               : selectRelevantTools(lastUserMsg, codexTools, permissions)
-          const relevantDefs = gateCreateTools(routedDefs, lastUserMsg, createGateOpened)
+          // Planning is opt-in (lib/plan-gate.ts): without Plan mode, a plan
+          // request or an open plan, todo_write is not offered at all.
+          const relevantDefs = gatePlanTool(
+            gateCreateTools(routedDefs, lastUserMsg, createGateOpened),
+            planToolAllowed({
+              mode: codexMode,
+              userText: lastUserMsg,
+              todos: convId ? useTodoStore.getState().getTodos(convId) : [],
+            }),
+          )
           const tools: ToolDefinition[] = relevantDefs.map(t => ({
             type: 'function' as const,
             function: { name: t.name, description: t.description, parameters: t.inputSchema },
@@ -1422,7 +1503,7 @@ export function useCodex() {
           if (convId) {
             useSendSizeStore.getState().reportTools(convId, stepToolsEstimate)
           }
-          void diagLog('iter-start', {
+          diagLog('iter-start', {
             iter: i,
             activeModel, modelToUse, strategy, providerId,
             allToolsCount: toolRegistry.getAll().length,
@@ -1452,7 +1533,7 @@ export function useCodex() {
             // count has landed yet, so a real value is never downgraded.
             seedEstimatedUsage(convId!, assistantMsg.id, sendMessages, tools)
             try {
-              void diagLog('streamWithTools-enter', { iter: i, messagesLen: sendMessages.length, toolsCount: tools.length, thinking: chatOptions.thinking })
+              diagLog('streamWithTools-enter', { iter: i, messagesLen: sendMessages.length, toolsCount: tools.length, thinking: chatOptions.thinking })
               turn = await streamWithTools(
                 modelToUse, sendMessages, tools,
                 { temperature: 0.1, thinking: chatOptions.thinking, maxTokens: chatOptions.maxTokens, contextWindow: numCtx, signal: abort.signal },
@@ -1464,9 +1545,9 @@ export function useCodex() {
                   }
                 },
               )
-              void diagLog('streamWithTools-ok', { iter: i, contentLen: turn.content?.length || 0, toolCallsCount: turn.toolCalls?.length || 0 })
+              diagLog('streamWithTools-ok', { iter: i, contentLen: turn.content?.length || 0, toolCallsCount: turn.toolCalls?.length || 0 })
             } catch (thinkErr) {
-              void diagLog('streamWithTools-catch', {
+              diagLog('streamWithTools-catch', {
                 iter: i,
                 status: httpStatusOf(thinkErr),
                 messageHead: errorText(thinkErr).slice(0, 400),
@@ -1484,7 +1565,7 @@ export function useCodex() {
                   liveContent,
                   () => {},
                 )
-                void diagLog('streamWithTools-retry-ok', { iter: i, contentLen: turn.content?.length || 0, toolCallsCount: turn.toolCalls?.length || 0 })
+                diagLog('streamWithTools-retry-ok', { iter: i, contentLen: turn.content?.length || 0, toolCallsCount: turn.toolCalls?.length || 0 })
               } else {
                 throw thinkErr
               }
@@ -1494,7 +1575,7 @@ export function useCodex() {
             turnContent = turn.content || ''
             turnFinishReason = turn.doneReason
             reportTurnUsage(convId!, assistantMsg.id, turn)
-            void diagLog('streamWithTools-return', {
+            diagLog('streamWithTools-return', {
               iter: i,
               toolCallsCount: toolCalls.length,
               toolCalls: toolCalls.map(tc => ({ name: tc.function?.name, args: tc.function?.arguments })),
@@ -1529,20 +1610,43 @@ export function useCodex() {
                 useChatStore.getState().updateMessageThinking(convId!, assistantMsg.id, combined)
               }
             }
+            // A call still being written names itself on the run anchor
+            // (stores/runActivityStore, realtime pass R1).
+            const onToolProgress = (p: ToolCallProgress) => {
+              useRunActivityStore.getState().setActivity(convId, toolProgressActivity(p))
+            }
             try {
-              turn = await streamProviderTurn(provider, modelToUse, sendMessages, streamOpts, liveContent, liveThinking)
+              turn = await streamProviderTurn(provider, modelToUse, sendMessages, streamOpts, liveContent, liveThinking, onToolProgress)
             } catch (thinkErr) {
               if (shouldDowngradeThinking(streamOpts.thinking, thinkErr)) {
-                turn = await streamProviderTurn(provider, modelToUse, sendMessages, { ...streamOpts, thinking: undefined as unknown as boolean }, liveContent, () => {})
+                turn = await streamProviderTurn(provider, modelToUse, sendMessages, { ...streamOpts, thinking: undefined as unknown as boolean }, liveContent, () => {}, onToolProgress)
               } else {
                 throw thinkErr
               }
             }
             settleLivePaint()
+            useRunActivityStore.getState().setActivity(convId, null)
             toolCalls = turn.toolCalls
             turnContent = turn.content || ''
             turnFinishReason = turn.finishReason
             reportTurnUsage(convId!, assistantMsg.id, turn)
+            // GH #147: a model on LU Cloud wrote its calls into the text
+            // (!function_call:{"call": "file_read", ...}). This path never
+            // looked, so the run stopped on prose. A call from the text counts
+            // only when every name in it is a tool this agent has, so example
+            // JSON in an explanation is never run.
+            {
+              const recovered = recoverToolCallsFromContent(toolCalls, turnContent)
+              const tools = toolRegistry.getAll()
+              const known = new Set(tools.map((t) => t.name))
+              const fromText = toolCalls.length === 0 && recovered.toolCalls.length > 0
+              const allKnown = recovered.toolCalls.every((tc) =>
+                known.has(repairToolCall(tc.function.name, isRecord(tc.function.arguments) ? tc.function.arguments : {}, tools).name))
+              if (!fromText || allKnown) {
+                toolCalls = recovered.toolCalls
+                turnContent = recovered.content
+              }
+            }
             if (keepThinking && turn.thinking) {
               thinkingContent += (thinkingContent ? '\n\n' : '') + turn.thinking
               useChatStore.getState().updateMessageThinking(convId!, assistantMsg.id, thinkingContent)
@@ -1701,7 +1805,7 @@ export function useCodex() {
           overflowRetries++
           settleLivePaint()
           learnSendWindow(modelToUse, numCtx, next)
-          void diagLog('context-overflow-retry', { iter: i, sent, next, window: overflow.window, promptTokens: overflow.promptTokens })
+          diagLog('context-overflow-retry', { iter: i, sent, next, window: overflow.window, promptTokens: overflow.promptTokens })
           addBlock({
             id: uuid(),
             phase: 'reflection',
@@ -1806,11 +1910,12 @@ export function useCodex() {
         // turn passed it, and the repair then turned it into `file_write` on
         // the way to the executor. Repair first, then judge the real name.
         if (toolCalls.length > 0) {
-          const knownToolNames = toolRegistry.getAll().map((t) => t.name)
+          const tools = toolRegistry.getAll()
           toolCalls = toolCalls.map((tc) => {
             const raw = tc.function?.name ?? ''
-            const fixed = canonicalToolName(raw, knownToolNames)
-            return fixed === raw ? tc : { ...tc, function: { ...tc.function, name: fixed } }
+            const args = isRecord(tc.function?.arguments) ? tc.function.arguments : {}
+            const fixed = repairToolCall(raw, args, tools)
+            return fixed.name === raw ? tc : { ...tc, function: { ...tc.function, name: fixed.name, arguments: fixed.arguments } }
           })
         }
 
@@ -1865,6 +1970,15 @@ export function useCodex() {
           }
         }
 
+        // A turn cut off by the token limit: its last call may stop halfway.
+        {
+          const cut = dropCutOffCall(toolCalls, turnFinishReason)
+          if (cut.dropped) {
+            toolCalls = cut.calls
+            diagLog('cut-off-call-dropped', { iter: i, name: (cut.dropped as { function?: { name?: string } }).function?.name })
+          }
+        }
+
         // No tool calls in this turn. For a strong model that means "task
         // done". For a small local model it's usually a PREMATURE stop — it
         // narrated the next step or asked for info instead of acting. Nudge it
@@ -1878,7 +1992,7 @@ export function useCodex() {
           const { nudgeWorthy } = codexStallVerdict(turnContent, fullContent)
           if (nudgeWorthy && continueNudgesRemaining > 0) {
             continueNudgesRemaining--
-            void diagLog('continue-nudge', { iter: i, remaining: continueNudgesRemaining, turnContentLen: turnContent.length })
+            diagLog('continue-nudge', { iter: i, remaining: continueNudgesRemaining, turnContentLen: turnContent.length })
             messages.push({
               role: 'user',
               // A read-only command's deliverable IS the text. Demanding "the
@@ -1902,7 +2016,7 @@ export function useCodex() {
             const gap = openPlanGap(useTodoStore.getState().getTodos(convId))
             if (gap) {
               planReconcilesRemaining--
-              void diagLog('plan-reconcile-steer', { iter: i, done: gap.done, total: gap.total, remaining: planReconcilesRemaining })
+              diagLog('plan-reconcile-steer', { iter: i, done: gap.done, total: gap.total, remaining: planReconcilesRemaining })
               messages.push({ role: 'user', content: planReconcileSteer(gap) })
               continue
             }
@@ -1920,7 +2034,7 @@ export function useCodex() {
             convId ? openPlanGap(useTodoStore.getState().getTodos(convId)) : null,
           )
           if (cutoff && convId) {
-            void diagLog('turn-cut-off', { iter: i, reason: turnFinishReason })
+            diagLog('turn-cut-off', { iter: i, reason: turnFinishReason })
             useChatStore.getState().updateMessageContent(
               convId,
               assistantMsg.id,
@@ -1933,7 +2047,7 @@ export function useCodex() {
               timestamp: Date.now(),
             })
           }
-          void diagLog('break-no-toolcalls', { iter: i, turnContentLen: turnContent.length, fullContentLen: fullContent.length, finishReason: turnFinishReason })
+          diagLog('break-no-toolcalls', { iter: i, turnContentLen: turnContent.length, fullContentLen: fullContent.length, finishReason: turnFinishReason })
           break
         }
 
@@ -1964,7 +2078,7 @@ export function useCodex() {
               { trimmedReadKeys },
             )
         if (batchVerdict.action === 'halt') {
-          void diagLog('loop-guard-halt', { iter: i, reason: batchVerdict.reason })
+          diagLog('loop-guard-halt', { iter: i, reason: batchVerdict.reason })
           const msg = `\n\n_(halted: ${batchVerdict.reason}. The model is looping. Try a stronger model for multi-step code tasks, or rephrase the instruction.)_`
           useChatStore.getState().updateMessageContent(convId, assistantMsg.id, fullContent + msg)
           // A halt has to be visible in the thread itself, not only as a
@@ -1986,7 +2100,7 @@ export function useCodex() {
         if (batchVerdict.action === 'steer') {
           // Let this batch still run (the in-turn cache serves it instantly),
           // but put the anti-repeat instruction in front of the NEXT turn.
-          void diagLog('loop-guard-steer', { iter: i })
+          diagLog('loop-guard-steer', { iter: i })
           pendingSteer = batchVerdict.message
           addBlock({
             id: uuid(),
@@ -2228,7 +2342,7 @@ export function useCodex() {
           abortSignal: abort.signal,
         })
 
-        void diagLog('executeParallel-done', {
+        diagLog('executeParallel-done', {
           iter: i,
           results: results.map(r => ({ tool: r.toolName, status: r.status, error: r.error?.slice(0,200), hint: r.errorHint?.slice(0,200), resultHead: r.result?.slice(0,200) })),
         })
@@ -2287,6 +2401,8 @@ export function useCodex() {
           const text =
             r.status === 'completed' || r.status === 'cached'
               ? (r.result ?? '')
+              : r.status === 'rejected'
+                ? REJECTED_CALL_FOR_MODEL
               : r.errorHint
                 ? `${r.error ?? 'Tool failed'}, ${r.errorHint}`
                 : (r.error ?? 'Tool failed')
@@ -2341,16 +2457,19 @@ export function useCodex() {
             messages.push(rememberResult({ role: 'tool', content: resultTextFor(result), tool_call_id: tc.id }, tc))
           }
         } else if (strategy === 'native') {
+          // Ids kept here too (bug hunt 01.10.2026, A7): Ollama ignores them,
+          // and a later switch to LU Cloud in the same conversation needs them.
           messages.push({
             role: 'assistant',
             content: turnContent || '',
             tool_calls: batch.map((e) => ({
+              id: e.tc.id,
               function: { name: e.ac.toolName, arguments: e.injectedArgs },
             })),
           })
           for (const { tc } of batch) {
             const result = results.find((r) => r.id === batch.find((b) => b.tc === tc)?.ac.id)!
-            messages.push(rememberResult({ role: 'tool', content: resultTextFor(result) }, tc))
+            messages.push(rememberResult({ role: 'tool', content: resultTextFor(result), tool_call_id: tc.id }, tc))
           }
         } else {
           // Ollama on a non-native strategy that is not hermes_xml. Same
@@ -2374,7 +2493,7 @@ export function useCodex() {
         // cannot see (they only look at what was asked for, and they skip
         // shell on purpose).
         const failVerdict = loopGuard.recordResults(
-          results.map((r) => ({ name: r.toolName, failed: r.status === 'failed', error: r.error, args: r.dispatchedArgs })),
+          results.map((r) => ({ name: r.toolName, failed: resultFailed(r), error: r.error ?? (resultFailed(r) ? r.result?.split('\n')[0].slice(0, 300) : undefined), args: r.dispatchedArgs })),
         )
         if (failVerdict.action === 'halt') {
           const msg = `\n\n_(halted: ${failVerdict.reason}. The model is looping. Try a stronger model for multi-step code tasks, or rephrase the instruction.)_`
@@ -2394,16 +2513,6 @@ export function useCodex() {
         }
         if (failVerdict.action === 'steer') {
           messages.push({ role: 'user', content: failVerdict.message })
-        }
-        // PlanBar lag, parity with the Agent loop: the bar renders only what
-        // the model reports, so after enough batches of silent progress ask it
-        // to bring the list current.
-        if (convId) {
-          const staleGap = openPlanGap(useTodoStore.getState().getTodos(convId))
-          if (planStaleness.recordBatch(requests.map((r) => r.toolName), staleGap !== null) && staleGap) {
-            void diagLog('plan-staleness-steer', { iter: i, done: staleGap.done, total: staleGap.total })
-            messages.push({ role: 'user', content: planStalenessSteer(staleGap) })
-          }
         }
       }
 
@@ -2427,10 +2536,16 @@ export function useCodex() {
       // aborted run did not produce it, it was interrupted producing it. The
       // queue survives, so nothing is lost: the Pending panel still offers
       // every change for review.
-      if (settings.codexStageMode && settings.codexAutoApply && convId && !isRunStopped(convId)) {
-        const pending = useStagedChangesStore.getState().list(convId)
+      //
+      // Bug hunt 01.10.2026 (C5): the gate read settings.codexStageMode, a
+      // switch the modes had replaced. Ask stages whatever that switch says,
+      // so with it off the opt-in never fired, and with it on a Bypass run
+      // applied what an EARLIER Ask run had left in the queue for review. The
+      // mode decides now, and only what this run staged lands.
+      if (knobs.stageWrites && settings.codexAutoApply && convId && !isRunStopped(convId)) {
+        const pending = useStagedChangesStore.getState().list(convId).filter((c) => c.stagedAt >= turnStartMs)
         if (pending.length > 0) {
-          const applied = await applyAllStagedChanges(convId)
+          const applied = await applyAllStagedChanges(convId, turnStartMs)
           if (applied.applied.length > 0) {
             fullContent += `\n\n_(auto-applied ${applied.applied.length} staged change${applied.applied.length === 1 ? '' : 's'}: ${applied.applied.join(', ')})_`
           }
@@ -2453,7 +2568,7 @@ export function useCodex() {
       // undefined for a non-object instead.
       const errName = asString(prop(err, 'name'))
       const code = asString(prop(err, 'code'))
-      void diagLog('outer-catch', {
+      diagLog('outer-catch', {
         name: errName,
         message: errorText(err).slice(0, 400),
         status: httpStatusOf(err),
@@ -2501,6 +2616,8 @@ export function useCodex() {
         })
       }
     } finally {
+      // A Stop before anything was written leaves a line, not an empty bubble.
+      if (convId && (abort.signal.aborted || isRunStopped(convId))) noteStoppedIfEmpty(convId, assistantMsg.id)
       // ── Continue capability (parity with original Codex CLI) ────────
       // Persist the tool-call chain from this turn as hidden messages in
       // the chat store. On the next turn, the history builder includes
@@ -2513,7 +2630,8 @@ export function useCodex() {
       // one-set()-per-message insert loop was the visible hang at run end.
       // The most recent chain is what the next turn actually needs; older
       // steps are summarised by the visible transcript anyway.
-      const toolHistoryAll = messages.slice(messagesStartLen)
+      logRun()
+      const toolHistoryAll = runLog
       // Deckelung UND Waisenschnitt gehoeren zusammen: hooks/codex/hidden-history.ts.
       const toolHistory = capHiddenToolHistory(toolHistoryAll)
       if (toolHistory.length > 0 && convId) {

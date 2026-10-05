@@ -112,29 +112,67 @@ pub(crate) fn lmstudio_lms_path() -> Option<PathBuf> {
     None
 }
 
-/// Soft-detect LM Studio by scanning `~/.lmstudio/models/` for GGUF files.
-/// Returns the number of GGUF files found (0 if the dir is missing or empty).
+/// True when a GGUF under `~/.lmstudio/models/` is a model the chat picker
+/// will list once the server runs. `rel` is the lowercased path below the
+/// models dir (`publisher/repo/file.gguf`).
 ///
-/// Rationale: even when `lms.exe` isn't on any search path (system-wide
-/// install missed by our fallback, GUI never launched, etc.), the presence
-/// of GGUFs in the canonical models dir is a strong signal that the user
-/// *has* LM Studio and just hasn't started the server. Surfacing that in the
-/// onboarding lets us show "LM Studio models detected — start server?" instead
-/// of the dead-end "no LM Studio".
-fn lmstudio_models_present() -> u32 {
-    let home = match dirs::home_dir() {
-        Some(h) => h,
-        None => return 0,
+/// The line in the picker says "N models on disk" next to its Start button,
+/// and after the click the list has to show N rows. Counting every GGUF said 8
+/// where the list showed 7 (Windows box, 05.10.2026). Three kinds of file are
+/// no row of their own:
+///   - an embedding model: the picker drops those by name, with the patterns
+///     of `EMBEDDING_GGUF_PATTERNS` in src/api/engine.ts, repeated here;
+///   - a vision projector (`mmproj-*.gguf`), which rides along with its model;
+///   - the further parts of a split model (`-00002-of-00003.gguf`).
+fn lmstudio_chat_model_file(rel: &str) -> bool {
+    const EMBEDDING_MARKS: [&str; 5] = ["embed", "bge-", "e5-", "gte-", "sentence-"];
+    if EMBEDDING_MARKS.iter().any(|m| rel.contains(m)) {
+        return false;
+    }
+    let file = rel.rsplit(['/', '\\']).next().unwrap_or(rel);
+    if file.contains("mmproj") {
+        return false;
+    }
+    // "<name>-00002-of-00003.gguf": only the first part stands for the model.
+    let stem = file.strip_suffix(".gguf").unwrap_or(file);
+    if let Some((head, total)) = stem.rsplit_once("-of-") {
+        let all_digits = |t: &str| !t.is_empty() && t.bytes().all(|b| b.is_ascii_digit());
+        if let Some((_, part)) = head.rsplit_once('-') {
+            if all_digits(total) && all_digits(part) {
+                return part.trim_start_matches('0') == "1";
+            }
+        }
+    }
+    true
+}
+
+/// What `~/.lmstudio/models/` holds.
+#[derive(Default)]
+struct LmStudioModelsOnDisk {
+    /// Any GGUF at all. Even when `lms.exe` isn't on any search path
+    /// (system-wide install missed by our fallback, GUI never launched), a
+    /// GGUF in the canonical models dir is a strong signal that the user *has*
+    /// LM Studio and just hasn't started the server.
+    any: bool,
+    /// The models the chat picker will list, see `lmstudio_chat_model_file`.
+    chat_models: u32,
+}
+
+/// Soft-detect LM Studio by scanning `~/.lmstudio/models/` for GGUF files.
+fn lmstudio_models_present() -> LmStudioModelsOnDisk {
+    let mut found = LmStudioModelsOnDisk::default();
+    let models_dir = match dirs::home_dir() {
+        Some(h) => h.join(".lmstudio").join("models"),
+        None => return found,
     };
-    let models_dir = home.join(".lmstudio").join("models");
     if !models_dir.exists() {
-        return 0;
+        return found;
     }
     // The standard layout is ~/.lmstudio/models/<publisher>/<repo>/<file>.gguf —
     // up to three levels deep. We walk lazily and stop after the first 1000
     // matches; the user does not care about the exact count past "many".
-    fn walk(dir: &Path, depth: u32, found: &mut u32) {
-        if *found >= 1000 || depth > 4 {
+    fn walk(root: &Path, dir: &Path, depth: u32, found: &mut LmStudioModelsOnDisk) {
+        if found.chat_models >= 1000 || depth > 4 {
             return;
         }
         let entries = match std::fs::read_dir(dir) {
@@ -144,18 +182,21 @@ fn lmstudio_models_present() -> u32 {
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_dir() {
-                walk(&path, depth + 1, found);
+                walk(root, &path, depth + 1, found);
             } else if path.extension().and_then(|e| e.to_str()).map(|s| s.eq_ignore_ascii_case("gguf")).unwrap_or(false) {
-                *found += 1;
-                if *found >= 1000 {
-                    return;
+                found.any = true;
+                let rel = path.strip_prefix(root).unwrap_or(&path).to_string_lossy().to_lowercase();
+                if lmstudio_chat_model_file(&rel) {
+                    found.chat_models += 1;
+                    if found.chat_models >= 1000 {
+                        return;
+                    }
                 }
             }
         }
     }
-    let mut count: u32 = 0;
-    walk(&models_dir, 0, &mut count);
-    count
+    walk(&models_dir, &models_dir, 0, &mut found);
+    found
 }
 
 #[cfg(target_os = "windows")]
@@ -322,15 +363,16 @@ fn start_lmstudio_server_blocking() -> Result<serde_json::Value, String> {
 #[tauri::command]
 pub async fn lmstudio_server_status() -> Result<serde_json::Value, String> {
     tokio::task::spawn_blocking(|| -> Result<serde_json::Value, String> {
-        let model_count = lmstudio_models_present();
+        let on_disk = lmstudio_models_present();
         Ok(serde_json::json!({
             "running": lmstudio_server_running(),
             "port": LMSTUDIO_DEFAULT_PORT,
             "lms_present": lmstudio_lms_path().is_some(),
             // Soft-detect signals — onboarding shows "Start LM Studio server?"
             // when models are present even if lms.exe couldn't be located.
-            "models_detected": model_count > 0,
-            "model_count": model_count,
+            "models_detected": on_disk.any,
+            // The rows the chat picker will show, not the files on disk.
+            "model_count": on_disk.chat_models,
         }))
     })
     .await
@@ -552,4 +594,43 @@ fn lmstudio_unload_model_blocking(model: String) -> Result<serde_json::Value, St
         ));
     }
     Ok(serde_json::json!({ "ok": true, "model": model }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::lmstudio_chat_model_file;
+
+    /// The picker line says "N models on disk" and the list then shows N rows.
+    /// Windows box, 05.10.2026: every GGUF was counted, the line said 8, the
+    /// list showed 7.
+    #[test]
+    fn counts_what_the_chat_picker_lists() {
+        let on_disk = [
+            "lmstudio-community/qwen3-8b-gguf/qwen3-8b-q4_k_m.gguf",
+            "lmstudio-community/gemma-3-12b-it-gguf/gemma-3-12b-it-q4_k_m.gguf",
+            "lmstudio-community/gemma-3-12b-it-gguf/mmproj-model-f16.gguf",
+            "nomic-ai/nomic-embed-text-v1.5-gguf/nomic-embed-text-v1.5.q4_k_m.gguf",
+            "baai/bge-m3-gguf/bge-m3-q8_0.gguf",
+            "bartowski/big-model-gguf/big-model-q4_k_m-00001-of-00003.gguf",
+            "bartowski/big-model-gguf/big-model-q4_k_m-00002-of-00003.gguf",
+            "bartowski/big-model-gguf/big-model-q4_k_m-00003-of-00003.gguf",
+        ];
+        let listed: Vec<&str> = on_disk.iter().copied().filter(|f| lmstudio_chat_model_file(f)).collect();
+        assert_eq!(
+            listed,
+            [
+                "lmstudio-community/qwen3-8b-gguf/qwen3-8b-q4_k_m.gguf",
+                "lmstudio-community/gemma-3-12b-it-gguf/gemma-3-12b-it-q4_k_m.gguf",
+                "bartowski/big-model-gguf/big-model-q4_k_m-00001-of-00003.gguf",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_windows_path_and_an_ordinary_name_with_of_in_it_count() {
+        assert!(lmstudio_chat_model_file("publisher\\repo\\model-q4_k_m.gguf"));
+        assert!(!lmstudio_chat_model_file("publisher\\repo\\mmproj-model-f16.gguf"));
+        assert!(lmstudio_chat_model_file("publisher/repo/best-of-breed-7b.gguf"));
+        assert!(lmstudio_chat_model_file("publisher/repo/tales-of-2024-q4.gguf"));
+    }
 }

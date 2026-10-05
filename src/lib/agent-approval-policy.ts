@@ -54,6 +54,20 @@ export const BACKGROUND_AGENT_TOOLS: ReadonlySet<string> = new Set([
 ])
 
 /**
+ * Lesen im Ordner des Laufs. Diese drei kommen nur in den Ordner, den der
+ * Nutzer dem Agent gegeben hat (Sandbox oder gewaehlter Ordner, der Riegel in
+ * commands/filesystem.rs), und aendern nichts. Die Kategorie 'filesystem'
+ * steht auf 'confirm' wegen des Schreibens; dass sie das Lesen mitfragte, war
+ * eine Freigabekarte vor jedem file_read in der eigenen Sandbox (Gegenprobe
+ * 01.10.2026). Der Code-Tab fragt in Ask ebenfalls nur vor dem Schreiben.
+ */
+export const WORKSPACE_READ_TOOLS: ReadonlySet<string> = new Set([
+  'file_read',
+  'file_list',
+  'file_search',
+])
+
+/**
  * Die Entscheidung, die vor dem Lauf schon feststand, in einem Objekt.
  *
  * Sie wird NICHT pro Werkzeugaufruf neu erfunden: `codexMode` und
@@ -128,5 +142,6 @@ export function resolveApprovalLevel(toolName: string, d: FrontDecision): Permis
   // gewinnt in BEIDE Richtungen, auch gegen die Ausnahme unten.
   if (d.override) return d.override
   if (BACKGROUND_AGENT_TOOLS.has(toolName)) return 'auto'
+  if (WORKSPACE_READ_TOOLS.has(toolName) && d.categoryLevel === 'confirm') return 'auto'
   return d.categoryLevel
 }

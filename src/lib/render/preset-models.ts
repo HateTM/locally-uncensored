@@ -9,13 +9,18 @@
 // member really runs: same inputs, same output kind, a price on both sides.
 // The contract test walks each one and refuses a member that cannot.
 
-import { STUDIO_MODELS, studioSchema } from './studio-contract'
-import { catalogHasStudio, cloudModelById, cloudModelsFor, i2vModels, runCredits } from '../../stores/cloudCatalogStore'
+import { STUDIO_MODELS, studioSchema, type ModelTier, type ModelWeights } from './studio-contract'
+import { cloudModelById, cloudModelsFor, i2vModels, runCredits, studioEntries, t2vModels } from '../../stores/cloudCatalogStore'
+import {
+  STUDIO_EDIT_MODELS, studioImageToVideo, studioReferenceVideo, studioTextToVideo,
+} from './studio-roles'
 import type { RenderKind, RenderOp } from './cloud-jobs'
 
 export type StepRole =
   | 'image' | 'animate' | 'soundtrack' | 'speech' | 'music' | 'talking' | 'presenter'
   | 'duo' | 'extend' | 'motion' | 'restyle' | 'angles' | 'edit' | 'upscale'
+  // 02.10.2026: Text zu Video, Referenz zu Video.
+  | 'video' | 'reference'
 
 export interface PresetModel {
   id: string
@@ -23,6 +28,11 @@ export interface PresetModel {
   kind: RenderKind
   op: RenderOp
   adult: boolean
+  /** Stufe und Herkunft aus dem Katalog des Servers. Ein aelterer Server liefert
+   *  sie nicht: dann bleiben beide leer und der Waehler stellt das Modell
+   *  neutral dar (model-tier.ts). */
+  tier?: ModelTier
+  weights?: ModelWeights
 }
 
 /** The op a NON-studio member of this role runs under. Studio members always
@@ -32,6 +42,7 @@ const ROLE_OP: Record<StepRole, RenderOp> = {
   music: 'music', talking: 'lipsync', presenter: 'studio', duo: 'studio',
   extend: 'extend', motion: 'motion', restyle: 'studio', angles: 'studio',
   edit: 'edit', upscale: 'upscale',
+  video: 'generate', reference: 'studio',
 }
 
 /** The staged inputs a NON-studio member consumes, as provider field -> job
@@ -44,12 +55,7 @@ export const ROLE_INPUTS: Record<StepRole, Record<string, string>> = {
   motion: { image: 'source_path', video: 'video_path' },
   edit: { image: 'source_path' },
   upscale: { video: 'video_path' },
-}
-
-/** The studio inputs this model cannot start without. */
-function studioRequiredInputs(id: string): string[] {
-  const required = studioSchema(id).required ?? []
-  return Object.keys(STUDIO_MODELS[id].inputs).filter((f) => required.includes(f)).sort()
+  video: {}, reference: {},
 }
 
 function studioIds(match: (id: string) => boolean): string[] {
@@ -65,9 +71,16 @@ const ROLE_MEMBERS: Record<StepRole, () => string[]> = {
   ],
   // Image to video: a still goes in, a clip comes out. Nothing else required.
   animate: () => [
-    ...studioIds((id) => STUDIO_MODELS[id].kind === 'video' && studioRequiredInputs(id).join() === 'image'),
+    ...studioImageToVideo(),
     ...i2vModels().map((m) => m.id),
   ],
+  // Text to video: words in, a clip out. Nothing to upload.
+  video: () => [
+    ...studioTextToVideo(),
+    ...t2vModels().map((m) => m.id),
+  ],
+  // Reference to video: one or more pictures say who is in the clip.
+  reference: () => studioReferenceVideo(),
   // A clip goes in, the same clip with sound comes out.
   soundtrack: () => ['mmaudio-v2', 'hunyuan-video-foley'],
   // Text to speech. Clone adds a reference recording, design a description.
@@ -96,10 +109,12 @@ const ROLE_MEMBERS: Record<StepRole, () => string[]> = {
   ],
   // Movement from a driving clip onto a character image.
   motion: () => ['scail-2', 'wan-2.2-animate-2', 'wan-2.2-animate', 'steady-dancer', 'p-video-animate', 'dreamactor-v2'],
-  restyle: () => ['wan-ditto'],
+  // A clip goes in, the same clip comes back changed. Wan DITTO picks a style
+  // from a list, MiniMax H3 follows a sentence.
+  restyle: () => ['wan-ditto', 'minimax-h3-video-edit'],
   angles: () => ['qwen-image-angles'],
   // Instruction edits, no mask. flux-dev is excluded: it demands one.
-  edit: () => ['minimax-h3-edit', 'qwen-image-3-edit', 'seedream-5-edit', 'qwen-image-edit'],
+  edit: () => [...STUDIO_EDIT_MODELS, 'qwen-image-edit'],
   // A finished clip goes in, the same clip at more pixels comes out.
   upscale: () => ['video-upscaler', 'flashvsr', 'video-upscaler-pro', 'ultimate-video-upscaler', 'crystal-upscaler', 'flux-3-upscale'],
 }
@@ -113,11 +128,20 @@ const SUPERSEDED = new Map<string, string>(
     .map(([id, m]) => [m.sourceModel as string, id]),
 )
 
+/** Fuehrt der lebende Katalog dieses Modell als Studio-Eintrag? */
+function studioKnown(id: string): boolean {
+  return studioEntries([id]).length > 0
+}
+
 function entry(id: string, role: StepRole): PresetModel | null {
   const studio = STUDIO_MODELS[id]
   const catalog = cloudModelById(studio?.sourceModel ?? id)
   const kind = studio?.kind ?? catalog?.kind
   if (!kind) return null
+  // Stufe und Herkunft stammen aus dem Katalog des Servers, bei einem Zwilling
+  // zuerst von seinem eigenen Eintrag, dann vom klassischen Bruder. Fehlen sie
+  // (aelterer Server), bleibt das Modell neutral.
+  const own = studio ? cloudModelById(id) : catalog
   return {
     id,
     // The name the customer already knows from the Create picker.
@@ -125,6 +149,8 @@ function entry(id: string, role: StepRole): PresetModel | null {
     kind,
     op: studio ? 'studio' : ROLE_OP[role],
     adult: (studio?.adult ?? catalog?.adult) === true,
+    tier: own?.tier ?? catalog?.tier,
+    weights: own?.weights ?? catalog?.weights,
   }
 }
 
@@ -150,17 +176,21 @@ function allPresetModels(role: StepRole): PresetModel[] {
   const seen = new Set<string>()
   for (const id of ids) {
     if (seen.has(id)) continue
+    // Ein Studio-Mitglied erscheint NUR, wenn der lebende Katalog genau dieses
+    // Modell als Studio-Eintrag fuehrt (`studioKnown`). Das Web fuehrt den
+    // Katalog im selben Repo, der Desktop liest ihn vom Server: ein aelterer
+    // Server (oder der Notvorrat vor dem ersten Abruf) kennt die neueren
+    // Modelle nicht, und ein Start dort wuerde abgelehnt. Frueher stand hier
+    // eine einzige Probe fuer den ganzen Katalog (catalogHasStudio), die auch
+    // ein Modell durchliess, das dieser Server gar nicht hat.
+    if (STUDIO_MODELS[id] && !studioKnown(id)) continue
     // A classic id the studio registry already serves is dropped, not listed
-    // twice under the same name. Review B1 (Runde 2): ONLY when the live
-    // catalog actually announces Studio (`catalogHasStudio()`), the same
-    // gate `create-studio.ts`'s `intentPickerModels()` applies to the twin
-    // itself. Without this, an older server dropped the classic id here
-    // (its studio twin is in STUDIO_MODELS unconditionally, catalog or not)
-    // while `intentPickerModels()` separately dropped the twin for being a
-    // Studio entry, leaving Extend/Motion with NEITHER: an empty picker
-    // instead of the classic member that used to run there.
+    // twice under the same name, ONLY when the server really lists that studio
+    // twin. Review B1 (Runde 2): sonst verdraengte die Zwillingsregel das
+    // klassische Mitglied, waehrend der Zwilling selbst entfiel, und Extend/
+    // Motion hatten auf einem aelteren Server KEINES von beiden.
     const twin = SUPERSEDED.get(id)
-    if (twin && ids.includes(twin) && catalogHasStudio()) continue
+    if (twin && ids.includes(twin) && studioKnown(twin)) continue
     const e = entry(id, role)
     if (!e) continue
     seen.add(id)
@@ -234,6 +264,14 @@ const HINTS: Record<string, string> = {
   'ultimate-video-upscaler': 'A heavier rebuild for really rough footage. Reaches 4K.',
   'crystal-upscaler': 'The only one that reaches 8K. Set 33 megapixels for 8K.',
   'flux-3-upscale': 'Multiplies the size instead of aiming at a target. No fixed 4K.',
+
+  // 02.10.2026: die Modelle aus offenen Familien. Jeder Satz sagt nur, was der
+  // Anbieter selbst zum Endpunkt schreibt.
+  'ltx-2.5-t2v': 'Makes a clip with sound. Longer clips and higher resolutions cost more.',
+  'ltx-2.5-i2v': 'Makes a clip with sound. Longer clips and higher resolutions cost more.',
+  'minimax-h3-video-edit': 'Say what to change. The clip keeps its movement and timing.',
+  'minimax-h3-ref': 'Your picture sets who is in the clip. Describe what they do.',
+  'wan-3.0-ref': 'Your picture sets who is in the clip. Describe what they do.',
 }
 
 export function modelHint(id: string): string | undefined {
@@ -267,6 +305,7 @@ export function requiredRoleInputs(role: StepRole, id: string): string[] {
 /** Roles whose NON-studio members need words before they can start. */
 const CLASSIC_PROMPT: Record<StepRole, boolean> = {
   image: true, animate: true, speech: true, music: true, extend: true, edit: true, restyle: true,
+  video: true, reference: true,
   talking: false, presenter: false, motion: false, soundtrack: false, duo: false,
   angles: false, upscale: false,
 }

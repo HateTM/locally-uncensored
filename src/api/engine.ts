@@ -20,6 +20,7 @@ import { useSettingsStore } from '../stores/settingsStore'
 import type { CloudModel } from '../types/models'
 import type { BuiltinEngineTuning } from '../types/settings'
 import { LU_ENGINE_NAME } from '../lib/engine-name'
+import { customModelDirs } from '../lib/custom-model-dirs'
 import { announceEngineCpuFallback } from '../lib/engine-offload'
 
 /** The user's Built-in Engine expert tuning (settings-backed). Injected into
@@ -285,19 +286,7 @@ export async function bundledEmbedLaneReady(): Promise<boolean> {
   }
 }
 
-/**
- * Every folder the GGUF scan walks: the app models dir (Rust adds that one)
- * plus the folder the user named under Settings → Model Storage.
- *
- * GH #122 (zrmdsxa, 2026-08-28): that setting was a download TARGET and
- * nothing else. A GGUF already sitting in it was never looked at, so the
- * Models tab stayed empty next to a folder full of models. Empty setting →
- * empty list, which is exactly the shipped single-folder scan.
- */
-export function customModelDirs(): string[] {
-  const dir = useSettingsStore.getState().settings.hfDownloadPathOverride?.trim() || ''
-  return dir ? [dir] : []
-}
+export { customModelDirs }
 
 /** How one scanned folder fared. `truncated` is a real answer: the walk has a
  *  wall-clock deadline and an entry budget per folder, because `fetchModels`

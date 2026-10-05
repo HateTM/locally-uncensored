@@ -6,7 +6,8 @@
 // both chips were filled and the sampler was already counting steps. The
 // caption was rendered on `!needsPrompt` alone, so it never reacted to anything
 // the user did.
-import type { CreateIntent } from '../../../stores/createStore'
+import type { CreateBackend, CreateIntent } from '../../../stores/createStore'
+import { MIN_TRAIN_IMAGES, maxTrainImages } from '../../../lib/train-image-cap'
 
 /** Captions that name the inputs a lane is waiting for. These go stale the
  *  moment the chips are filled, so they hide once the lane reports ready. */
@@ -16,14 +17,14 @@ const INPUT_HINT_INTENTS: ReadonlySet<CreateIntent> =
 /** Caption for prompt-less intents so each reads honestly (the old copy said
  *  "remove the background" for every one of them — misleading the eraser into
  *  a guaranteed "Paint a mask first" error). */
-export function noPromptHint(id: CreateIntent): string {
+export function noPromptHint(id: CreateIntent, backend: CreateBackend = 'local'): string {
   switch (id) {
     case 'upscale':
       return 'No prompt needed. Just hit Create to enhance the image.'
     case 'eraser':
       return 'No prompt needed. Paint a mask over the object to remove, then hit Create.'
     case 'character':
-      return 'Add 4 to 30 photos of one person or character above, pick a trigger word, then hit Create to train.'
+      return `Add ${MIN_TRAIN_IMAGES} to ${maxTrainImages(backend)} photos of one person or character above, pick a trigger word, then hit Create to train.`
     case 'lipsync':
       return 'Add the portrait (or clip) and a voice above, then hit Create to make it speak.'
     case 'motion':

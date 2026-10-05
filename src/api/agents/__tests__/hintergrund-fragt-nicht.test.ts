@@ -148,7 +148,7 @@ beforeEach(() => {
   auditRecord.mockClear()
   auditComplete.mockClear()
   resetApprovals()
-  useCodexConfirmStore.setState({ pending: null, resolve: null })
+  useCodexConfirmStore.setState({ pending: null, resolve: null, queue: [] })
 })
 
 describe('Unterauftrag aus dem Code-Tab: das Preset entscheidet, nicht der Chat-Store', () => {

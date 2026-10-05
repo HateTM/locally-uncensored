@@ -172,7 +172,7 @@ mod tests {
             ("comfy_repair.rs", "\"Environment repaired.", "the repair"),
             (
                 "comfy_repair.rs",
-                "\"ComfyUI updated. Restart ComfyUI",
+                "update(\"complete\", &done);",
                 "the update",
             ),
         ] {
@@ -229,12 +229,20 @@ mod tests {
         let venv_at = install_body
             .find("comfy_venv_state")
             .expect("install_comfyui ignores an existing venv");
-        let pep_at = install_body
-            .find("is_pep668_protected")
-            .expect("the PEP 668 branch");
+        let build_at = install_body
+            .find("create_comfyui_venv(")
+            .expect("install_comfyui builds no venv of its own");
         assert!(
-            venv_at < pep_at,
-            "the venv is only considered after the PEP 668 branch"
+            venv_at < build_at,
+            "an existing venv is only considered after a new one is built"
+        );
+        // nosferatue412 (Discord 2026-09-22, Windows 11, RX 9060 XT): without a
+        // venv the packages went into the system Python next to another
+        // install's ROCm DLLs, and the environment check died on "Bad Image".
+        // The venv is built on every platform, not only behind PEP 668.
+        assert!(
+            !install_body.contains("pep668_protected"),
+            "the venv is only built where PEP 668 forces it again"
         );
     }
 

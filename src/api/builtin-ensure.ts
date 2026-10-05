@@ -31,6 +31,7 @@ import {
 } from '../lib/builtin-model-identity'
 import { hostOf, isLocalTransportFailure } from '../lib/local-backend-transport'
 import { announceEngineCpuFallback } from '../lib/engine-offload'
+import { customModelDirs } from '../lib/custom-model-dirs'
 
 interface EngineStatusLite {
   running: boolean
@@ -50,6 +51,18 @@ interface EngineStatusLite {
 
 interface BundledList {
   models?: Array<{ name: string; path: string; ctx_train?: number | null }>
+}
+
+/** The GGUFs the engine can be started on: the app models dir AND the folder
+ *  named under Model Storage, exactly the set the picker lists.
+ *
+ *  Discord 2026-10-01 (samvenice, 3.0.3, RTX 4090): a group chat of two models
+ *  from that folder answered with the loaded one only. The other speaker got
+ *  "The LU Engine has X loaded, but this request asked for Y", because the
+ *  lookup here walked the app dir alone, found no Y, and called a model the
+ *  picker had just offered a missing file. */
+function listEngineModels(): Promise<BundledList> {
+  return backendCall<BundledList>('list_bundled_models', { extraDirs: customModelDirs() })
 }
 
 /** What `start_bundled_engine` / `swap_bundled_model` answer. `port` is the
@@ -254,7 +267,7 @@ async function loadBuiltinModel(modelName: string): Promise<void> {
 
   let models: Array<{ name: string; path: string; ctx_train?: number | null }>
   try {
-    const res = await backendCall<BundledList>('list_bundled_models')
+    const res = await listEngineModels()
     models = res?.models ?? []
   } catch {
     return
@@ -373,7 +386,7 @@ export async function ensureBuiltinAgentCtx(modelName: string): Promise<void> {
 
   let models: Array<{ name: string; path: string; ctx_train?: number | null }>
   try {
-    const res = await backendCall<BundledList>('list_bundled_models')
+    const res = await listEngineModels()
     models = res?.models ?? []
   } catch {
     return
@@ -482,7 +495,7 @@ export async function diagnoseBuiltinEngine(
 
   let models: Array<{ name: string; path: string }>
   try {
-    const res = await backendCall<BundledList>('list_bundled_models')
+    const res = await listEngineModels()
     models = res?.models ?? []
   } catch (e) {
     return {

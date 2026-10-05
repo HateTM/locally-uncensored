@@ -1,7 +1,8 @@
-import { useState, useRef, useEffect, useLayoutEffect } from 'react'
+import { useState, useRef, useEffect } from 'react'
+import { usePopoverPlatz } from '../../hooks/usePopoverPlatz'
 import { useDismissOnEscape } from '../../hooks/useDismissOnEscape'
 import { motion, AnimatePresence } from 'framer-motion'
-import { AlertTriangle, Ban, ChevronDown, Loader2, Power, PlayCircle, Settings as SettingsIcon, Wrench, X, Cloud } from 'lucide-react'
+import { AlertTriangle, Ban, ChevronDown, Loader2, Power, Settings as SettingsIcon, Wrench, X, Cloud } from 'lucide-react'
 import { useModels } from '../../hooks/useModels'
 import { useModelStore } from '../../stores/modelStore'
 import { useProviderStore } from '../../stores/providerStore'
@@ -9,7 +10,7 @@ import { useSettingsStore } from '../../stores/settingsStore'
 import { useUIStore } from '../../stores/uiStore'
 import { unloadAllModels, loadModel, unloadModel, listRunningModels } from '../../api/ollama'
 import { displayModelName, getProviderIdFromModel } from '../../api/providers'
-import { splitForMiddleEllipsis, shortModelLabel } from '../../lib/model-label'
+import { splitForMiddleEllipsis, modelDisplayLabel } from '../../lib/model-label'
 import { formatContextWindow } from '../../lib/formatters'
 import { activateBuiltinModel, isManagedBuiltinActive } from '../../api/engine'
 import { diagnoseBuiltinEngine } from '../../api/builtin-ensure'
@@ -43,6 +44,8 @@ import { ModelPickerSkeleton } from '../layout/ViewSkeletons'
 import type { AIModel } from '../../types/models'
 import { MOTION_S } from '../ui/motion'
 import { ModelRowMarks } from './ModelRowMarks'
+import { CloudModelPicker, CLOUD_PICKER_MAX_HEIGHT, CLOUD_PICKER_WIDTH, type PickerNote } from './CloudModelPicker'
+import { modelFamily, OTHER_FAMILY } from '../../lib/model-family'
 import type { CloudModel as CloudModelMarks } from '../../types/models'
 
 // ── Local-mode cloud discovery (2.5.8): an "LU Cloud" section at the list's
@@ -150,8 +153,8 @@ function sameStringSet(prev: Set<string>, next: string[]): boolean {
 // returns nothing and LM Studio is silently dropped from the dropdown.
 // v2.4.4 added a "Start LM Studio server" hint to onboarding, but the
 // chat picker (where users actually look for their models) never got
-// the same treatment. This banner closes that gap. Polls
-// `lmstudio_server_status` on dropdown open; renders inline when LM
+// the same treatment. This banner closes that gap. Asks
+// `lmstudio_server_status` while the dropdown is open; renders inline when LM
 // Studio is detected on disk (lms.exe present OR models in
 // ~/.lmstudio/models/) AND its server isn't running. Clicking "Start
 // Server" hits the same Tauri command the Settings panel uses, then
@@ -168,124 +171,178 @@ export interface LmStudioServerStatus {
   running: boolean
   port: number
   lms_present: boolean
+  /** Any GGUF in LM Studio's models folder. */
   models_detected: boolean
+  /** The models the chat picker lists once the server runs: no embedding
+   *  models, no vision projectors, a split model once. */
   model_count: number
 }
 
-// Session-scope dismiss flag. Lives at module-level on purpose: the
-// LmStudioServerHint component unmounts when the dropdown closes, so a
-// useState reset would resurface the hint on every reopen. Module
-// state survives unmount/remount within the same LU run, and resets to
-// false when the user relaunches LU (the module reloads from scratch).
-// Not persisted to localStorage so a forgotten-to-start server gets
-// flagged again next launch.
-let LM_HINT_DISMISSED_THIS_SESSION = false
+/** How often the line asks the server while the menu is open. */
+const LMSTUDIO_STATUS_POLL_MS = 1500
+/** How long "starting" stands before the Start button comes back. */
+const LMSTUDIO_START_WAIT_MS = 30_000
 
-function LmStudioServerHint({ onStarted }: { onStarted: () => void }) {
+// One line with a state dot, a short sentence and a text button (David,
+// 05.10.2026). It used to be a box of three text blocks and a full-width
+// button, about as tall as five model rows. What the click does is unchanged.
+//
+// `onServerOff` tells the list below what the line knows: with the server off
+// its rows cannot be picked, so they leave the list for as long as the line
+// stands and come back with the server.
+function LmStudioStatusLine({ onStarted, onServerOff }: { onStarted: () => void; onServerOff: (off: boolean) => void }) {
   const [status, setStatus] = useState<LmStudioServerStatus | null>(null)
   const [starting, setStarting] = useState(false)
   const [startError, setStartError] = useState('')
-  const [dismissed, setDismissed] = useState(LM_HINT_DISMISSED_THIS_SESSION)
   // Starting the server also hands LM Studio the local backend slot (see
   // lib/lmstudio-backend-adopt). When the built-in engine holds that slot the
-  // user learns it here, before the click, together with the way back.
+  // user learns it before the click, together with the way back: in the
+  // tooltip of the button, the line itself stays one line.
   const replacesBuiltinEngine = useProviderStore((s) => adoptionReplacesBuiltinEngine(s.providers.openai))
 
+  // The line follows the server for as long as the menu is open. It used to
+  // ask once on open and for six seconds after "Start": a server that needed
+  // longer came up, its models reached the list, and the line above them went
+  // on saying "server off" (Windows box, 05.10.2026).
+  const refreshRef = useRef<() => Promise<void>>(async () => {})
+  const startAsked = useRef(false)
+  const onStartedRef = useRef(onStarted)
+  const onServerOffRef = useRef(onServerOff)
+  useEffect(() => { onStartedRef.current = onStarted; onServerOffRef.current = onServerOff }, [onStarted, onServerOff])
   useEffect(() => {
     let cancelled = false
-    backendCall<LmStudioServerStatus>('lmstudio_server_status')
-      .then(s => { if (!cancelled) setStatus(s) })
-      .catch(() => { /* not Tauri / endpoint missing → just don't render */ })
-    return () => { cancelled = true }
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let wasRunning: boolean | null = null
+    let following = false
+    let asked = 0
+    const refresh = async () => {
+      clearTimeout(timer)
+      const mine = ++asked
+      const fresh = await backendCall<LmStudioServerStatus>('lmstudio_server_status').catch(() => null)
+      // A newer question is on its way (the click on "Start" asks at once):
+      // that one answers and keeps the rhythm.
+      if (cancelled || mine !== asked) return
+      // Not Tauri, endpoint missing, or no LM Studio on this machine: there
+      // is nothing to follow, so the line stays away and nothing keeps asking.
+      // One answer that fails later on is not that: the line keeps what it
+      // last knew and asks again.
+      const detected = !!fresh && (fresh.lms_present || fresh.models_detected)
+      if (!fresh && following) timer = setTimeout(() => void refresh(), LMSTUDIO_STATUS_POLL_MS)
+      // Only an answer moves the list. A reopened menu keeps what the last
+      // answer said until the next one is in.
+      if (fresh) onServerOffRef.current(detected && !fresh.running)
+      if (!fresh || !detected) return
+      following = true
+      const cameUp = fresh.running && wasRunning === false
+      wasRunning = fresh.running
+      if (cameUp) {
+        // After a click on "Start" this is the moment the line promised: the
+        // models have to appear. A running server is only half of that. The
+        // picker lists ENABLED provider slots, so without the slot the models
+        // stay invisible and the button leads into a dead end (Nebenbefund 4,
+        // R8 re-measure). Same call the BackendSelector makes, no
+        // LM-Studio-only path. A server someone started elsewhere takes no
+        // slot: nobody asked for that here.
+        if (startAsked.current) {
+          startAsked.current = false
+          const update = lmStudioSlotUpdate(useProviderStore.getState().providers.openai)
+          if (update) {
+            useProviderStore.getState().setProviderConfig('openai', update)
+            // Opus review, R13D follow-up: this click is the deliberate
+            // pick `adoptionReplacesBuiltinEngine` already warns about
+            // above, not an eviction bug, so the missing-engine notice
+            // must not fire because of it. See lib/builtin-engine-presence.ts.
+            if (update.managed === false) useProviderStore.getState().setEngineOptedOut(true)
+          }
+        }
+        setStarting(false)
+        onStartedRef.current()
+      }
+      setStatus(fresh)
+      timer = setTimeout(() => void refresh(), LMSTUDIO_STATUS_POLL_MS)
+    }
+    refreshRef.current = refresh
+    void refresh()
+    return () => { cancelled = true; clearTimeout(timer) }
   }, [])
+
+  // "Starting" is a promise with an end: a server that has not answered by
+  // then gets its Start button back. The line keeps following it either way.
+  useEffect(() => {
+    if (!starting) return
+    const timer = setTimeout(() => setStarting(false), LMSTUDIO_START_WAIT_MS)
+    return () => clearTimeout(timer)
+  }, [starting])
 
   // Render only when LM Studio is on disk but its server is off. If
   // running, models are already in the list; if neither lms.exe nor any
   // models are present, the user just doesn't have LM Studio.
-  const detected = !!status && (status.lms_present || status.models_detected)
-  if (!status || status.running || !detected || dismissed) return null
+  if (!status || status.running) return null
 
   const handleStart = async (e: React.MouseEvent) => {
     e.stopPropagation()
     if (starting) return
     setStarting(true)
     setStartError('')
+    startAsked.current = true
     try {
       await backendCall('start_lmstudio_server')
-      // The CLI takes a second or two to bind 1234, poll status
-      // briefly so the banner replaces itself with the models list
-      // instead of leaving the spinner spinning forever.
-      for (let i = 0; i < 8; i++) {
-        await new Promise(r => setTimeout(r, 750))
-        const fresh = await backendCall<LmStudioServerStatus>('lmstudio_server_status').catch(() => null)
-        if (fresh) {
-          setStatus(fresh)
-          if (fresh.running) {
-            // A running server is only half of what the sentence above
-            // promises. The picker lists ENABLED provider slots, so without
-            // this the models stay invisible and the button leads into a dead
-            // end (Nebenbefund 4, R8 re-measure). Same call the
-            // BackendSelector makes, no LM-Studio-only path.
-            const update = lmStudioSlotUpdate(useProviderStore.getState().providers.openai)
-            if (update) {
-              useProviderStore.getState().setProviderConfig('openai', update)
-              // Opus review, R13D follow-up: this click is the deliberate
-              // pick `adoptionReplacesBuiltinEngine` already warns about
-              // above, not an eviction bug, so the missing-engine notice
-              // must not fire because of it. See lib/builtin-engine-presence.ts.
-              if (update.managed === false) useProviderStore.getState().setEngineOptedOut(true)
-            }
-            onStarted()
-            break
-          }
-        }
-      }
+      // The CLI takes a moment to bind 1234. Ask right away, the line then
+      // keeps asking on its own until the server answers.
+      await refreshRef.current()
     } catch (e) {
-      // Hier stand `catch (e: any)` mit `e?.message`. Das las genau EINE Sorte
-      // Fehler: ein `Error`-Objekt. Tauris `invoke` lehnt aber mit einem STRING
-      // ab (die Rust-Seite gibt `Result<_, String>` zurueck), im ausgelieferten
-      // Programm hatte `e.message` deshalb nie einen Wert, und der Grund des
-      // Fehlschlags wurde jedes Mal durch das pauschale „Start failed" ersetzt.
-      // `detailOf` ist die Stelle, an der dieses Projekt genau diese Frage schon
-      // beantwortet (lib/error-text.ts): String, Error oder sonst etwas.
+      // Tauris `invoke` lehnt mit einem STRING ab (die Rust-Seite gibt
+      // `Result<_, String>` zurueck), ein `e.message` haette im ausgelieferten
+      // Programm nie einen Wert. `detailOf` ist die Stelle, an der dieses
+      // Projekt genau diese Frage beantwortet (lib/error-text.ts): String,
+      // Error oder sonst etwas.
       const detail = detailOf(e)
+      startAsked.current = false
       setStartError(detail ? detail.slice(0, 80) : 'Start failed')
-    } finally {
       setStarting(false)
     }
   }
 
+  const sentence = lmStudioLineText(status.model_count, starting, startError !== '')
   return (
-    <div className="relative px-2.5 py-2 border-b border-black/[0.06] dark:border-white/[0.04] bg-black/[0.03] dark:bg-white/[0.03]">
-      <button
-        onClick={(e) => { e.stopPropagation(); LM_HINT_DISMISSED_THIS_SESSION = true; setDismissed(true) }}
-        aria-label="Dismiss (returns on next launch)"
-        title="Dismiss (returns on next launch)"
-        className="absolute top-1 right-1 p-1 rounded text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-black/[0.06] dark:hover:bg-white/[0.08] transition-colors"
-      >
-        <X size={10} />
-      </button>
-      <p className="t-micro text-gray-600 dark:text-gray-300 leading-snug mb-1.5 pr-5">
-        LM Studio is installed ({status.model_count} model{status.model_count === 1 ? '' : 's'} on disk) but its server isn't running. Start it to pick LM Studio models here.
-      </p>
-      <button
-        onClick={handleStart}
-        disabled={starting}
-        className="w-full flex items-center justify-center gap-1.5 px-2 py-1 rounded t-micro bg-black/[0.06] dark:bg-white/[0.06] hover:bg-black/[0.1] dark:hover:bg-white/[0.12] text-gray-700 dark:text-gray-200 transition-colors disabled:opacity-50"
-      >
-        {starting ? <Loader2 size={10} className="animate-spin" /> : <PlayCircle size={10} />}
-        <span>{starting ? 'Starting LM Studio server…' : 'Start LM Studio Server'}</span>
-      </button>
-      {replacesBuiltinEngine && (
-        <p className="text-[0.55rem] text-gray-500 dark:text-gray-400 mt-1 leading-snug">
-          This also makes LM Studio your local chat backend in place of the LU Engine. You can switch back under Settings, AI Backends, Providers.
-        </p>
-      )}
-      {startError && (
-        <p className="text-[0.55rem] text-red-600/80 dark:text-red-300/70 mt-1 leading-snug">{startError}</p>
+    <div
+      data-testid="lmstudio-status-line"
+      data-state={starting ? 'starting' : startError ? 'failed' : 'off'}
+      className={`lu-picker-service${startError ? ' is-err' : ''}`}
+    >
+      {starting
+        ? <Loader2 size={8} className="shrink-0 animate-spin" />
+        : <span className={`lu-picker-dot${startError ? ' is-err' : ''}`} />}
+      {/* Why the start failed, in the server's own words, behind the line. */}
+      <span className="st" title={startError || sentence}>{sentence}</span>
+      {!starting && (
+        <button
+          type="button"
+          className="lu-picker-text-btn"
+          onClick={handleStart}
+          title={lmStudioStartTitle(replacesBuiltinEngine)}
+        >
+          {startError ? 'Retry' : 'Start'}
+        </button>
       )}
     </div>
   )
+}
+
+/** What the LM Studio line reads in each of its three states. */
+export function lmStudioLineText(modelCount: number, starting: boolean, failed: boolean): string {
+  if (starting) return 'LM Studio server starting'
+  if (failed) return 'LM Studio server did not start'
+  return `LM Studio server off, ${modelCount} ${modelCount === 1 ? 'model' : 'models'} on disk`
+}
+
+/** The tooltip of "Start". The consequence of the click stands here and
+ *  nowhere in the line: with the LU Engine in the local slot, starting LM
+ *  Studio takes that slot over. */
+export function lmStudioStartTitle(replacesBuiltinEngine: boolean): string {
+  return replacesBuiltinEngine
+    ? 'Start the LM Studio server to pick its models here. This also makes LM Studio your local chat backend in place of the LU Engine. You can switch back under Settings, AI Backends, Providers.'
+    : 'Start the LM Studio server to pick its models here.'
 }
 
 // ── Badge configs ─────────────────────────────────────────────
@@ -327,68 +384,33 @@ function getProviderBadge(model: AIModel) {
 //
 // Pure visual grouping, model name + provider still resolve chat
 // routing exactly as before.
-
-// Normalize a model name into a comparable base form:
-//   openai::qwen3.6-27b        → qwen3.6-27b
-//   richardyoung/qwen3-14b:…   → qwen3-14b
-//   Qwen3.6-27B-Q4_K_M.gguf    → qwen3.6-27b-q4_k_m.gguf
-function normalizeModelName(name: string): string {
-  return (name || '')
-    .toLowerCase()
-    .replace(/^[^:]+::/, '')    // strip openai:: / anthropic::
-    .replace(/^[^/]+\//, '')    // strip repo-author/ prefix
-    .replace(/:.+$/, '')        // strip :tag suffix
-}
-
-// Ordered, first match wins. Prefixes/infixes on the normalized name.
-const FAMILY_MATCHERS: Array<{ family: string; test: RegExp }> = [
-  { family: 'Qwen',       test: /^qwen|^qwq/ },
-  { family: 'Gemma',      test: /^gemma/ },
-  { family: 'Llama',      test: /^llama|^meta[-_]?llama/ },
-  { family: 'Mistral',    test: /^mistral|^mixtral|^mistral-nemo|^mistral-small|^mistral-large/ },
-  { family: 'DeepSeek',   test: /^deepseek/ },
-  { family: 'Phi',        test: /^phi-?\d|^phi_?\d/ },
-  { family: 'Hermes',     test: /^hermes|^nous-/ },
-  { family: 'Dolphin',    test: /^dolphin/ },
-  { family: 'Claude',     test: /^claude/ },
-  { family: 'GPT-OSS',    test: /^gpt-oss/ },
-  { family: 'GPT / o-series', test: /^gpt-|^o1-|^o3-/ },
-  { family: 'Command',    test: /^command/ },
-  { family: 'GLM',        test: /^glm|^chatglm|^zai/ },
-  { family: 'Yi',         test: /^yi-/ },
-  { family: 'Gemini',     test: /^gemini/ },
-  { family: 'Grok',       test: /^grok/ },
-]
-
-function getModelFamily(modelName: string): string {
-  const n = normalizeModelName(modelName)
-  for (const { family, test } of FAMILY_MATCHERS) {
-    if (test.test(n)) return family
-  }
-  return 'Other'
-}
+//
+// This is the LOCAL list. It keeps its own order and its own head per family,
+// also over a single row (David, 05.10.2026: the local list stays as it is).
+// Which family a name belongs to is asked in lib/model-family, the same table
+// the Cloud picker groups by.
 
 // Family display order, Qwen/Gemma/Llama surface first since they're
 // the most common local-chat picks; cloud-only families (Claude/GPT)
 // come after the local ones; 'Other' always last.
 const FAMILY_ORDER: string[] = [
   'Qwen', 'Gemma', 'Llama', 'Mistral', 'DeepSeek', 'Phi', 'Hermes',
-  'Dolphin', 'GLM', 'GPT-OSS', 'Yi', 'Command',
+  'Dolphin', 'GLM', 'gpt-oss', 'Yi', 'Command',
   'Claude', 'GPT / o-series', 'Gemini', 'Grok',
 ]
 
 function groupByFamily(models: AIModel[]): { family: string; models: AIModel[] }[] {
   const groups: Record<string, AIModel[]> = {}
   for (const m of models) {
-    const fam = getModelFamily(m.name)
+    const fam = modelFamily(m.name)
     if (!groups[fam]) groups[fam] = []
     groups[fam].push(m)
   }
 
   return Object.entries(groups)
     .sort(([a], [b]) => {
-      if (a === 'Other') return 1
-      if (b === 'Other') return -1
+      if (a === OTHER_FAMILY) return 1
+      if (b === OTHER_FAMILY) return -1
       const ai = FAMILY_ORDER.indexOf(a)
       const bi = FAMILY_ORDER.indexOf(b)
       if (ai >= 0 && bi >= 0) return ai - bi
@@ -653,6 +675,18 @@ export interface ModelSelectorProps {
   answeredBy?: string | null
 }
 
+/** What the picker button reads while no chat model is picked. In Cloud mode
+ *  that is the normal state of a new account: the app never picks a hosted
+ *  model by itself (lib/active-model-mode). */
+const NO_MODEL_LABEL = 'Choose a model'
+/** The first line of the menu while nothing is picked, in the words of the
+ *  web app. One wording for both reasons the line can stand there. */
+export const CHOOSE_TO_SEND = 'Choose a model to send your message.'
+/** Added to it, in the same line, after a send was tried without a model. */
+export const MESSAGE_IS_KEPT = 'Your text and attachments are kept.'
+/** The line when a send is waiting and the list holds no model at all. */
+export const NO_MODEL_LISTED = `Your message needs a chat model, and none is listed yet. ${MESSAGE_IS_KEPT}`
+
 // `openUpward` flips the dropdown to open above the trigger, right-aligned, // used when the picker lives in the composer action bar (bottom of the screen)
 // instead of the header. Header usage keeps the default downward/centered menu.
 export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy = null }: ModelSelectorProps = {}) {
@@ -730,6 +764,29 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
   useDismissOnEscape(open, () => setOpen(false))
 
   /**
+   * A send was tried without a chat model (ChatInput.handleSend). The message
+   * stays in the composer, and this picker is where the user learns why: it
+   * opens, and its first line says what is missing. Nothing is written in or
+   * above the prompt field. When the menu is closed without a pick, the dot
+   * on the button stays as the way back to the sentence, until a model is
+   * there.
+   *
+   * The counter is compared during render instead of in an effect: opening is
+   * a reaction to one click somewhere else, and an effect would open the menu
+   * one paint late.
+   */
+  const modelAskSeq = useUIStore((s) => s.modelAskSeq)
+  const [seenModelAsk, setSeenModelAsk] = useState(modelAskSeq)
+  const [modelAsked, setModelAsked] = useState(false)
+  if (seenModelAsk !== modelAskSeq) {
+    setSeenModelAsk(modelAskSeq)
+    setModelAsked(true)
+    setOpen(true)
+  }
+  if (modelAsked && activeModel) setModelAsked(false)
+  const sendNeedsModel = modelAsked && !activeModel
+
+  /**
    * Die Lesezeit beginnt, wenn der Satz wirklich zu lesen ist.
    *
    * Eine Info-Zeile steht zwoelf Sekunden. Solange sie im Chat nur als Punkt
@@ -797,12 +854,35 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
    * rohe Maschinenprotokoll, der Satz mit dem Namen des Modells und dem
    * Handlungsvorschlag war unerreichbar.
    *
-   * Ein festes `max-h` in vh reicht dafuer nicht: das Menue haengt mit
-   * `bottom-full` am Ausloeser, und wie viel Platz DARUEBER ist, weiss nur
-   * der Ausloeser selbst. Also gemessen, bei jedem Oeffnen und bei jeder
-   * Groessenaenderung des Fensters.
+   * Ein festes `max-h` in vh reicht dafuer nicht: wie viel Platz ueber oder
+   * unter dem Ausloeser ist, weiss nur der Ausloeser selbst. Also gemessen,
+   * seit GitHub #149 mit `usePopoverPlatz` wie jedes Aufklappmenue der App:
+   * die Seite, die reicht, die Hoehe, die bleibt, keine Mindesthoehe mehr.
    */
-  const [menuePlatz, setMenuePlatz] = useState<number | null>(null)
+  const menueRef = useRef<HTMLDivElement>(null)
+  // In Cloud mode the menu is the new picker: a fixed head and foot around a
+  // list that scrolls by itself, capped in height, and never wider than the
+  // area that would cut it.
+  const cloudListRef = useRef<HTMLDivElement>(null)
+  const cloudPicker = appMode === 'cloud'
+  const menue = usePopoverPlatz(menueRef, open, cloudPicker
+    ? { bevorzugt: openUpward ? 'oben' : 'unten', abstand: 6, luft: 12, deckel: CLOUD_PICKER_MAX_HEIGHT, rolle: cloudListRef, breiteDeckeln: true }
+    : { bevorzugt: openUpward ? 'oben' : 'unten', abstand: 6, luft: 12 })
+
+  // The Cloud picker's search field takes the keyboard when the menu opens.
+  // When the menu closes while the keyboard is still in it (a pick, Escape),
+  // the keyboard goes back to where it came from: the composer, so Enter
+  // sends the kept message, or the trigger.
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const focusCameFrom = useRef<HTMLElement | null>(null)
+  useEffect(() => {
+    if (open || !cloudPicker) return
+    const menu = menueRef.current
+    if (!menu || !menu.contains(document.activeElement)) return
+    const back = focusCameFrom.current
+    focusCameFrom.current = null
+    ;(back && back.isConnected && back !== document.body ? back : triggerRef.current)?.focus({ preventScroll: true })
+  }, [open, cloudPicker])
 
   // Keep the per-row On/Off LOAD state LIVE while the dropdown is open
   // (David 2026-06-12: "on und offload button sehr delayed und nicht immer
@@ -1171,6 +1251,8 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
   // with nothing installed. Asked only while the dropdown is open and the list
   // is empty, and never repairs, because opening a dropdown must not boot a server.
   const [emptyReason, setEmptyReason] = useState('')
+  // What the LM Studio line last heard from the server, see `allTextModels`.
+  const [lmStudioServerOff, setLmStudioServerOff] = useState(false)
   useEffect(() => {
     if (!open || textModelsEmptyRef.current === false) return
     let cancelled = false
@@ -1195,6 +1277,9 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
+      // The rate popover of the Cloud picker is lifted out to the body. It
+      // belongs to the menu, so a press on it is not a press outside.
+      if (e.target instanceof Element && e.target.closest('[data-model-rate]')) return
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
     }
     document.addEventListener('mousedown', handler)
@@ -1231,17 +1316,7 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
   const wechselLaeuft = isModelLoading || imWechselZu !== null
     || (swapLaeuft && getProviderIdFromModel(gezeigtesModell ?? '') === 'openai')
   const gezeigtesObj = models.find((m) => m.name === gezeigtesModell)
-  const activeDisplayName = gezeigtesModell
-    ? (gezeigtesObj && 'displayName' in gezeigtesObj && gezeigtesObj.displayName) ||
-      // F3 (3.0.1): `.split(':')[0]` here truncated at the FIRST colon in the
-      // model id, not just the `provider::model` prefix `displayModelName`
-      // already stripped. An Ollama tag ("llama3.1:8b-instruct-q4_K_M") uses
-      // a single colon as its OWN separator, so the header showed only
-      // "llama3.1" while the dropdown row below it, which never split on
-      // ':', showed the real, full name. Dropped the split entirely so the
-      // header matches the row (both go through shortModelLabel only).
-      shortModelLabel(displayModelName(gezeigtesModell))
-    : 'Select Model'
+  const activeDisplayName = gezeigtesModell ? modelDisplayLabel(models, gezeigtesModell) : NO_MODEL_LABEL
   // Der Punkt folgt demselben Modell wie der Name daneben, sonst haette der
   // Knopf waehrend eines Wechsels zwei Aussagen in sich.
   const activeType = gezeigtesObj?.type || 'text'
@@ -1250,7 +1325,12 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
   // FAMILY (Qwen/Gemma/Llama/…), not by provider, because users pick
   // models by lineage first and the backend that serves them is a
   // per-row badge.
-  const allTextModels = models.filter(m => m.type === 'text')
+  // Minus the rows of an LM Studio whose server is off (Windows box,
+  // 05.10.2026: "server off" stood above seven of its models for 160 s, and a
+  // click on one could only fail). The pick itself is not touched.
+  const allTextModels = models
+    .filter((m) => m.type === 'text')
+    .filter((m) => !(lmStudioServerOff && isLmStudioProvider(m.providerName)))
   // Code needs tools to do literally anything. A hosted model that has told us
   // it cannot call them is not a degraded choice there, it is a dead one, so it
   // does not get listed. Keep the ACTIVE model visible even if it fails the
@@ -1276,33 +1356,76 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
   const hasOllamaModels = textModels.some(m => ('provider' in m && m.provider === 'ollama') || !('provider' in m))
   textModelsEmptyRef.current = textModels.length === 0
 
-  // Messen, wie viel Fenster ueber (bzw. unter) dem Ausloeser noch frei ist.
-  // 18 px Abzug: 6 px Abstand des Menues zum Ausloeser plus 12 px Luft zum
-  // Fensterrand. Die Untergrenze von 200 px ist die Notbremse fuer ein sehr
-  // flaches Fenster, in dem sonst ein Menue ohne Inhalt herauskaeme.
-  useLayoutEffect(() => {
-    if (!open) return
-    const messen = () => {
-      const el = ref.current
-      if (!el) return
-      const r = el.getBoundingClientRect()
-      const frei = openUpward ? r.top : window.innerHeight - r.bottom
-      setMenuePlatz(Math.max(200, Math.round(frei - 18)))
-    }
-    messen()
-    window.addEventListener('resize', messen)
-    return () => window.removeEventListener('resize', messen)
-  }, [open, openUpward])
+  // The one reason this picker switches rows off: a pick is already running.
+  // Kept as its own name because a refused click hands exactly this to
+  // `blockedPickWait`, which is what keeps any future second reason silent
+  // (A17).
+  const pickInFlight = selectingLms !== null || togglingLms !== null
+
+  // What an empty list says, in both modes. An empty picker after the user
+  // switched the last backend off in Settings used to say only "No models
+  // available", which reads like a machine with nothing installed
+  // (Nebenbefund 1, R9 re-measure). The reason and the way back belong here.
+  // Ruhiger Ton aus `lib/hinweis.ts`: der Nutzer hat das Backend selbst
+  // ausgeschaltet, das ist kein Zwischenfall, sondern die Antwort auf „warum
+  // ist die Liste leer". Der Knopf darunter traegt den Weg zurueck.
+  const emptyList = (
+    <div className="px-2.5 py-3 text-center">
+      <p className="t-micro text-gray-600">No models available</p>
+      {noBackendEnabled ? (
+        <>
+          <p className={`mt-1 t-micro leading-snug text-left ${HINWEIS_TEXT.ruhig}`}>
+            No AI backend is enabled, so there is nothing to list. Open Settings, go to AI Backends, and press Enable on the backend you switched off, or Add Provider.
+          </p>
+          <button
+            onClick={() => { setOpen(false); openSettingsAt({ tab: 'backends' }) }}
+            className="mt-2 inline-flex items-center gap-1 px-2 py-1 rounded bg-white/5 border border-white/10 t-micro text-gray-300 hover:bg-white/10 transition-colors"
+          >
+            <SettingsIcon size={10} /> Open Settings
+          </button>
+        </>
+      ) : emptyReason && (
+        <p className={`mt-1 t-micro leading-snug text-left ${HINWEIS_TEXT.ruhig}`}>{emptyReason}</p>
+      )}
+    </div>
+  )
+
+  // The lines under the search of the Cloud picker: what needs attention now.
+  // Same sentences and the same test ids as the lines of the local menu.
+  const cloudNotes: PickerNote[] = [
+    ...(selectError ? [{ testId: 'model-picker-error', text: selectError, tone: 'error' as const }] : []),
+    ...(engineSwitchNote ? [{
+      testId: 'picker-engine-note',
+      text: engineSwitchNote,
+      tone: engineSwitchTone === 'error' ? 'error' as const : 'info' as const,
+      onDismiss: () => useLuEngineSwitchStore.getState().dismiss(),
+    }] : []),
+    // In Cloud the app picks no model by itself, so a menu without a pick is
+    // the normal state of a new account there. The line says what the pick is
+    // for; after a send was tried it adds, in the same line, that the message
+    // is still in the composer.
+    ...(sendNeedsModel
+      ? [{
+          testId: 'picker-send-needs-model',
+          text: textModels.length > 0 ? `${CHOOSE_TO_SEND} ${MESSAGE_IS_KEPT}` : NO_MODEL_LISTED,
+          tone: 'info' as const,
+        }]
+      : !activeModel && textModels.length > 0
+        ? [{ testId: 'picker-choose-a-model', text: CHOOSE_TO_SEND, tone: 'info' as const }]
+        : []),
+  ]
 
   return (
     <div ref={ref} className="relative">
       {/* ── Trigger Button ── */}
       <button
+        ref={triggerRef}
         onClick={() => setOpen(!open)}
         title={
           answeredBy
             ? `The answers in this chat were written by ${answeredBy}. The next answer runs on the model picked here.`
-            : activeModel ? `Model: ${activeDisplayName}, click to switch` : 'Select a chat model'
+            : activeModel ? `Model: ${activeDisplayName}, click to switch`
+              : sendNeedsModel ? 'Your message needs a chat model. Pick one here to send it.' : 'Select a chat model'
         }
         aria-label="Select chat model"
         aria-expanded={open}
@@ -1311,7 +1434,9 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
         // Akzent, die Aussage steht damit im selben Vokabular wie der Rest
         // der Leiste, und im Accessibility-Baum, wo sie hingehoert.
         aria-busy={wechselLaeuft}
-        className="lu-control"
+        // max-w-full + min-w-0 below: in a tight composer row the name
+        // ellipsizes inside the slot ChatInput lets shrink.
+        className="lu-control max-w-full"
       >
         {/* Type indicator dot */}
         <span className={`w-1.5 h-1.5 rounded-full ${
@@ -1320,7 +1445,7 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
 
         {/* Model name. Keine eigene Textfarbe mehr, sie wird vom Control
             geerbt, sonst haette der Knopf zwei Graustufen in sich. */}
-        <span className="max-w-[140px] truncate leading-none">
+        <span className="min-w-0 max-w-[140px] truncate leading-none">
           {activeDisplayName}
         </span>
 
@@ -1369,20 +1494,66 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
         />
       )}
 
+      {/* A send is waiting for a model and the menu is closed: the same dot,
+          as the way back to the sentence in the menu. */}
+      {sendNeedsModel && !open && (
+        <span
+          data-testid="picker-send-needs-model-dot"
+          aria-hidden
+          className="absolute top-0 right-0 w-1.5 h-1.5 rounded-full bg-lu-accent pointer-events-none"
+        />
+      )}
+
       {/* ── Dropdown ── */}
       <AnimatePresence>
         {open && (
           <motion.div
             data-testid="model-picker-menu"
-            style={menuePlatz === null ? undefined : { maxHeight: menuePlatz }}
-            className={`absolute w-72 rounded-lg overflow-x-hidden overflow-y-auto scrollbar-thin z-50 lu-elevated ${
-              openUpward ? 'bottom-full mb-1.5 right-0' : 'top-full mt-1.5 left-1/2 -translate-x-1/2'
-            }`}
-            initial={{ opacity: 0, y: openUpward ? 6 : -6, scale: 0.98 }}
+            data-picker={cloudPicker ? 'cloud' : 'local'}
+            ref={menueRef}
+            style={cloudPicker ? { width: CLOUD_PICKER_WIDTH, ...menue.style } : menue.style}
+            className={`absolute z-50 lu-elevated ${
+              // Cloud: the new picker, a column whose list scrolls by itself.
+              // Local: the list as it always was, the menu scrolls as a whole.
+              cloudPicker
+                ? 'lu-picker flex flex-col overflow-hidden'
+                : 'w-72 rounded-lg overflow-x-hidden overflow-y-auto scrollbar-thin'
+            } ${
+              menue.nachOben ? 'bottom-full mb-1.5' : 'top-full mt-1.5'
+            } ${openUpward ? 'right-0' : 'left-1/2 -translate-x-1/2'}`}
+            initial={{ opacity: 0, y: menue.nachOben ? 6 : -6, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: openUpward ? 6 : -6, scale: 0.98 }}
+            exit={{ opacity: 0, y: menue.nachOben ? 6 : -6, scale: 0.98 }}
             transition={{ duration: MOTION_S.fast, ease: 'easeOut' }}
           >
+            {cloudPicker ? (
+              <CloudModelPicker
+                models={textModels}
+                activeModel={activeModel}
+                loading={!inventoryLoaded}
+                notes={cloudNotes}
+                hiddenForCode={hiddenForCode}
+                empty={emptyList}
+                listRef={cloudListRef}
+                onPick={(model) => {
+                  // A17: a pick while another one is running is refused, and
+                  // says which wait it ran into.
+                  if (pickInFlight) { announceBlockedPick(pickInFlight); return }
+                  void handleSelectModel(model)
+                }}
+                onTookFocus={(from) => { focusCameFrom.current = from }}
+              />
+            ) : (<>
+            {/* First of all: why the menu opened by itself. The message the
+                user tried to send is still in the composer. */}
+            {sendNeedsModel && (
+              <div
+                data-testid="picker-send-needs-model"
+                className={`px-2.5 py-1.5 border-b border-black/5 dark:border-white/[0.06] t-micro leading-snug ${HINWEIS_TEXT.ruhig}`}
+              >
+                {textModels.length > 0 ? `${CHOOSE_TO_SEND} ${MESSAGE_IS_KEPT}` : NO_MODEL_LISTED}
+              </div>
+            )}
             {/* Noch vor der Engine-Zeile: was sich am Modell selbst geaendert
                 hat, waehrend der Nutzer woanders hinsah. Begruendung des
                 Platzes oben an `engineSwitchNote`. */}
@@ -1438,19 +1609,12 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
               </div>
             )}
 
-            {/* Bug Q v2.4.7, surface "Start LM Studio Server" inline when
-                LM Studio is on disk but its server is off. wakeywakeynow's
-                "can't choose any models i have installed" symptom. */}
-            <LmStudioServerHint onStarted={fetchModels} />
-
-            {/* Same honesty as the hiddenForCode note below: in Cloud mode the
-                local models are hidden on purpose, so say so instead of
-                letting an empty local section read as a bug (G20). */}
-            {appMode === 'cloud' && (
-              <div className="px-2.5 py-1.5 border-b border-black/5 dark:border-white/[0.06] text-[0.55rem] text-gray-500">
-                Cloud mode shows hosted models only. Switch the app to Local mode to use Ollama, LM Studio or the LU Engine.
-              </div>
-            )}
+            {/* Bug Q v2.4.7: LM Studio is on disk but its server is off.
+                wakeywakeynow's "can't choose any models i have installed"
+                symptom. One line with a "Start" button. Local mode only: in
+                Cloud the list shows hosted models, and what the line promises
+                (pick LM Studio models here) would not come true there. */}
+            <LmStudioStatusLine onStarted={fetchModels} onServerOff={setLmStudioServerOff} />
 
             {/* K6: grouping threw and was caught above instead of crashing the
                 whole chat view. Says so, in the dropdown itself, with a way
@@ -1507,35 +1671,7 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
             {/* Scrollable model list */}
             <div className="py-1 max-h-[280px] overflow-y-auto scrollbar-thin">
               {!inventoryLoaded && textModels.length === 0 && <ModelPickerSkeleton />}
-              {inventoryLoaded && textModels.length === 0 && (
-                <div className="px-2.5 py-3 text-center">
-                  <p className="t-micro text-gray-600">No models available</p>
-                  {/* An empty picker after the user switched the last backend
-                      off in Settings used to say only that, which reads like a
-                      machine with nothing installed (Nebenbefund 1, R9
-                      re-measure). The reason and the way back belong here.
-                      Beide Saetze standen in Gelb. Der Nutzer hat das Backend
-                      selbst ausgeschaltet; das ist kein Zwischenfall, sondern
-                      die Antwort auf „warum ist die Liste leer". Ruhiger Ton
-                      aus `lib/hinweis.ts`, der Knopf darunter traegt den
-                      Weg zurueck. */}
-                  {noBackendEnabled ? (
-                    <>
-                      <p className={`mt-1 t-micro leading-snug text-left ${HINWEIS_TEXT.ruhig}`}>
-                        No AI backend is enabled, so there is nothing to list. Open Settings, go to AI Backends, and press Enable on the backend you switched off, or Add Provider.
-                      </p>
-                      <button
-                        onClick={() => { setOpen(false); openSettingsAt({ tab: 'backends' }) }}
-                        className="mt-2 inline-flex items-center gap-1 px-2 py-1 rounded bg-white/5 border border-white/10 t-micro text-gray-300 hover:bg-white/10 transition-colors"
-                      >
-                        <SettingsIcon size={10} /> Open Settings
-                      </button>
-                    </>
-                  ) : emptyReason && (
-                    <p className={`mt-1 t-micro leading-snug text-left ${HINWEIS_TEXT.ruhig}`}>{emptyReason}</p>
-                  )}
-                </div>
-              )}
+              {inventoryLoaded && textModels.length === 0 && emptyList}
 
               {groups.map(({ family, models: groupModels }) => (
                 <div key={family}>
@@ -1572,11 +1708,6 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
                     // a <button>. A <button> can't nest a <button> (invalid HTML →
                     // React hydration error + flaky clicks), so the row is a
                     // role="button" <div> with explicit keyboard activation.
-                    // The one reason this picker switches rows off: a pick is
-                    // already running. Kept as its own name because the click
-                    // below hands exactly this to `blockedPickWait`, which is
-                    // what keeps any future second reason silent (A17).
-                    const pickInFlight = selectingLms !== null || togglingLms !== null
                     const rowDisabled = pickInFlight
 
                     return (
@@ -1786,6 +1917,7 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
                 </button>
               </div>
             )}
+            </>)}
           </motion.div>
         )}
       </AnimatePresence>

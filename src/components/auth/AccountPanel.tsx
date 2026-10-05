@@ -14,7 +14,9 @@ import { MONOGRAM } from '../layout/brand'
 import { openExternal } from '../../api/backend'
 import { formatCount } from '../../lib/formatters'
 import { countUnsyncedAccountMemories } from '../../lib/memory-unsynced'
+import { PAST_DUE_ACTION, PAST_DUE_BADGE, PAST_DUE_WALLET_LINE, pastDueLine } from '../../lib/past-due'
 import { Modal } from '../ui/Modal'
+import { Hinweis } from '../ui/Hinweis'
 
 /**
  * Run a sign-out and report what happened, in that order.
@@ -132,6 +134,8 @@ export function AccountPanel() {
   const user = useCloudAuthStore((s) => s.user)
   const licenseActive = useCloudAuthStore((s) => s.licenseActive)
   const quota = useCloudAuthStore((s) => s.quota)
+  const pastDue = useCloudAuthStore((s) => s.pastDue)
+  const pastDueTier = useCloudAuthStore((s) => s.pastDueTier)
 
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -265,7 +269,7 @@ export function AccountPanel() {
         <div>
           <div className="text-[0.7rem] text-gray-900 dark:text-gray-100">{user.email ?? user.id}</div>
           <div className="text-[0.65rem] text-gray-500">
-            {licenseActive ? `Plan: ${quota?.tier ?? 'active'}` : 'No active plan'}
+            {licenseActive ? `Plan: ${quota?.tier ?? 'active'}` : pastDue ? PAST_DUE_BADGE : 'No active plan'}
           </div>
         </div>
         <button
@@ -311,6 +315,24 @@ export function AccountPanel() {
         </p>
       )}
 
+      {/* A failed renewal, said in plain words with the way to settle it.
+          Until 3.0.5 this account read "No active plan" and was offered a new
+          one. Paying happens on lu-labs.ai, the app does not touch Stripe. */}
+      {pastDue && (
+        <div className="space-y-1.5" data-testid="past-due-notice">
+          <Hinweis ton="fehler">
+            {pastDueLine(pastDueTier)}
+            {licenseActive ? ` ${PAST_DUE_WALLET_LINE}` : ''}
+          </Hinweis>
+          <button
+            onClick={() => void openExternal(`${CLOUD_BASE}/account`)}
+            className="flex items-center gap-1 px-2 py-1 rounded text-[0.65rem] font-medium border border-gray-200 dark:border-white/10 bg-gray-100 dark:bg-white/5 text-gray-800 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-white/10 transition-colors"
+          >
+            <ExternalLink size={10} /> {PAST_DUE_ACTION}
+          </button>
+        </div>
+      )}
+
       {licenseActive && quota ? (
         <div className="space-y-2">
           {/* One shared compute-credit wallet, chat, images, video and voice
@@ -323,17 +345,23 @@ export function AccountPanel() {
           />
         </div>
       ) : (
-        <p className="text-[0.7rem] text-gray-600 dark:text-gray-400">
-          Pick a plan to unlock cloud rendering and chat.
-        </p>
+        !pastDue && (
+          <p className="text-[0.7rem] text-gray-600 dark:text-gray-400">
+            Pick a plan to unlock cloud rendering and chat.
+          </p>
+        )
       )}
 
-      <button
-        onClick={() => void openExternal(`${CLOUD_BASE}/${licenseActive ? 'account' : 'pricing'}`)}
-        className="flex items-center gap-1 text-[0.65rem] text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 transition-colors"
-      >
-        <ExternalLink size={10} /> {licenseActive ? 'Manage subscription' : 'View plans'} on lu-labs.ai
-      </button>
+      {/* Not next to the notice: the server refuses a new plan until the open
+          invoice is settled, and its button already leads to the account. */}
+      {!(pastDue && !licenseActive) && (
+        <button
+          onClick={() => void openExternal(`${CLOUD_BASE}/${licenseActive ? 'account' : 'pricing'}`)}
+          className="flex items-center gap-1 text-[0.65rem] text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 transition-colors"
+        >
+          <ExternalLink size={10} /> {licenseActive ? 'Manage subscription' : 'View plans'} on lu-labs.ai
+        </button>
+      )}
     </div>
   )
 }

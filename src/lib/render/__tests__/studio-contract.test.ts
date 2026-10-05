@@ -9,7 +9,9 @@
  * Der Web-Fall "keeps API and worker definitions identical" vergleicht die
  * API-Kopie gegen die Worker-Kopie im selben Repo. Dafuer gibt es im Desktop
  * keine Entsprechung; stattdessen haelt der Fall unten die drei JSON-Dateien
- * byteidentisch gegen den Web-Worktree, wenn LU_STUDIO_WEB_REPO gesetzt ist,
+ * byteidentisch gegen den Web-Worktree, wenn LU_STUDIO_WEB_REPO gesetzt ist
+ * (seit 02.10.2026 auch studio-contract.ts und studio-roles.ts, die der Desktop
+ * unveraendert uebernimmt),
  * und ueberspringt sonst sauber, denn der Web-Stand ist beweglich.
  *
  * Run mit Drift-Pruefung: LU_STUDIO_WEB_REPO=/pfad/zum/web npx vitest run \
@@ -29,7 +31,7 @@ if (!WEB) {
 
 describe('Cloud studio contracts', () => {
   describe.skipIf(!WEB)('haelt die Vertragsdaten byteidentisch gegen den Web-Worktree', () => {
-    it.each(['studio-models.json', 'provider-schemas.json', 'provider-endpoints.json'])('%s', (f) => {
+    it.each(['studio-models.json', 'provider-schemas.json', 'provider-endpoints.json', 'studio-contract.ts', 'studio-roles.ts'])('%s', (f) => {
       const desktop = readFileSync(resolve('src/lib/render', f), 'utf8')
       const web = readFileSync(resolve(WEB!, 'apps/web/lib/render', f), 'utf8')
       expect(desktop).toBe(web)

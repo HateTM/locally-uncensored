@@ -3,7 +3,8 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
 
 use futures_util::StreamExt;
 use sha2::{Digest, Sha256};
@@ -553,6 +554,8 @@ const MODEL_SUBDIRS: &[&str] = &[
     "checkpoints", "diffusion_models", "unet", "vae", "loras",
     "text_encoders", "clip", "clip_vision", "audio_encoders",
     "controlnet", "upscale_models", "embeddings", "style_models",
+    // LTX 2.5's x2 latent upscaler (LatentUpscaleModelLoader reads this folder).
+    "latent_upscale_models",
 ];
 
 /// Why a file ComfyUI listed is not in the ComfyUI models tree.
@@ -1003,6 +1006,46 @@ fn resumed_bytes(resume_offset: u64, status: u16) -> u64 {
     if resume_offset > 0 && status == 206 { resume_offset } else { 0 }
 }
 
+// ── Download speed limit (Discord, boromirofgeo 2026-09-23) ─────────────
+//
+// "is there a way to limit download speed that this app does whenever it
+// downloads anything?" Every model file LU fetches itself runs through
+// do_download, so the limit sits there, shared by all downloads at once:
+// two downloads under a 10 MB/s limit get 10 MB/s together, not 20. Ollama
+// pulls and package installs run in other programs and are not limited.
+
+/// Bytes per second, 0 for no limit. Set from Settings at boot and on change.
+static DOWNLOAD_LIMIT_BPS: AtomicU64 = AtomicU64::new(0);
+/// When the shared line is free again, across all running downloads.
+static DOWNLOAD_NEXT_SLOT: Mutex<Option<Instant>> = Mutex::new(None);
+
+/// How long the download that just received `bytes` waits before it reads
+/// on, so that everything together stays at `limit_bps`. A line that has been
+/// idle starts from now, so a pause never turns into a burst afterwards.
+fn throttle_wait(slot: &mut Option<Instant>, limit_bps: u64, bytes: u64, now: Instant) -> Duration {
+    if limit_bps == 0 {
+        *slot = None;
+        return Duration::ZERO;
+    }
+    let start = match *slot {
+        Some(t) if t > now => t,
+        _ => now,
+    };
+    let done = start + Duration::from_secs_f64(bytes as f64 / limit_bps as f64);
+    *slot = Some(done);
+    done.saturating_duration_since(now)
+}
+
+/// Settings, Model Storage: megabytes per second, 0 for no limit.
+#[tauri::command]
+pub fn set_download_limit(mb_per_sec: f64) -> Result<(), String> {
+    if !mb_per_sec.is_finite() || mb_per_sec < 0.0 {
+        return Err("The download limit has to be 0 or a positive number of MB/s.".to_string());
+    }
+    DOWNLOAD_LIMIT_BPS.store((mb_per_sec * 1_000_000.0).round() as u64, Ordering::Relaxed);
+    Ok(())
+}
+
 /// True when the body stopped before Content-Length was reached. `total == 0`
 /// means the server declared no length — there is nothing to check against.
 fn ended_early(total: u64, downloaded: u64) -> bool {
@@ -1138,12 +1181,40 @@ const SPACE_RESERVE: u64 = 1024 * 1024 * 1024;
 /// download big enough to fill a disk, so the check belongs here, where every
 /// download passes through, not in the caller that happens to know the sizes.
 fn space_shortfall(total: u64, already_on_disk: u64, available: Option<u64>) -> Option<(u64, u64)> {
+    space_shortfall_keeping(total, already_on_disk, available, SPACE_RESERVE)
+}
+
+/// `space_shortfall` with the headroom named by the caller.
+fn space_shortfall_keeping(total: u64, already_on_disk: u64, available: Option<u64>, reserve: u64) -> Option<(u64, u64)> {
     let available = available?;
     if total == 0 {
         return None;
     }
-    let needed = total.saturating_sub(already_on_disk).saturating_add(SPACE_RESERVE);
+    let needed = total.saturating_sub(already_on_disk).saturating_add(reserve);
     if available >= needed { None } else { Some((needed, available)) }
+}
+
+/// Headroom a whole bundle leaves free. Twice the single file's: a bundle is
+/// tens of gigabytes in several transfers, and its plan is made from catalog
+/// sizes before any server has stated a length (the box, 03.10.2026: 27.1 GB
+/// started onto 29.6 GB free without a word).
+const BUNDLE_SPACE_RESERVE: u64 = 2 * 1024 * 1024 * 1024;
+
+/// What the user is told when a bundle does not fit: how much is missing
+/// first, then the three numbers it comes from.
+fn bundle_space_message(required: u64, reserved: u64, needed: u64, free: u64) -> String {
+    format!(
+        "Not enough free space: {} short. The download is {}, LU keeps {} of the drive free, and the drive has {} free.{} Free up some space and start it again.",
+        gib(needed.saturating_sub(free)),
+        gib(required),
+        gib(BUNDLE_SPACE_RESERVE),
+        gib(free),
+        if reserved > 0 {
+            format!(" Another {} is already promised to downloads that are still running.", gib(reserved))
+        } else {
+            String::new()
+        },
+    )
 }
 
 /// Free bytes on the drive that holds `dest`. The longest matching mount point
@@ -1550,6 +1621,19 @@ async fn do_download(
                         if let Some(h) = hasher.as_mut() { h.update(&bytes); }
                         downloaded += bytes.len() as u64;
 
+                        let wait = {
+                            let mut slot = DOWNLOAD_NEXT_SLOT.lock().unwrap_or_else(|p| p.into_inner());
+                            throttle_wait(&mut slot, DOWNLOAD_LIMIT_BPS.load(Ordering::Relaxed), bytes.len() as u64, Instant::now())
+                        };
+                        if !wait.is_zero() {
+                            // Pause and Cancel still answer at once: the
+                            // outer select sees the token on the next turn.
+                            tokio::select! {
+                                _ = token.cancelled() => {}
+                                _ = tokio::time::sleep(wait) => {}
+                            }
+                        }
+
                         // Update progress every 500ms
                         if last_update.elapsed().as_millis() > 500 {
                             last_update = Instant::now();
@@ -1818,7 +1902,7 @@ pub async fn check_download_space(
         .map(|dl| reserved_bytes(&dl))
         .unwrap_or(0);
     let available = available_space_for(&dir);
-    let shortfall = space_shortfall(requiredBytes.saturating_add(reserved), 0, available);
+    let shortfall = space_shortfall_keeping(requiredBytes.saturating_add(reserved), 0, available, BUNDLE_SPACE_RESERVE);
 
     Ok(match shortfall {
         None => serde_json::json!({
@@ -1832,16 +1916,7 @@ pub async fn check_download_space(
             "requiredBytes": requiredBytes,
             "reservedBytes": reserved,
             "availableBytes": available,
-            "message": format!(
-                "Not enough free space. This needs {} and the drive has {} free.{} Free up some space and start it again.",
-                gib(needed),
-                gib(free),
-                if reserved > 0 {
-                    format!(" {} of that is already promised to downloads that are still running.", gib(reserved))
-                } else {
-                    String::new()
-                },
-            ),
+            "message": bundle_space_message(requiredBytes, reserved, needed, free),
         }),
     })
 }
@@ -2542,6 +2617,42 @@ pub async fn check_model_sizes(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_model_subdirs_are_plain_folder_names_and_cover_the_ltx_upscaler() {
+        // Delete searches exactly these folders under models/. Each must be a single
+        // lowercase path segment (no separators, so the join behaves the same on
+        // every platform) and the LTX 2.5 upscaler folder must be among them, or a
+        // file the Get button wrote there could never be deleted from the list.
+        assert!(MODEL_SUBDIRS.contains(&"latent_upscale_models"));
+        for d in MODEL_SUBDIRS {
+            assert!(!d.is_empty() && !d.contains('/') && !d.contains('\\') && !d.contains(".."), "{d}");
+            assert_eq!(*d, d.to_lowercase(), "{d}");
+        }
+        let mut sorted: Vec<&&str> = MODEL_SUBDIRS.iter().collect();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(sorted.len(), MODEL_SUBDIRS.len(), "duplicate entry");
+    }
+
+
+    #[test]
+    fn the_download_limit_is_shared_and_off_at_zero() {
+        let now = Instant::now();
+        let mut slot = None;
+        // 1 MB at 1 MB/s takes a second.
+        assert_eq!(throttle_wait(&mut slot, 1_000_000, 1_000_000, now), Duration::from_secs(1));
+        // A second download in the same instant queues behind the first.
+        assert_eq!(throttle_wait(&mut slot, 1_000_000, 500_000, now), Duration::from_millis(1500));
+        // After an idle stretch the line starts from now, without a burst.
+        let later = now + Duration::from_secs(10);
+        assert_eq!(throttle_wait(&mut slot, 1_000_000, 250_000, later), Duration::from_millis(250));
+        // 0 means no limit and clears the queue.
+        assert_eq!(throttle_wait(&mut slot, 0, 1_000_000, later), Duration::ZERO);
+        assert_eq!(slot, None);
+        assert!(set_download_limit(-1.0).is_err());
+        assert!(set_download_limit(f64::NAN).is_err());
+    }
+
     use super::*;
 
     /// Der Rueckfall, den dieser Test verhindert, ist im Zusammenschluss des
@@ -2692,6 +2803,30 @@ mod tests {
         assert!(space_shortfall(modell, 0, Some(modell + SPACE_RESERVE)).is_none());
         // Exakt die Reserve zu wenig: das ist der Fall, der Windows lahmlegt.
         assert!(space_shortfall(modell, 0, Some(modell)).is_some());
+    }
+
+    #[test]
+    fn a_bundle_keeps_two_gigabytes_free_and_says_how_much_is_missing() {
+        const GIB: u64 = 1024 * 1024 * 1024;
+        // The box, 03.10.2026: 27.1 GB to fetch, 29.6 GB free. That fits, and
+        // it still does with the larger reserve.
+        let ltx: u64 = 29_066_057_328;
+        assert!(space_shortfall_keeping(ltx, 0, Some(31_782_000_000), BUNDLE_SPACE_RESERVE).is_none());
+        // One gigabyte less free and the single file's reserve would still let
+        // it start; the bundle's does not.
+        let free = ltx + GIB + GIB / 2;
+        assert!(space_shortfall(ltx, 0, Some(free)).is_none());
+        let (needed, got) = space_shortfall_keeping(ltx, 0, Some(free), BUNDLE_SPACE_RESERVE).expect("too tight for a bundle");
+        assert_eq!(needed, ltx + 2 * GIB);
+        let message = bundle_space_message(ltx, 0, needed, got);
+        assert!(message.starts_with("Not enough free space: 0.5 GB short."), "{message}");
+        assert!(message.contains("The download is 27.1 GB"), "{message}");
+        assert!(message.contains("keeps 2.0 GB of the drive free"), "{message}");
+        assert!(!message.contains("promised"), "{message}");
+        // Transfers still running are named, because their bytes are why.
+        let busy = bundle_space_message(ltx, 4 * GIB, needed + 4 * GIB, got);
+        assert!(busy.contains("Another 4.0 GB is already promised"), "{busy}");
+        assert!(busy.starts_with("Not enough free space: 4.5 GB short."), "{busy}");
     }
 
     #[test]

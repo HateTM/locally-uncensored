@@ -32,6 +32,7 @@ const searchCivitaiModels = vi.fn(
 const startModelDownload = vi.fn(
   async (_url: string, _subfolder: string, _filename: string) => ({ status: 'ok', id: '1' }),
 )
+const installBundleComplete = vi.fn(async (_name: string) => ({}))
 const setActiveModel = vi.fn(async () => {})
 const fetchModels = vi.fn(async () => {})
 let macHost = false
@@ -44,11 +45,21 @@ vi.mock('../../../api/backend', () => ({
   isMacOS: () => false,
 }))
 vi.mock('../../../api/discover', () => ({
+  lookupFileMeta: () => null,
   searchCivitaiModels: (query: string, type: string, key?: string, host?: string) =>
     searchCivitaiModels(query, type, key, host),
   startModelDownload: (url: string, subfolder: string, filename: string) =>
     startModelDownload(url, subfolder, filename),
   fetchCivitaiPopular: async () => [],
+  // The panel downloads through startCivitaiDownload; for a safetensors LoRA
+  // that is exactly one startModelDownload (api/discover).
+  startCivitaiDownload: (m: { downloadUrl: string; subfolder: string; filename: string }) =>
+    startModelDownload(m.downloadUrl, m.subfolder, m.filename),
+  // The catalog LoRAs above the search (LoraAddons) ask what is on disk and
+  // install through the bundle path.
+  checkBundlesInstalled: async () => ({}),
+  installBundleComplete: (b: { name: string }) => installBundleComplete(b.name),
+  remoteBundleNotice: () => '',
 }))
 vi.mock('../../../api/comfyui', () => ({
   checkComfyConnection: vi.fn(async () => comfyLaeuft),
@@ -322,6 +333,21 @@ describe('Get new unter LoRAs', () => {
     await waitFor(() => expect(startModelDownload).toHaveBeenCalledTimes(1))
     expect(startModelDownload.mock.calls[0][1]).toBe('loras')
     expect(startModelDownload.mock.calls[0][2]).toBe('pixel_art_xl.safetensors')
+  })
+
+  // Discord 2026-10-03 (boromirofgeo): where does the H3 turbo LoRA come from.
+  it('die Katalog-LoRAs stehen ueber der Suche, ein Klick installiert', async () => {
+    render(createElement(ModelManager))
+    fireEvent.click(screen.getByRole('button', { name: /^LoRAs/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^Get new/ }))
+    const liste = await screen.findByTestId('lora-addons')
+    const karte = liste.querySelector('[data-bundle-tile="MiniMax H3 Turbo LoRA · 8 Steps"]') as HTMLElement
+    expect(karte).toBeTruthy()
+    // Above the CivitAI card, not below it.
+    const suche = screen.getByLabelText('Search CivitAI for LoRAs')
+    expect(liste.compareDocumentPosition(suche) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    fireEvent.click(within(karte).getByRole('button', { name: /Get/ }))
+    await waitFor(() => expect(installBundleComplete).toHaveBeenCalledWith('MiniMax H3 Turbo LoRA · 8 Steps'))
   })
 })
 

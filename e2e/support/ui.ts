@@ -54,3 +54,19 @@ export async function oeffneSeitenleiste(page: Page): Promise<void> {
     await expect(page.getByRole('button', { name: 'New Chat' }).first()).toBeVisible({ timeout: 10_000 })
   }
 }
+
+/**
+ * Pick a chat model in the composer's picker, the way a user does.
+ *
+ * Needed in Cloud mode since 3.0.5: the app no longer picks a hosted chat
+ * model by itself, so a spec that wants a conversation there names its model
+ * first, exactly like a new account has to. "New Chat" without a picked model
+ * stays on the landing page.
+ */
+export async function pickChatModel(page: Page, name: RegExp): Promise<void> {
+  const picker = page.getByRole('button', { name: 'Select chat model', exact: true })
+  await expect(picker).toBeVisible({ timeout: 20_000 })
+  await picker.click()
+  await page.getByTestId('model-picker-menu').getByRole('button', { name }).click()
+  await expect(picker).toContainText(name)
+}

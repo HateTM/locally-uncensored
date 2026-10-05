@@ -78,8 +78,8 @@ describe('A2: the paid-provider send cap', () => {
 })
 
 describe('A2: the shipped defaults', () => {
-  it('ships the cap at 64k and the decay switch on', () => {
-    expect(DEFAULT_SETTINGS.codexSendWindowTokens).toBe(64000)
+  it('ships the cap at 32K and the decay switch on', () => {
+    expect(DEFAULT_SETTINGS.codexSendWindowTokens).toBe(32768)
     expect(DEFAULT_SETTINGS.contextDecay).toBe(true)
   })
 })
@@ -125,7 +125,11 @@ describe('A2: the counter divides by the send window', () => {
     expect(src).toMatch(
       /const window = ctx\.sendWindow > 0 \? ctx\.sendWindow : ctx\.contextWindow/,
     )
-    expect(src).toMatch(/const maxTokens = window > 0 \? window : 16384/)
+    expect(src).toMatch(/const maxTokens = window\n/)
+    // No stand-in denominator any more: an unknown window shows no counter
+    // (Gegenprobe 01.10.2026, "18/16K" then "30/32K").
+    expect(src).not.toMatch(/: 16384/)
+    expect(src).toMatch(/if \(ctx\.sendWindow <= 0 && ctx\.contextWindow <= 0\) return null/)
   })
 
   it('feeds the built-request size in as the numerator', () => {
@@ -193,5 +197,15 @@ describe('A2 meter honesty: the tool catalog is part of the request', () => {
     const withoutCatalog = computeContextFill(msgs, { tokens: 732, atMessageCount: 2 })
     const withCatalog = computeContextFill(msgs, { tokens: 732 + 1856, atMessageCount: 2 })
     expect(withCatalog.used - withoutCatalog.used).toBe(1856)
+  })
+})
+
+describe('sendWindowFor: the per-model pick from the context dropdown', () => {
+  it('a pick for this model wins, other models keep the default', async () => {
+    const { sendWindowFor } = await import('../send-window')
+    const settings = { codexSendWindowTokens: 32768, cloudSendWindowByModel: { 'lu-cloud::Kimi': 131072 } }
+    expect(sendWindowFor(settings, 'lu-cloud::Kimi')).toBe(131072)
+    expect(sendWindowFor(settings, 'lu-cloud::GLM')).toBe(32768)
+    expect(sendWindowFor({ codexSendWindowTokens: 32768 }, 'lu-cloud::Kimi')).toBe(32768)
   })
 })

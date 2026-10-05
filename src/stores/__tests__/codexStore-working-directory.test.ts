@@ -235,7 +235,9 @@ describe('R1 DOWNGRADE-KONTRAKT still holds', () => {
     useCodexStore.getState().beginSend()
 
     const raw = persisted()
-    expect(Object.keys(raw.state).sort()).toEqual(['modeByConversation', 'workingDirectory'])
+    // lastPickedMode joined additively on 01.10.2026 (a new conversation keeps
+    // the last Ask/Bypass); removing the folder still adds nothing.
+    expect(Object.keys(raw.state).sort()).toEqual(['lastPickedMode', 'modeByConversation', 'workingDirectory'])
     expect(raw.version ?? 0).toBe(0)
     // Negative control: the threads that were just unpinned stay off the disk.
     expect(raw.state.threads).toBeUndefined()

@@ -125,7 +125,9 @@ describe('every assistant turn records the model that produced it', () => {
 
 describe('the conversation displays read the conversation, not the picker', () => {
   it('THE FIX: the export header names the model of the last answer', () => {
-    expect(src('lib/chat-export.ts')).toMatch(/_Model: \$\{conversationModelOf\(conversation\)\}/)
+    const exportSrc = src('lib/chat-export.ts')
+    expect(exportSrc).toMatch(/const model = conversationModelOf\(conversation\)/)
+    expect(exportSrc).toMatch(/_Model: \$\{model\}/)
   })
 
   it('THE FIX: the composer still knows what the open chat ran on when it differs', () => {

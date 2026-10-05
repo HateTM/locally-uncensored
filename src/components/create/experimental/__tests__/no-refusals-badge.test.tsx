@@ -62,8 +62,10 @@ describe('ModelChip "No refusals" badge', () => {
     render(<ModelChip />)
     const label = screen.getByText('No refusals')
     // The Select renders the current value's badge next to the trigger.
-    expect(label.className).toContain('text-gray-500')
-    expect(label.className).not.toContain('text-purple-600')
+    // The pickers' tag style: held back while the account filters, in the
+    // one accent once it does not.
+    expect(label.className).toContain('lu-picker-tag is-quiet')
+    expect(label.className).not.toContain('is-accent')
   })
 
   it('shows "No refusals" vivid once the account policy is off', () => {
@@ -71,7 +73,7 @@ describe('ModelChip "No refusals" badge', () => {
     setup('wan-2.2-spicy')
     render(<ModelChip />)
     const label = screen.getByText('No refusals')
-    expect(label.className).toContain('text-purple-600')
+    expect(label.className).toContain('lu-picker-tag is-accent')
   })
 
   it('a non-adult cloud model keeps the plain Cloud badge, never "No refusals"', () => {

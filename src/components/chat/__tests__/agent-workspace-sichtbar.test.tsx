@@ -61,14 +61,17 @@ describe('the pill shows where the agent really works', () => {
 })
 
 describe('the refusal reaches the user whatever the model says', () => {
-  it('the agent chat raises the line from the applied call, file_edit included', async () => {
+  it('the agent chat raises the line at the end of the run, from the applied calls', async () => {
     const { readFileSync } = await import('node:fs')
     const { join } = await import('node:path')
     const src = readFileSync(join(__dirname, '..', '..', '..', 'hooks', 'useAgentChat.ts'), 'utf8')
-    expect(src).toContain("isOutsideWorkspaceRefusal(entry.ac.toolName, entry.ac.error)")
+    expect(src).toContain('hasUnrecoveredOutsideRefusal(steps)')
     expect(src).toContain("show('agent-outside-workspace', OUTSIDE_WORKSPACE_NOTICE)")
-    // After applyResultToToolCall, which is what turns file_edit's text into a failure.
-    expect(src.indexOf("isOutsideWorkspaceRefusal(entry.ac.toolName"))
-      .toBeGreaterThan(src.indexOf('applyResultToToolCall(entry.ac, result)'))
+    // In the finally, after every applyResultToToolCall, which is what turns
+    // file_edit's text into a failure.
+    expect(src.indexOf('hasUnrecoveredOutsideRefusal(steps)'))
+      .toBeGreaterThan(src.lastIndexOf('applyResultToToolCall(entry.ac, result)'))
+    expect(src.indexOf('hasUnrecoveredOutsideRefusal(steps)'))
+      .toBeGreaterThan(src.indexOf('    } finally {', src.indexOf('// ── Agent Loop ──')))
   })
 })

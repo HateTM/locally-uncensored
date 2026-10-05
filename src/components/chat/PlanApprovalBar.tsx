@@ -56,9 +56,9 @@ export function PlanApprovalBar({ onApprove }: { onApprove: (instruction: string
 
   return (
     <div className="w-full p-1.5" data-testid="plan-approval-panel">
-      <div className="w-full rounded-md border border-purple-500/25 bg-purple-500/[0.04]">
+      <div className="w-full rounded-md border border-gray-200 dark:border-white/[0.06] bg-white dark:bg-white/[0.02]">
         <div className="flex items-center gap-1.5 px-2 py-1">
-          <ClipboardCheck size={9} className="text-purple-400 shrink-0" />
+          <ClipboardCheck size={9} className="text-lu-accent shrink-0" />
           <span className="text-[0.55rem] uppercase tracking-wider text-gray-500 shrink-0">plan ready</span>
           <button
             onClick={() => setExpanded(!expanded)}
@@ -70,7 +70,7 @@ export function PlanApprovalBar({ onApprove }: { onApprove: (instruction: string
           <button
             onClick={approve}
             title={`Runs the plan in ${CODEX_MODE_SHORT[target]} mode. ${CODEX_MODE_DESCRIPTIONS[target]}`}
-            className="shrink-0 px-2 py-0.5 rounded text-[0.55rem] font-medium bg-purple-500/15 text-purple-600 dark:text-purple-300 hover:bg-purple-500/25 transition-colors"
+            className="shrink-0 px-2 py-0.5 rounded text-[0.55rem] font-medium bg-lu-accent/15 text-lu-accent hover:bg-lu-accent/25 transition-colors"
           >
             {`Approve and run (${CODEX_MODE_SHORT[target]})`}
           </button>

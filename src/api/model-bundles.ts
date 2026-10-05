@@ -1,7 +1,8 @@
 /**
  * Der Download-Katalog: welche Dateien es gibt, wie groß sie sind und in
  * welchen ComfyUI-Ordner sie gehören. Reine Daten plus die Formen, die sie
- * beschreiben — dieses Modul importiert außer einem Typ nichts.
+ * beschreiben. Dieses Modul importiert außer einem Typ nur die reine
+ * Grafikspeicher-Regel aus lib/vram-fit, die selbst nichts importiert.
  *
  * Audit W-T2: Der Katalog stand in api/discover.ts, dem Modul, das Downloads
  * anstößt und ComfyUI nach installierten Dateien fragt. api/comfyui.ts braucht
@@ -20,6 +21,8 @@
  */
 
 import type { ProviderId } from './providers/types'
+import type { ModelTier } from '../lib/render/model-tier'
+import { withVramNeed } from '../lib/vram-fit'
 
 export interface DiscoverModel {
   name: string
@@ -33,6 +36,9 @@ export interface DiscoverModel {
   filename?: string
   subfolder?: string  // ComfyUI models subfolder: checkpoints, diffusion_models, vae, text_encoders
   sizeGB?: number
+  /** Exact byte count, when the catalog knows it to the byte. A file of the same name
+   *  and another size is NOT this file (a mirror's repack), so it never counts as installed. */
+  sizeBytes?: number
   // Vision projector that belongs to `downloadUrl`. A text GGUF carries no
   // image tower: llama.cpp keeps it in a separate mmproj file and only sees
   // images when the server is started with `--mmproj`. When this is set the
@@ -80,10 +86,45 @@ export interface DiscoverModel {
   sha256?: string
 }
 
+// The Qwen-Image 2.1 files that more than one of its bundles load: the
+// official image model (the official bundle and the one with the text encoder
+// without refusals), the official text encoder (the official bundle and Noct
+// Q) and the VAE (all three). One entry each, so the bundles can never drift
+// apart and a machine that has one bundle does not fetch these again for
+// another. Byte counts and SHA-256 are the Hugging Face LFS values of
+// Comfy-Org/Qwen-Image-2.1, read on 2026-10-03.
+const QWEN21_DIFFUSION_MODEL: DiscoverModel = {
+  name: 'Qwen-Image 2.1 (INT8)',
+  description: 'Diffusion model · generates and edits, native 2K, transparent backgrounds.',
+  pulls: '', tags: ['Diffusion Model', '7.26 GB'], updated: 'New',
+  downloadUrl: 'https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/diffusion_models/qwen_image_2.1_int8_convrot.safetensors',
+  filename: 'qwen_image_2.1_int8_convrot.safetensors', subfolder: 'diffusion_models', sizeGB: 6.76,
+  sizeBytes: 7256783064,
+  sha256: 'cb74113cb03faecd79611b01fd7fd642f0aa60d6f0b95086abee214d75eaa57d',
+}
+const QWEN21_TEXT_ENCODER: DiscoverModel = {
+  name: 'Qwen3-VL 8B Text Encoder (INT8)',
+  description: 'Required text encoder for Qwen-Image 2.1 prompt understanding.',
+  pulls: '', tags: ['Text Encoder', '9.35 GB'], updated: 'New',
+  downloadUrl: 'https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/text_encoders/qwen3vl_8b_int8_convrot.safetensors',
+  filename: 'qwen3vl_8b_int8_convrot.safetensors', subfolder: 'text_encoders', sizeGB: 8.71,
+  sizeBytes: 9350798360,
+  sha256: '8bfd0f6e12abf2d2d697ecc888e5e90b0d6741d6708f05799f53afa560452e8f',
+}
+const QWEN21_VAE: DiscoverModel = {
+  name: 'Qwen-Image 2.1 VAE',
+  description: 'Required autoencoder for Qwen-Image 2.1.',
+  pulls: '', tags: ['VAE', '676 MB'], updated: '',
+  downloadUrl: 'https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/vae/qwen_image_2.1_vae_bf16.safetensors',
+  filename: 'qwen_image_2.1_vae_bf16.safetensors', subfolder: 'vae', sizeGB: 0.63,
+  sizeBytes: 675509688,
+  sha256: 'bb21f7473051e1ac368515dd3f2e15cd44d7a11748ee8823e1ddca3e4876b7c9',
+}
+
 // ─── Image Model Bundles ───
 
 export function getImageBundles(): ModelBundle[] {
-  return [
+  return withVramNeed([
     {
       name: 'Juggernaut XL V9 (Photorealistic)',
       description: 'Best photorealistic SDXL checkpoint. All in one. Just install and generate.',
@@ -93,6 +134,7 @@ export function getImageBundles(): ModelBundle[] {
       totalSizeGB: 6.5,
       vramRequired: '6-8 GB',
       workflow: 'sdxl',
+      tier: 'older',
       url: 'https://huggingface.co/RunDiffusion/Juggernaut-XL-v9',
       files: [
         {
@@ -113,6 +155,7 @@ export function getImageBundles(): ModelBundle[] {
       totalSizeGB: 6.5,
       vramRequired: '6-8 GB',
       workflow: 'sdxl',
+      tier: 'older',
       url: 'https://huggingface.co/SG161222/RealVisXL_V5.0',
       files: [
         {
@@ -132,6 +175,7 @@ export function getImageBundles(): ModelBundle[] {
       totalSizeGB: 21,
       vramRequired: '8-10 GB',
       workflow: 'flux',
+      tier: 'older',
       url: 'https://huggingface.co/Comfy-Org/flux1-schnell',
       files: [
         {
@@ -172,6 +216,7 @@ export function getImageBundles(): ModelBundle[] {
       totalSizeGB: 21,
       vramRequired: '8-10 GB',
       workflow: 'flux',
+      tier: 'older',
       url: 'https://huggingface.co/Comfy-Org/flux1-dev',
       files: [
         {
@@ -212,6 +257,7 @@ export function getImageBundles(): ModelBundle[] {
       totalSizeGB: 11.1,
       vramRequired: '8-10 GB',
       workflow: 'flux2',
+      tier: 'best',
       url: 'https://huggingface.co/Comfy-Org/vae-text-encorder-for-flux-klein-4b',
       files: [
         {
@@ -254,7 +300,11 @@ export function getImageBundles(): ModelBundle[] {
       verified: true,
       totalSizeGB: 5.5,
       vramRequired: 'depends on the checkpoint',
+      // A text encoder and a VAE for a checkpoint from elsewhere: an add-on,
+      // so the card says what it is for where the others carry a verdict.
+      addonFor: 'Krea 2 checkpoints',
       workflow: 'krea2',
+      tier: 'best',
       url: 'https://huggingface.co/Comfy-Org/Krea-2',
       files: [
         {
@@ -275,13 +325,14 @@ export function getImageBundles(): ModelBundle[] {
     },
     {
       name: 'Z-Image Turbo (Unfiltered, Fast)',
-      description: 'Explicitly unfiltered image model. 8 to 15 seconds per image. No safety filters. Text to Image and Image to Image.',
+      description: 'Explicitly unfiltered image model. No safety filters. Text to Image and Image to Image.',
       tags: ['Z-Image', 'Unfiltered', 'Fast', '1024px'],
       uncensored: true,
       verified: true,
       totalSizeGB: 19.3,
       vramRequired: '10-16 GB',
       workflow: 'zimage',
+      tier: 'best',
       url: 'https://huggingface.co/Comfy-Org/z_image_turbo',
       files: [
         {
@@ -316,6 +367,7 @@ export function getImageBundles(): ModelBundle[] {
       totalSizeGB: 19.3,
       vramRequired: '10-16 GB',
       workflow: 'zimage',
+      tier: 'best',
       url: 'https://huggingface.co/Comfy-Org/z_image',
       files: [
         {
@@ -353,30 +405,183 @@ export function getImageBundles(): ModelBundle[] {
       // listing. Needs ComfyUI 0.37.0 or newer for the TextEncodeQwenImage21
       // node; an older one is told so before anything is built.
       totalSizeGB: 16.1,
-      vramRequired: '16-24 GB',
+      // Measured on the test box on 03.10.2026 (RTX 3060, 12 GB, ComfyUI
+      // 0.38.0): cold load 46 s, a 768 x 768 picture in 74 s in all (25 steps,
+      // about 1 s each), 1024 x 1024 warm in 85 s, peak 11.5 GB of graphics
+      // memory, no error. The text encoder and the image model load one after
+      // the other, so the card holds one at a time. Not measured below 12 GB.
+      // The figure before this was "16-24 GB" off the model card, and it told
+      // the owner of a 12 GB card "Needs more".
+      vramRequired: '12 GB best, offloads on less',
       workflow: 'qwenimage',
+      tier: 'best',
+      url: 'https://huggingface.co/Comfy-Org/Qwen-Image-2.1',
+      files: [
+        QWEN21_DIFFUSION_MODEL,
+        QWEN21_TEXT_ENCODER,
+        QWEN21_VAE,
+      ],
+    },
+    // Qwen-Image 2.1 with the community text encoder that has its refusals
+    // removed. Read off the model card on 2026-10-03
+    // (pottokao/Qwen-Image-2.1-Text-Encoder-Heretic-int8-convrot, Apache 2.0):
+    // a Heretic directional ablation of Qwen/Qwen3-VL-8B-Instruct, the model
+    // Qwen-Image 2.1 uses as its text encoder, on o_proj and down_proj; the
+    // card states that only the text encoder is modified and that the file
+    // has the tensor names and the INT8 ConvRot layout of the official one,
+    // so the stock CLIPLoader loads it. The image model and the VAE are the
+    // official files, the same entries as in the bundle above, so a machine
+    // that has that bundle fetches only the encoder. Byte count and SHA-256
+    // are the Hugging Face LFS values read on 2026-10-03; the address answers
+    // without a token. Not marked verified: no run on real hardware yet.
+    {
+      name: 'Qwen-Image 2.1 (No Refusals)',
+      description: 'Qwen-Image 2.1 with a text encoder that has its refusal direction removed by the community (Heretic). Only the text encoder differs: the image model and the VAE are the official files, shared with the official bundle and not downloaded twice. Generates from a prompt and edits a reference image from a prompt, no mask needed. With both text encoders installed, pick one under Text encoder in the Expert settings. Image model under the Qwen Research License, non-commercial use: https://huggingface.co/Qwen/Qwen-Image-2.1/blob/main/LICENSE. Text encoder under Apache 2.0.',
+      tags: ['Qwen Image 2.1', 'Image', 'Edit', '1024px'],
+      uncensored: true,
+      // 6.76 + 8.71 + 0.63, in gibibytes like the official bundle. The VRAM
+      // figure is the official bundle's measurement of 03.10.2026: the same
+      // three file sizes on the same lane.
+      totalSizeGB: 16.1,
+      vramRequired: '12 GB best, offloads on less',
+      workflow: 'qwenimage',
+      tier: 'best',
+      url: 'https://huggingface.co/pottokao/Qwen-Image-2.1-Text-Encoder-Heretic-int8-convrot',
+      files: [
+        QWEN21_DIFFUSION_MODEL,
+        {
+          name: 'Qwen3-VL 8B Text Encoder, No Refusals (INT8)',
+          description: 'Text encoder for Qwen-Image 2.1 with the refusal direction removed (Heretic). From pottokao/Qwen-Image-2.1-Text-Encoder-Heretic.',
+          pulls: '', tags: ['Text Encoder', '9.35 GB'], updated: 'New',
+          downloadUrl: 'https://huggingface.co/pottokao/Qwen-Image-2.1-Text-Encoder-Heretic-int8-convrot/resolve/main/qwen3vl_8b_int8_convrot_heretic.safetensors',
+          filename: 'qwen3vl_8b_int8_convrot_heretic.safetensors', subfolder: 'text_encoders', sizeGB: 8.71,
+          sizeBytes: 9350828392,
+          sha256: 'f15ce4275428e04f42cdb59e3a253cb290cae5de99259527f01d3d2e51153653',
+        },
+        QWEN21_VAE,
+      ],
+    },
+    // Noct Q, a community finetune of Qwen-Image 2.1. Read off Hugging Face on
+    // 2026-10-03 (Noctaluna/Noct-Q-Uncensored-Qwen-Image-2.1, not gated, Qwen
+    // Research License): the NOTICE file says "the Qwen-Image-2.1 transformer
+    // weights were modified by noctaluna", the card calls the result
+    // uncensored and says it edits with the same file in ComfyUI's Qwen Image
+    // 2.1 edit template. Unlike the bundle above, the image model itself is
+    // the changed file here. The safetensors header of NoctQ_V4_int8_convrot
+    // carries the same 649 tensor names, shapes and data types as the official
+    // qwen_image_2.1_int8_convrot, so UNETLoader and the whole Qwen-Image 2.1
+    // lane take it as they take the official file.
+    // The card names the official text encoder and the official VAE as its
+    // companions, so those are the two shared entries: the file is published
+    // against that encoder, and a machine with the official bundle fetches
+    // only the image model. Whoever has the encoder without refusals too picks
+    // it under Text encoder like for any Qwen-Image 2.1 run.
+    // Byte count and SHA-256 are the Hugging Face LFS values; the address
+    // answers without a token. Not marked verified: no run on real hardware.
+    {
+      name: 'Noct Q (Qwen-Image 2.1, Unfiltered)',
+      description: 'A community finetune of Qwen-Image 2.1 by Noctaluna, published as an unfiltered edition. The image model itself is changed: its notice says the Qwen-Image 2.1 transformer weights were modified. Generates from a prompt and edits a reference image from a prompt, no mask needed. The text encoder and the VAE are the official files, shared with the official bundle and not downloaded twice. Qwen Research License, non-commercial use: https://huggingface.co/Noctaluna/Noct-Q-Uncensored-Qwen-Image-2.1/blob/main/LICENSE',
+      tags: ['Qwen Image 2.1', 'Unfiltered', 'Image', 'Edit', '1024px'],
+      uncensored: true,
+      // 6.76 + 8.71 + 0.63, in gibibytes like the official bundle. The VRAM
+      // figure is the official bundle's measurement of 03.10.2026: the same
+      // three file sizes on the same lane.
+      totalSizeGB: 16.1,
+      vramRequired: '12 GB best, offloads on less',
+      workflow: 'qwenimage',
+      tier: 'best',
+      url: 'https://huggingface.co/Noctaluna/Noct-Q-Uncensored-Qwen-Image-2.1',
+      files: [
+        {
+          name: 'Noct Q V4 (INT8)',
+          description: 'Diffusion model · Qwen-Image 2.1 with transformer weights modified by Noctaluna.',
+          pulls: '', tags: ['Diffusion Model', '7.26 GB'], updated: 'New',
+          downloadUrl: 'https://huggingface.co/Noctaluna/Noct-Q-Uncensored-Qwen-Image-2.1/resolve/main/NoctQ_V4_int8_convrot.safetensors',
+          filename: 'NoctQ_V4_int8_convrot.safetensors', subfolder: 'diffusion_models', sizeGB: 6.76,
+          sizeBytes: 7256784368,
+          sha256: '4d92d5538253ab36e6a73b056cce5f697950f4303cb9e6686a3198d0ea13f9e8',
+        },
+        QWEN21_TEXT_ENCODER,
+        QWEN21_VAE,
+      ],
+    },
+    // The Qwen-Image 2.1 prompt enhancers (GH #148). Add-ons to the bundle
+    // above, not models of their own: a 9B text model that turns a short
+    // prompt or edit instruction into the long prompt Qwen-Image 2.1 works
+    // best with. One file writes prompts for new pictures (t2i), the other
+    // rewrites edit instructions and reads the pictures (i2i). ComfyUI runs
+    // them with its own TextGenerate node, no node pack; "Improve my prompt"
+    // uses them when they are installed (api/qwen-enhancer.ts), and that needs
+    // ComfyUI 0.37.2 or newer. Byte counts and SHA-256 are the Hugging Face
+    // LFS values read on 2026-10-03; all four addresses answer without a
+    // token. sizeGB is gibibytes, as everywhere in this file. The VRAM figure
+    // is measured on the test box on 03.10.2026 (RTX 3060, 12 GB, ComfyUI
+    // 0.38.0) with the official enhancer: a 768 x 768 picture with the rewrite
+    // in 160 s in all (74 s without it), the rewrite itself about 70 s for a
+    // new picture and about 175 s for an edit, up to 9.7 GB of graphics memory
+    // while it writes, peak 11.4 GB over the run, no error. The node pack
+    // author's "16 GB recommended" told the owner of that card "Needs more".
+    // The file without refusals has the same size and layout. The tier is the
+    // family's, as for every add-on (local-model-tier.test.ts).
+    {
+      name: 'Qwen-Image 2.1 Prompt Enhancer (Official)',
+      description: 'Add-on for Qwen-Image 2.1. Turns a short prompt or edit instruction into the long, detailed prompt the model works best with, and looks at your pictures when you edit. It runs before the image model and makes room for it afterwards. Made to play it safe: it can soften or refuse an instruction. Turn it on with Improve my prompt in the advanced settings. Qwen Research License, non-commercial use: https://huggingface.co/Qwen/Qwen-Image-2.1-PE-T2I/blob/main/LICENSE',
+      tags: ['Qwen Image 2.1', 'Prompt Enhancer', 'Addon'],
+      uncensored: false,
+      totalSizeGB: 17.64,
+      vramRequired: '12 GB best, offloads on less',
+      workflow: 'qwenimage',
+      tier: 'best',
       url: 'https://huggingface.co/Comfy-Org/Qwen-Image-2.1',
       files: [
         {
-          name: 'Qwen-Image 2.1 (INT8)',
-          description: 'Diffusion model · generates and edits, native 2K, transparent backgrounds.',
-          pulls: '', tags: ['Diffusion Model', '7.26 GB'], updated: 'New',
-          downloadUrl: 'https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/diffusion_models/qwen_image_2.1_int8_convrot.safetensors',
-          filename: 'qwen_image_2.1_int8_convrot.safetensors', subfolder: 'diffusion_models', sizeGB: 6.76,
+          name: 'Qwen Prompt Enhancer, Image (INT8)',
+          description: 'Writes the prompt for a new picture.',
+          pulls: '', tags: ['Prompt Enhancer', '9.47 GB'], updated: 'New',
+          downloadUrl: 'https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/text_encoders/qwen3.5_9b_qwen_image_2.1_pe_t2i.int8_convrot.safetensors',
+          filename: 'qwen3.5_9b_qwen_image_2.1_pe_t2i.int8_convrot.safetensors', subfolder: 'text_encoders', sizeGB: 8.82,
+          sizeBytes: 9471072252,
+          sha256: '9182abae56fe05459840a86d22abd21f972061c92fce032630af680c8c5178d3',
         },
         {
-          name: 'Qwen3-VL 8B Text Encoder (INT8)',
-          description: 'Required text encoder for Qwen-Image 2.1 prompt understanding.',
-          pulls: '', tags: ['Text Encoder', '9.35 GB'], updated: 'New',
-          downloadUrl: 'https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/text_encoders/qwen3vl_8b_int8_convrot.safetensors',
-          filename: 'qwen3vl_8b_int8_convrot.safetensors', subfolder: 'text_encoders', sizeGB: 8.71,
+          name: 'Qwen Prompt Enhancer, Edit (INT8)',
+          description: 'Rewrites an edit instruction and reads your pictures.',
+          pulls: '', tags: ['Prompt Enhancer', '9.47 GB'], updated: 'New',
+          downloadUrl: 'https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/text_encoders/qwen3.5_9b_qwen_image_2.1_pe_i2i.int8_convrot.safetensors',
+          filename: 'qwen3.5_9b_qwen_image_2.1_pe_i2i.int8_convrot.safetensors', subfolder: 'text_encoders', sizeGB: 8.82,
+          sizeBytes: 9471072252,
+          sha256: '32707d01b427e488af252b95c551989aad59f9fec611a694f5db6bde7f0f1f6c',
+        },
+      ],
+    },
+    {
+      name: 'Qwen-Image 2.1 Prompt Enhancer (No Refusals)',
+      description: 'Add-on for Qwen-Image 2.1. The same prompt enhancer with its refusals taken out by the community (Heretic), so your prompt and your edit instruction stay what you wrote. Turns a short prompt into a long, detailed one and looks at your pictures when you edit. It runs before the image model and makes room for it afterwards. Turn it on with Improve my prompt in the advanced settings. Qwen Research License, non-commercial use: https://huggingface.co/Adahm/PE-Heretic-INT8-ConvRot-for-Qwen-Image-2.1/blob/main/LICENSE',
+      tags: ['Qwen Image 2.1', 'Prompt Enhancer', 'Addon'],
+      uncensored: true,
+      totalSizeGB: 17.64,
+      vramRequired: '12 GB best, offloads on less',
+      workflow: 'qwenimage',
+      tier: 'best',
+      url: 'https://huggingface.co/Adahm/PE-Heretic-INT8-ConvRot-for-Qwen-Image-2.1',
+      files: [
+        {
+          name: 'Qwen Prompt Enhancer, Image, No Refusals (INT8)',
+          description: 'Writes the prompt for a new picture. From pottokao/Qwen-Image-2.1-PE-T2I-Heretic.',
+          pulls: '', tags: ['Prompt Enhancer', '9.47 GB'], updated: 'New',
+          downloadUrl: 'https://huggingface.co/Adahm/PE-Heretic-INT8-ConvRot-for-Qwen-Image-2.1/resolve/main/qwen3.5_9b_qwen_image_2.1_pe_t2i_heretic.int8_convrot.safetensors',
+          filename: 'qwen3.5_9b_qwen_image_2.1_pe_t2i_heretic.int8_convrot.safetensors', subfolder: 'text_encoders', sizeGB: 8.82,
+          sizeBytes: 9471072252,
+          sha256: '91b9ba42539fb662775181eabce845befe2c1441658a736fadf0033dd799d8f3',
         },
         {
-          name: 'Qwen-Image 2.1 VAE',
-          description: 'Required autoencoder for Qwen-Image 2.1.',
-          pulls: '', tags: ['VAE', '676 MB'], updated: '',
-          downloadUrl: 'https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/vae/qwen_image_2.1_vae_bf16.safetensors',
-          filename: 'qwen_image_2.1_vae_bf16.safetensors', subfolder: 'vae', sizeGB: 0.63,
+          name: 'Qwen Prompt Enhancer, Edit, No Refusals (INT8)',
+          description: 'Rewrites an edit instruction and reads your pictures. From darrellbest/Qwen-Image-2.1-PE-I2I-Heretic.',
+          pulls: '', tags: ['Prompt Enhancer', '9.47 GB'], updated: 'New',
+          downloadUrl: 'https://huggingface.co/Adahm/PE-Heretic-INT8-ConvRot-for-Qwen-Image-2.1/resolve/main/qwen3.5_9b_qwen_image_2.1_pe_i2i_heretic.int8_convrot.safetensors',
+          filename: 'qwen3.5_9b_qwen_image_2.1_pe_i2i_heretic.int8_convrot.safetensors', subfolder: 'text_encoders', sizeGB: 8.82,
+          sizeBytes: 9471072252,
+          sha256: '979b9063dd16645f0191c9ff55aa5059105bfe84096d96a817a85deed22231f0',
         },
       ],
     },
@@ -389,6 +594,7 @@ export function getImageBundles(): ModelBundle[] {
       totalSizeGB: 6.5,
       vramRequired: '6-8 GB',
       workflow: 'sdxl',
+      tier: 'older',
       url: 'https://huggingface.co/Lykon/dreamshaper-xl-v2-turbo',
       files: [
         {
@@ -409,6 +615,7 @@ export function getImageBundles(): ModelBundle[] {
       totalSizeGB: 28.9,
       vramRequired: '24 GB',
       workflow: 'ernie_image',
+      tier: 'best',
       url: 'https://huggingface.co/Comfy-Org/ERNIE-Image',
       files: [
         {
@@ -450,6 +657,7 @@ export function getImageBundles(): ModelBundle[] {
       totalSizeGB: 28.9,
       vramRequired: '24 GB',
       workflow: 'ernie_image',
+      tier: 'best',
       url: 'https://huggingface.co/Comfy-Org/ERNIE-Image',
       files: [
         {
@@ -489,7 +697,9 @@ export function getImageBundles(): ModelBundle[] {
       verified: true,
       totalSizeGB: 0.33,
       vramRequired: 'any',
+      addonFor: 'SDXL models',
       workflow: 'sdxl',
+      tier: 'older',
       url: 'https://huggingface.co/madebyollin/sdxl-vae-fp16-fix',
       files: [
         {
@@ -506,21 +716,28 @@ export function getImageBundles(): ModelBundle[] {
       description: 'nerijs Pixel Art XL · turns any SDXL model into crisp pixel art. A clearly visible style LoRA. After download, pick it under Advanced → LoRA and raise the strength.',
       tags: ['SDXL', 'LoRA', 'Style'],
       verified: true,
-      totalSizeGB: 0.17,
+      // 170 543 052 bytes on Hugging Face (read 03.10.2026), which is 162.6 MB
+      // the way the app counts (sizeGB is in gibibytes, see Qwen-Image 2.1
+      // above). 0.17 was the decimal figure and showed as 174.1 MB on the
+      // card beside 162.6 MB under Installed.
+      totalSizeGB: 0.1588,
       vramRequired: 'any',
+      addonFor: 'SDXL models',
       workflow: 'sdxl',
+      tier: 'older',
       url: 'https://huggingface.co/nerijs/pixel-art-xl',
       files: [
         {
           name: 'Pixel Art XL LoRA',
           description: 'SDXL pixel art style LoRA → models/loras.',
-          pulls: '', tags: ['LoRA', '170 MB'], updated: '',
+          pulls: '', tags: ['LoRA', '163 MB'], updated: '',
           downloadUrl: 'https://huggingface.co/nerijs/pixel-art-xl/resolve/main/pixel-art-xl.safetensors',
-          filename: 'pixel-art-xl.safetensors', subfolder: 'loras', sizeGB: 0.17,
+          filename: 'pixel-art-xl.safetensors', subfolder: 'loras', sizeGB: 0.1588,
+          sha256: '4234637cb80c998f41e348e6a6cb6bc20d8d038b2b0f256b6129b3b5e353eef7',
         },
       ],
     },
-  ]
+  ])
 }
 
 // Flat list for backwards compat
@@ -546,7 +763,22 @@ export interface CustomNodeDef {
   name: string
 }
 
-export const CUSTOM_NODE_REGISTRY: Record<string, { repo: string; name: string; requiredNodes: string[] }> = {
+export interface CustomNodeEntry {
+  repo: string
+  name: string
+  requiredNodes: string[]
+  /**
+   * A tested commit of the pack. The installer puts the checkout on exactly
+   * this commit (fresh clone or one that is already there) instead of the
+   * head of the repository. Only for a pack whose head was seen broken, with
+   * the date and the reason next to it. To release a pin, delete the field:
+   * the next install goes back to the default branch and pulls
+   * (custom_nodes.rs, return_to_default_branch).
+   */
+  commit?: string
+}
+
+export const CUSTOM_NODE_REGISTRY: Record<string, CustomNodeEntry> = {
   'animatediff-evolved': {
     repo: 'https://github.com/Kosinkadink/ComfyUI-AnimateDiff-Evolved',
     name: 'ComfyUI-AnimateDiff-Evolved',
@@ -589,10 +821,21 @@ export const CUSTOM_NODE_REGISTRY: Record<string, { repo: string; name: string; 
   // for · and auto-downloads its cutout model (BiRefNet / RMBG-2.0, ~300 MB)
   // into ComfyUI/models/RMBG on first use. So the one-click action only needs to
   // install the node; the model lands on the first cutout run.
+  //
+  // Pinned on 03.10.2026 to 58f1947a (21.08.2026, pack version 3.1.0), the last
+  // commit before the pack's 3.2.0 uploads of 30.09.2026. From 54e62337 on,
+  // the pack's own loader dies on the first node file that fails to import
+  // (its error line names a variable that does not exist), and on Windows one
+  // always fails: the SAM3 node imports triton, which exists for Linux only.
+  // ComfyUI then reports IMPORT FAILED for the whole pack and no RMBG node.
+  // Measured on the Windows box: head 229529e0 does not load, 58f1947a lists
+  // RMBG. Release the pin (delete `commit`) once the pack's head loads again
+  // on Windows with no triton installed.
   'rmbg': {
     repo: 'https://github.com/1038lab/ComfyUI-RMBG',
     name: 'ComfyUI-RMBG',
     requiredNodes: ['RMBG'],
+    commit: '58f1947a11567a9f8b707223185570850e773856',
   },
   // GGUF quant loader (city96). Lets the 2.5.8 lanes offer Q4 quants of the
   // 14B Wan models (S2V / Animate / NSFW finetunes) — the difference between
@@ -620,7 +863,31 @@ export interface ModelBundle {
   tags: string[]
   totalSizeGB: number
   vramRequired: string
+  /**
+   * The same requirement as numbers, stamped on every entry by the one rule in
+   * lib/vram-fit (never written by hand, so no entry can disagree with its own
+   * text): from `vramMinGB` the model runs, from `vramComfortGB` it runs
+   * without moving weights out of graphics memory. Null when the text names no
+   * number, which is the companion files whose need is the checkpoint's.
+   */
+  vramMinGB: number | null
+  vramComfortGB: number | null
+  /** See lib/vram-fit NeedSource: the authors' own comfortable value, for a
+   *  model built to run mostly outside graphics memory. */
+  vramComfortStatedGB?: number
+  /** Set on an add-on (a LoRA, a VAE): what it belongs to. An add-on loads
+   *  into its model's memory, so its card carries no verdict of its own and
+   *  says what it is for instead ("For MiniMax H3"). */
+  addonFor?: string
   workflow: string
+  /**
+   * How the pickers order this bundle (Oct 2026, David). 'best' is today's open
+   * weight state of the art and stands on top with a small mark, 'older' is
+   * collected under "Older models", everything else keeps its usual place.
+   * Nothing is hidden by it. Every local model is an open weight, so there is
+   * no weights field here (the cloud catalog carries one).
+   */
+  tier: ModelTier
   files: DiscoverModel[]
   url?: string
   hot?: boolean
@@ -630,8 +897,43 @@ export interface ModelBundle {
   verified?: boolean      // E2E tested and confirmed working
 }
 
+// The three files MiniMax H3 and FastH3 share: the text encoder and both
+// autoencoders. One definition, so an install of either bundle satisfies the
+// other and the two can never drift apart.
+const H3_SHARED_FILES: DiscoverModel[] = [
+    {
+      name: 'Qwen3-VL 32B Text Encoder (NVFP4)',
+      description: 'Required text encoder for MiniMax H3. Runs on any NVIDIA card, not only Blackwell.',
+      pulls: '', tags: ['Text Encoder', '15.7 GB'], updated: 'New',
+      downloadUrl: 'https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors',
+      filename: 'qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors', subfolder: 'text_encoders', sizeGB: 15.7,
+    },
+    {
+      name: 'MiniMax H3 Video VAE',
+      description: 'Required, decodes the picture.',
+      pulls: '', tags: ['VAE', '2.8 GB'], updated: 'New',
+      downloadUrl: 'https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/vae/minimax_h3_video_vae_int8_convrot.safetensors',
+      filename: 'minimax_h3_video_vae_int8_convrot.safetensors', subfolder: 'vae', sizeGB: 2.8,
+    },
+    {
+      name: 'MiniMax H3 Audio VAE',
+      description: 'Required, decodes the sound.',
+      pulls: '', tags: ['VAE', '605 MB'], updated: 'New',
+      downloadUrl: 'https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/vae/minimax_h3_audio_vae_fp32.safetensors',
+      filename: 'minimax_h3_audio_vae_fp32.safetensors', subfolder: 'vae', sizeGB: 0.6,
+    },
+]
+
+/** The catalog's LoRA add-ons: bundles that are nothing but files for
+ *  models/loras (Pixel Art XL, the MiniMax H3 turbo LoRA). Models, LoRAs,
+ *  Get new lists them, so a LoRA is found where LoRAs are. */
+export function getLoraAddonBundles(): ModelBundle[] {
+  return [...getImageBundles(), ...getVideoBundles()]
+    .filter((b) => b.files.length > 0 && b.files.every((f) => f.subfolder === 'loras'))
+}
+
 export function getVideoBundles(): ModelBundle[] {
-  return [
+  return withVramNeed([
     {
       name: 'Wan 2.1 · 1.3B (Lightweight)',
       description: 'Best for 8 to 10 GB VRAM GPUs. Generates 480p video. Fast and lightweight.',
@@ -641,6 +943,7 @@ export function getVideoBundles(): ModelBundle[] {
       totalSizeGB: 9.2,
       vramRequired: '8-10 GB',
       workflow: 'wan',
+      tier: 'older',
       url: 'https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged',
       files: [
         {
@@ -675,6 +978,7 @@ export function getVideoBundles(): ModelBundle[] {
       totalSizeGB: 20.5,
       vramRequired: '12+ GB',
       workflow: 'wan',
+      tier: 'older',
       url: 'https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged',
       files: [
         {
@@ -711,6 +1015,7 @@ export function getVideoBundles(): ModelBundle[] {
       totalSizeGB: 16.9,
       vramRequired: '12+ GB',
       workflow: 'wan22',
+      tier: 'standard',
       url: 'https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged',
       files: [
         {
@@ -745,6 +1050,7 @@ export function getVideoBundles(): ModelBundle[] {
       totalSizeGB: 19.3,
       vramRequired: '12+ GB',
       workflow: 'hunyuan',
+      tier: 'older',
       url: 'https://huggingface.co/Comfy-Org/HunyuanVideo_1.5_repackaged',
       files: [
         {
@@ -781,13 +1087,14 @@ export function getVideoBundles(): ModelBundle[] {
       ],
     },
     {
-      name: 'LTX Video 2.3 · 22B FP8 (Latest)',
+      name: 'LTX Video 2.3 · 22B FP8',
       description: 'Lightricks LTX Video 2.3 · fast inference, high quality. Uses Gemma 3 12B text encoder. Distilled for speed.',
       tags: ['LTX 2.3', '22B', 'Quality'],
       verified: true,
       totalSizeGB: 40,
       vramRequired: '16+ GB',
       workflow: 'ltx',
+      tier: 'older',
       url: 'https://huggingface.co/Lightricks/LTX-2.3-fp8',
       files: [
         {
@@ -809,6 +1116,222 @@ export function getVideoBundles(): ModelBundle[] {
         },
       ],
     },
+    // MiniMax H3 (Discord, throwaway 2026-09-26). The files and the int8
+    // tier are the official Comfy-Org templates' (video_minimax_h3_t2v/_i2v);
+    // sizes read from Hugging Face on 2026-10-01. The 21 GB model alone sets
+    // the VRAM line.
+    {
+      name: 'MiniMax H3 · Video with Sound',
+      description: 'Video with its own sound from a prompt or a first frame, up to about 15 seconds. Fastest way: add the MiniMax H3 Turbo LoRA, 8 steps instead of 20.',
+      tags: ['MiniMax H3', 'Audio', '768p'],
+      verified: true,
+      totalSizeGB: 40.1,
+      vramRequired: '24+ GB',
+      workflow: 'minimaxh3',
+      tier: 'best',
+      url: 'https://huggingface.co/Comfy-Org/MiniMax-H3',
+      files: [
+        {
+          name: 'MiniMax H3 fl2va (int8)',
+          description: 'Main model, text or first frame to video with sound.',
+          pulls: '', tags: ['Model', '21 GB'], updated: 'New',
+          downloadUrl: 'https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors',
+          filename: 'minimax_h3_fl2va_pruned_int8_convrot.safetensors', subfolder: 'diffusion_models', sizeGB: 21.0,
+        },
+        ...H3_SHARED_FILES,
+      ],
+    },
+    // The 8 step turbo LoRA for MiniMax H3 (Discord 2026-10-03, boromirofgeo:
+    // "how do I get the turbo lora into the stack"). The file is the one the
+    // official templates video_minimax_h3_t2v and _i2v load with
+    // LoraLoaderModelOnly at strength 1. Free to download, read from the
+    // Hugging Face tree API and an anonymous HEAD on 2026-10-03: 1956193000
+    // bytes, and lightx2v/Minimax-h3-Turbo (the origin) states the same digest.
+    // It lands in models/loras, the LoRA stack lists it, and the H3 builder
+    // reads the 8 steps from its name.
+    {
+      name: 'MiniMax H3 Turbo LoRA · 8 Steps',
+      description: 'Add-on for MiniMax H3: 8 steps instead of 20, from a prompt or a first frame. After the download, turn it on in Create, Advanced settings, Expert, LoRA stack.',
+      tags: ['MiniMax H3', 'LoRA', 'Addon'],
+      totalSizeGB: 1.82,
+      // Sized like the model it needs next to it, for the sort and the size
+      // filters. The card itself shows no verdict for an add-on (addonFor):
+      // "Needs more than your 12 GB card" under a 1.82 GB file read as a
+      // statement about the LoRA.
+      vramRequired: '24+ GB',
+      addonFor: 'MiniMax H3',
+      workflow: 'minimaxh3',
+      tier: 'best',
+      url: 'https://huggingface.co/Comfy-Org/MiniMax-H3',
+      files: [
+        {
+          name: 'MiniMax H3 Turbo LoRA (8 steps)',
+          description: 'Step distillation LoRA for the MiniMax H3 fl2va model → models/loras.',
+          pulls: '', tags: ['LoRA', '1.82 GB'], updated: 'New',
+          downloadUrl: 'https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/loras/minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors',
+          filename: 'minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors', subfolder: 'loras', sizeGB: 1.82,
+          sizeBytes: 1956193000,
+          sha256: '2339acdf19bfe123f46b971ea35d367a84adb85de43627e1eceafa5a5b2b111e',
+        },
+      ],
+    },
+    // FastH3 (FastVideo, 8 step distilled MiniMax H3). A full checkpoint of its
+    // own, not a LoRA: FastVideo/FastVideo-FastH3-Comfy ships the distilled
+    // weights as diffusion_models/fastvideo_fasth3_8step_v2_pruned_*.safetensors.
+    // The official Comfy-Org template (video_fastvideo_fasth3_t2v) loads it with
+    // the same Qwen3-VL encoder and the same two VAEs as MiniMax H3, so those
+    // three files are shared. Text to video only: the model card says the
+    // first/last frame and reference tasks were not distilled. Sizes and
+    // digests read from the Hugging Face tree API on 2026-10-02. Needs ComfyUI
+    // 0.35.0 or newer (BlockSparseAttention, comfy_extras/nodes_sparse_attention.py).
+    {
+      name: 'FastH3 · MiniMax H3 in 8 Steps',
+      description: 'The quick MiniMax H3: video with its own sound from a prompt in 8 steps. Text to video only. Shares its text encoder and VAEs with MiniMax H3.',
+      tags: ['FastH3', 'Audio', 'Fast'],
+      totalSizeGB: 39.7,
+      vramRequired: '24+ GB',
+      workflow: 'minimaxh3',
+      tier: 'best',
+      url: 'https://huggingface.co/FastVideo/FastVideo-FastH3-Comfy',
+      files: [
+        {
+          name: 'FastH3 8 Step V2 (int8)',
+          description: 'Main model, distilled to 8 steps. Text to video with sound.',
+          pulls: '', tags: ['Model', '20.6 GB'], updated: 'New',
+          downloadUrl: 'https://huggingface.co/FastVideo/FastVideo-FastH3-Comfy/resolve/main/diffusion_models/fastvideo_fasth3_8step_v2_pruned_int8_convrot.safetensors',
+          filename: 'fastvideo_fasth3_8step_v2_pruned_int8_convrot.safetensors', subfolder: 'diffusion_models', sizeGB: 20.61,
+          sha256: '0922785978dc9bfe1adf27d8b291b0ca763f9f165f882e6cb297c72fbb6deda8',
+        },
+        ...H3_SHARED_FILES,
+      ],
+    },
+    // LTX 2.5 (Lightricks, open weights since 11.08.2026). Every file is the one
+    // the official Comfy-Org template video_ltx2_5_t2v/_i2v loads. The official
+    // repo Lightricks/LTX-2.5 is GATED (a download needs a Hugging Face token a
+    // customer does not have), so the files come from FREE mirrors, checked on
+    // 2026-10-02 with an anonymous HEAD (HTTP 200 on every file). Byte counts
+    // equal the official repo's, and the SHA-256 of each file agrees between
+    // independent mirrors (comfyicu/LTX-2.5, deAPI-ai/ltx2-5-22b-dist-int8,
+    // osantinello/LTX25_Models). comfyicu's copy of the Gemma encoder differs
+    // from the official byte count, so the encoder comes from deAPI-ai. The small
+    // variant is a GGUF Q4_K_M of the distilled transformer (agosh/LTX-2.5-Comfy-GGUF),
+    // loaded through ComfyUI-GGUF. The model patch for 2.5 reached ComfyUI in
+    // 0.32.0 (PR 15499), and the graph needs LTXVDualCFGGuider from the same release.
+    {
+      name: 'LTX 2.5 · Video with Sound',
+      description: 'Video with its own sound from a prompt or a first frame, with cuts between connected shots. Fast distilled version, full quality.',
+      tags: ['LTX 2.5', 'Audio', 'Multishot'],
+      totalSizeGB: 37.0,
+      vramRequired: '24+ GB',
+      workflow: 'ltx25',
+      tier: 'best',
+      url: 'https://huggingface.co/Lightricks/LTX-2.5',
+      files: [
+        {
+          name: 'LTX 2.5 22B Distilled (int8)',
+          description: 'Main video model, distilled for fast renders. Video and sound in one pass.',
+          pulls: '', tags: ['Model', '21.5 GB'], updated: 'New',
+          downloadUrl: 'https://huggingface.co/comfyicu/LTX-2.5/resolve/main/diffusion_models/ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors',
+          filename: 'ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors', subfolder: 'diffusion_models', sizeGB: 20.03,
+          sizeBytes: 21504034224,
+          sha256: 'c4279eeff115cbeaca494bd2183e7d768c38fe85a184dc6afbb7159157c44334',
+        },
+        {
+          name: 'Gemma 4 12B Text Encoder (LTX 2.5, int8)',
+          description: 'Required text encoder for LTX 2.5.',
+          pulls: '', tags: ['Text Encoder', '15.4 GB'], updated: 'New',
+          downloadUrl: 'https://huggingface.co/deAPI-ai/ltx2-5-22b-dist-int8/resolve/main/text_encoders/gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors',
+          filename: 'gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors', subfolder: 'text_encoders', sizeGB: 14.32,
+          sizeBytes: 15372969374,
+          sha256: '6ce688a0aa98a5fa36a9f1e6c3f42152a498cc2b53ee8c15674c64244f91487f',
+        },
+        {
+          name: 'LTX 2.5 Video VAE',
+          description: 'Required, decodes the picture.',
+          pulls: '', tags: ['VAE', '1.5 GB'], updated: 'New',
+          downloadUrl: 'https://huggingface.co/comfyicu/LTX-2.5/resolve/main/vae/ltx-2.5-video-vae-bf16.safetensors',
+          filename: 'ltx-2.5-video-vae-bf16.safetensors', subfolder: 'vae', sizeGB: 1.37,
+          sizeBytes: 1472223346,
+          sha256: '847e14ca7f3355debca0cea4eaa24ac0fbcdf0061da054ac89ca638a869ddba3',
+        },
+        {
+          name: 'LTX 2.5 Audio VAE',
+          description: 'Required, decodes the sound.',
+          pulls: '', tags: ['VAE', '365 MB'], updated: 'New',
+          downloadUrl: 'https://huggingface.co/comfyicu/LTX-2.5/resolve/main/vae/ltx-2.5-audio-vae-bf16.safetensors',
+          filename: 'ltx-2.5-audio-vae-bf16.safetensors', subfolder: 'vae', sizeGB: 0.34,
+          sizeBytes: 364866540,
+          sha256: 'c52733d37f6a7fb7949c3dc0fb468c6cb2169e4d836983a73babb9f0d54837a5',
+        },
+        {
+          name: 'LTX 2.5 Latent Upscaler x2',
+          description: 'Required, sharpens the picture in the second pass.',
+          pulls: '', tags: ['Upscaler', '996 MB'], updated: 'New',
+          downloadUrl: 'https://huggingface.co/comfyicu/LTX-2.5/resolve/main/latent_upscale_models/ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors',
+          filename: 'ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors', subfolder: 'latent_upscale_models', sizeGB: 0.93,
+          sizeBytes: 995778752,
+          sha256: 'eb5a71fe4068ee87ccdb1c3aa635e547ca76bd2d30ae20ae889f2c325c0677e8',
+        },
+      ],
+    },
+    {
+      name: 'LTX 2.5 · Small (GGUF Q4)',
+      description: 'The same video with sound model in a smaller 4 bit version for 16 GB graphics cards. The ComfyUI-GGUF node pack it needs is installed with it. Slightly softer detail than the full version.',
+      tags: ['LTX 2.5', 'Audio', 'GGUF'],
+      totalSizeGB: 28.4,
+      vramRequired: '16 GB',
+      workflow: 'ltx25',
+      tier: 'best',
+      customNodes: ['gguf'],
+      url: 'https://huggingface.co/agosh/LTX-2.5-Comfy-GGUF',
+      files: [
+        {
+          name: 'LTX 2.5 22B Distilled (GGUF Q4_K_M)',
+          description: 'Main video model, 4 bit. Video and sound in one pass.',
+          pulls: '', tags: ['Model', '12.2 GB', 'GGUF'], updated: 'New',
+          downloadUrl: 'https://huggingface.co/agosh/LTX-2.5-Comfy-GGUF/resolve/main/ltx-2.5-22b-distilled-transformer-bf16-Q4_K_M.gguf',
+          filename: 'ltx-2.5-22b-distilled-transformer-bf16-Q4_K_M.gguf', subfolder: 'diffusion_models', sizeGB: 11.38,
+          sizeBytes: 12220864608,
+          sha256: '0b1bca38240087117bb0d1379fdaf1bcdb53c40e63f5f9bcb1a7e793f9520cfb',
+        },
+        {
+          name: 'Gemma 4 12B Text Encoder (LTX 2.5, int8)',
+          description: 'Required text encoder for LTX 2.5.',
+          pulls: '', tags: ['Text Encoder', '15.4 GB'], updated: 'New',
+          downloadUrl: 'https://huggingface.co/deAPI-ai/ltx2-5-22b-dist-int8/resolve/main/text_encoders/gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors',
+          filename: 'gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors', subfolder: 'text_encoders', sizeGB: 14.32,
+          sizeBytes: 15372969374,
+          sha256: '6ce688a0aa98a5fa36a9f1e6c3f42152a498cc2b53ee8c15674c64244f91487f',
+        },
+        {
+          name: 'LTX 2.5 Video VAE',
+          description: 'Required, decodes the picture.',
+          pulls: '', tags: ['VAE', '1.5 GB'], updated: 'New',
+          downloadUrl: 'https://huggingface.co/comfyicu/LTX-2.5/resolve/main/vae/ltx-2.5-video-vae-bf16.safetensors',
+          filename: 'ltx-2.5-video-vae-bf16.safetensors', subfolder: 'vae', sizeGB: 1.37,
+          sizeBytes: 1472223346,
+          sha256: '847e14ca7f3355debca0cea4eaa24ac0fbcdf0061da054ac89ca638a869ddba3',
+        },
+        {
+          name: 'LTX 2.5 Audio VAE',
+          description: 'Required, decodes the sound.',
+          pulls: '', tags: ['VAE', '365 MB'], updated: 'New',
+          downloadUrl: 'https://huggingface.co/comfyicu/LTX-2.5/resolve/main/vae/ltx-2.5-audio-vae-bf16.safetensors',
+          filename: 'ltx-2.5-audio-vae-bf16.safetensors', subfolder: 'vae', sizeGB: 0.34,
+          sizeBytes: 364866540,
+          sha256: 'c52733d37f6a7fb7949c3dc0fb468c6cb2169e4d836983a73babb9f0d54837a5',
+        },
+        {
+          name: 'LTX 2.5 Latent Upscaler x2',
+          description: 'Required, sharpens the picture in the second pass.',
+          pulls: '', tags: ['Upscaler', '996 MB'], updated: 'New',
+          downloadUrl: 'https://huggingface.co/comfyicu/LTX-2.5/resolve/main/latent_upscale_models/ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors',
+          filename: 'ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors', subfolder: 'latent_upscale_models', sizeGB: 0.93,
+          sizeBytes: 995778752,
+          sha256: 'eb5a71fe4068ee87ccdb1c3aa635e547ca76bd2d30ae20ae889f2c325c0677e8',
+        },
+      ],
+    },
     // ─── NEW VIDEO BUNDLES ───
     {
       name: 'AnimateDiff Lightning',
@@ -818,6 +1341,7 @@ export function getVideoBundles(): ModelBundle[] {
       totalSizeGB: 2.8,
       vramRequired: '6-8 GB',
       workflow: 'animatediff',
+      tier: 'older',
       customNodes: ['animatediff-evolved'],
       url: 'https://huggingface.co/ByteDance/AnimateDiff-Lightning',
       files: [
@@ -844,6 +1368,7 @@ export function getVideoBundles(): ModelBundle[] {
       totalSizeGB: 3.6,
       vramRequired: '6-8 GB',
       workflow: 'animatediff',
+      tier: 'older',
       customNodes: ['animatediff-evolved'],
       url: 'https://huggingface.co/guoyww/animatediff',
       files: [
@@ -881,7 +1406,15 @@ export function getVideoBundles(): ModelBundle[] {
       verified: true,
       totalSizeGB: 27.0,
       vramRequired: '6-8 GB',
+      // FramePack is built to run with its weights outside graphics memory: it
+      // predicts the next frame section from a fixed length context and moves
+      // the 15.3 GB model through the card piece by piece. Its authors state
+      // 6 GB as enough (github.com/lllyasviel/FramePack, Requirements). The
+      // largest-weight rule read "tight" on every card below 16.8 GB, against
+      // the bundle's own description, so the stated value stands here.
+      vramComfortStatedGB: 8,
       workflow: 'framepack',
+      tier: 'older',
       i2v: true,
       customNodes: ['framepack-wrapper'],
       url: 'https://huggingface.co/lllyasviel/FramePack_F1_I2V_HY_20250503',
@@ -931,6 +1464,7 @@ export function getVideoBundles(): ModelBundle[] {
       totalSizeGB: 4.8,
       vramRequired: '12+ GB',
       workflow: 'svd',
+      tier: 'older',
       i2v: true,
       url: 'https://huggingface.co/stabilityai/stable-video-diffusion-img2vid-xt-1-1',
       files: [
@@ -950,6 +1484,7 @@ export function getVideoBundles(): ModelBundle[] {
       totalSizeGB: 20.4,
       vramRequired: '16+ GB',
       workflow: 'mochi',
+      tier: 'older',
       url: 'https://huggingface.co/Comfy-Org/mochi_preview_repackaged',
       files: [
         {
@@ -993,6 +1528,7 @@ export function getVideoBundles(): ModelBundle[] {
       totalSizeGB: 19.2,
       vramRequired: '24+ GB',
       workflow: 'cosmos',
+      tier: 'older',
       url: 'https://huggingface.co/mcmonkey/cosmos-1.0',
       files: [
         {
@@ -1026,6 +1562,7 @@ export function getVideoBundles(): ModelBundle[] {
       totalSizeGB: 15.5,
       vramRequired: '10-12 GB',
       workflow: 'wan',
+      tier: 'older',
       customNodes: ['gguf'],
       url: 'https://huggingface.co/NSFW-API/NSFW_Wan_14b',
       files: [
@@ -1061,6 +1598,7 @@ export function getVideoBundles(): ModelBundle[] {
       totalSizeGB: 16.6,
       vramRequired: '10-12 GB',
       workflow: 'wan',
+      tier: 'standard',
       customNodes: ['gguf'],
       url: 'https://huggingface.co/desirel/WAN2.2-14B-Rapid-AllInOne-GGUF-NSFW-v10',
       files: [
@@ -1087,7 +1625,7 @@ export function getVideoBundles(): ModelBundle[] {
         },
       ],
     },
-  ]
+  ])
 }
 
 // ─── 2.5.8 specialized local-lane bundles (music / talking character / motion) ───
@@ -1099,7 +1637,7 @@ export function getVideoBundles(): ModelBundle[] {
 // video list above (real uncensored finetunes) instead.
 
 export function getAudioBundles(): ModelBundle[] {
-  return [
+  return withVramNeed([
     {
       name: 'ACE Step 1.5 Turbo (Music)',
       description: 'Newest full song generator, MIT licensed. Vocals, lyrics and instruments from a text description. One file.',
@@ -1107,6 +1645,7 @@ export function getAudioBundles(): ModelBundle[] {
       totalSizeGB: 9.4,
       vramRequired: '6-8 GB',
       workflow: 'ace',
+      tier: 'best',
       url: 'https://huggingface.co/Comfy-Org/ace_step_1.5_ComfyUI_files',
       files: [
         {
@@ -1118,6 +1657,32 @@ export function getAudioBundles(): ModelBundle[] {
         },
       ],
     },
+    // YuE2 (m-a-p, ComfyUI 0.36.0 and newer, PR 16250). Songs with vocals from a
+    // style and lyrics. The int8 checkpoint is the one the official template
+    // audio_yue2_text2music loads; it is an all in one file (model, text model
+    // and audio VAE), so it goes to checkpoints like ACE Step. Size and digest
+    // from the Hugging Face tree API on 2026-10-02. The model card says CC BY NC
+    // 4.0, so the card says non-commercial.
+    {
+      name: 'YuE2 (Songs from Style and Lyrics)',
+      description: 'Full songs with vocals from a style and your lyrics. Non-commercial use only (CC BY-NC 4.0).',
+      tags: ['Music', 'Vocals', 'Lyrics'],
+      totalSizeGB: 3.69,
+      vramRequired: '6-8 GB',
+      workflow: 'yue2',
+      tier: 'best',
+      url: 'https://huggingface.co/Comfy-Org/YuE2',
+      files: [
+        {
+          name: 'YuE2 3B (int8, all in one)',
+          description: 'Complete music model. Includes its text model and audio VAE.',
+          pulls: '', tags: ['Checkpoint', '4.0 GB'], updated: 'New',
+          downloadUrl: 'https://huggingface.co/Comfy-Org/YuE2/resolve/main/checkpoints/yue2_3b_int8_convrot.safetensors',
+          filename: 'yue2_3b_int8_convrot.safetensors', subfolder: 'checkpoints', sizeGB: 3.69,
+          sha256: '96fe199377309001ed8cd26a944baeee8cc31a20ba7c36d1d3c0a7e1f4149db6',
+        },
+      ],
+    },
     {
       name: 'ACE Step v1 3.5B (Music, lighter)',
       description: 'The proven full song generator. Smaller download, runs from 4 GB VRAM.',
@@ -1125,6 +1690,7 @@ export function getAudioBundles(): ModelBundle[] {
       totalSizeGB: 7.2,
       vramRequired: '4-6 GB',
       workflow: 'ace',
+      tier: 'standard',
       url: 'https://huggingface.co/Comfy-Org/ACE-Step_ComfyUI_repackaged',
       files: [
         {
@@ -1136,7 +1702,7 @@ export function getAudioBundles(): ModelBundle[] {
         },
       ],
     },
-  ]
+  ])
 }
 
 export function getLipsyncBundles(): ModelBundle[] {
@@ -1164,14 +1730,15 @@ export function getLipsyncBundles(): ModelBundle[] {
       filename: 'wav2vec2_large_english_fp16.safetensors', subfolder: 'audio_encoders', sizeGB: 0.59,
     },
   ]
-  return [
+  return withVramNeed([
     {
       name: 'Wan 2.2 S2V Q4 (Talking Character, GGUF)',
-      description: 'A portrait plus any voice becomes a talking video. Q4 quant, the comfortable pick for 12 GB cards.',
+      description: 'A portrait plus any voice becomes a talking video. Q4 quant, the pick for 12 GB cards.',
       tags: ['Wan 2.2', 'S2V', 'GGUF'],
       totalSizeGB: 20.0,
       vramRequired: '10-12 GB',
       workflow: 'wans2v',
+      tier: 'standard',
       customNodes: ['gguf'],
       url: 'https://huggingface.co/QuantStack/Wan2.2-S2V-14B-GGUF',
       files: [
@@ -1192,6 +1759,7 @@ export function getLipsyncBundles(): ModelBundle[] {
       totalSizeGB: 22.4,
       vramRequired: '16 GB best, offloads on less',
       workflow: 'wans2v',
+      tier: 'standard',
       url: 'https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged',
       files: [
         {
@@ -1204,7 +1772,7 @@ export function getLipsyncBundles(): ModelBundle[] {
         ...s2vSupport,
       ],
     },
-  ]
+  ])
 }
 
 export function getMotionBundles(): ModelBundle[] {
@@ -1224,7 +1792,7 @@ export function getMotionBundles(): ModelBundle[] {
       filename: 'wan_2.1_vae.safetensors', subfolder: 'vae', sizeGB: 0.24,
     },
   ]
-  return [
+  return withVramNeed([
     {
       name: 'Wan VACE 1.3B (Motion Control, light)',
       description: 'Your character copies the moves from any dance or pose video. The light pick, runs from 8 GB VRAM.',
@@ -1232,6 +1800,7 @@ export function getMotionBundles(): ModelBundle[] {
       totalSizeGB: 10.5,
       vramRequired: '8-10 GB',
       workflow: 'wanvace',
+      tier: 'older',
       customNodes: ['controlnet-aux'],
       url: 'https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged',
       files: [
@@ -1252,6 +1821,7 @@ export function getMotionBundles(): ModelBundle[] {
       totalSizeGB: 17.3,
       vramRequired: '10-12 GB',
       workflow: 'wananimate',
+      tier: 'standard',
       customNodes: ['gguf', 'controlnet-aux'],
       url: 'https://huggingface.co/QuantStack/Wan2.2-Animate-14B-GGUF',
       files: [
@@ -1265,5 +1835,5 @@ export function getMotionBundles(): ModelBundle[] {
         ...wanSupport,
       ],
     },
-  ]
+  ])
 }

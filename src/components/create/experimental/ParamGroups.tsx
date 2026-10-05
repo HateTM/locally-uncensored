@@ -1,4 +1,4 @@
-import { Gauge, Boxes, FlaskConical, RotateCcw, HelpCircle, RectangleHorizontal, RectangleVertical } from 'lucide-react'
+import { Gauge, Boxes, FlaskConical, RotateCcw, HelpCircle, RectangleHorizontal, RectangleVertical, X } from 'lucide-react'
 import { VIDEO_RES_PRESETS, ASPECT_RATIOS, applyAspect, presetForOrientation, matchesPreset } from '../../../lib/create-resolution'
 import { useCreateStore } from '../../../stores/createStore'
 import { useCreateExp } from './CreateContext'
@@ -17,13 +17,18 @@ import { Tooltip } from '../ui/Tooltip'
 import { cn } from '../ui/cn'
 import { HINWEIS_TEXT } from '../../../lib/hinweis'
 import { staleSelectedLoras } from '../../../lib/stale-loras'
+import { lorasForRun, loraRows } from '../../../lib/lora-stack'
+import { LoraStrength } from './LoraStrength'
+import { supportsTransparent } from '../../../lib/transparent-image'
+import { QWEN_ENCODER_HELP, pickQwenEncoder, qwenEncoderOptions, type QwenEncoderVariant } from '../../../lib/render/qwen-text-encoder'
+import { MAX_SHOTS, MAX_SHOT_CHARS, supportsMultishot } from '../../../lib/ltx-multishot'
 
 // Video families whose dynamic-workflow strategy actually wires a LoRA node:
 // the generic UNET path (wan/hunyuan/ltx/mochi/cosmos) plus Wan 2.2's dedicated
 // builder (LoraLoaderModelOnly insert). The remaining families (cogvideo/svd/
 // framepack/pyramidflow/allegro) use wrapper nodes with no LoRA seam, so we hide
 // the stack for them rather than offer a control that silently does nothing.
-const VIDEO_LORA_FAMILIES = new Set(['wan', 'wan22', 'hunyuan', 'ltx', 'mochi', 'cosmos'])
+const VIDEO_LORA_FAMILIES = new Set(['wan', 'wan22', 'hunyuan', 'ltx', 'mochi', 'cosmos', 'minimaxh3'])
 
 // The full param surface, reorganized into 3 frequency-ranked Sections.
 // Sampler/scheduler/LoRA/VAE lists come live from ComfyUI via CreateContext,
@@ -58,6 +63,11 @@ export function ParamGroups() {
   // LoRA is a local-only knob; for video it's offered only on families whose
   // builder actually applies it (see VIDEO_LORA_FAMILIES). Image always qualifies.
   const loraSupported = !isCloud && (!isVideo || VIDEO_LORA_FAMILIES.has(classifyModel(s.videoModel)))
+  // GH #146: the count is what a run sends, the same rule useCreate applies.
+  const laneModel = isVideo ? s.videoModel : s.imageModel
+  const laneType = (isVideo ? s.videoModelList : s.imageModelList).find((m) => m.name === laneModel)?.type ?? classifyModel(laneModel)
+  const activeLoras = lorasForRun(s.selectedLoras, loraList, laneType).use.length
+  const stackRows = loraRows(loraList, s.selectedLoras, laneType)
 
   // On cloud the worker only honours steps for images and guidance_scale for
   // the flux family — hide the sliders elsewhere rather than show a dead
@@ -80,6 +90,21 @@ export function ParamGroups() {
       hiresSizeError = error instanceof Error ? error.message : String(error)
     }
   }
+
+  // Transparent background: local Qwen-Image 2.1 text-to-image only, the one
+  // model family whose VAE writes an alpha channel (lib/transparent-image.ts).
+  const showTransparent = !isCloud && !isVideo && meta.id === 'image' && !isMlxLocal && supportsTransparent(laneType)
+
+  // Text encoder: a local Qwen-Image 2.1 with both editions of its encoder
+  // installed, the official one and the one without refusals. Here, in the
+  // Expert section, the user says which one reads the prompt. With one
+  // edition installed there is nothing to choose and no row.
+  const encoderOptions = !isCloud && !isVideo && !isMlxLocal && laneType === 'qwenimage' ? qwenEncoderOptions(s.textEncoderList) : []
+  const activeEncoder = pickQwenEncoder(s.textEncoderList, s.qwenTextEncoder)?.variant
+
+  // Shots: LTX 2.5 can cut between several shots in one run, with the same
+  // figure (lib/ltx-multishot.ts). Local text-to-video on that model only.
+  const showShots = !isCloud && meta.id === 'video' && !isMlxLocal && supportsMultishot(laneType)
 
   const samplers = samplerList.length ? samplerList : SAMPLERS_FALLBACK
   const schedulers = schedulerList.length ? schedulerList : SCHEDULERS_FALLBACK
@@ -196,9 +221,50 @@ export function ParamGroups() {
       {/* OUTPUT */}
       <Section title="Output" icon={Boxes} defaultOpen>
         <NumberField label="Seed (−1 = random)" value={s.seed} step={1} mono onRandomize={() => s.setSeed(-1)} onChange={s.setSeed} />
-        {/* Batch size has no cloud path — CloudJobParams carries no batch
-            field and useCloudCreate always stamps 1. */}
+        {showTransparent && (
+          <button
+            type="button"
+            role="switch"
+            aria-checked={s.transparentBackground}
+            onClick={() => s.setTransparentBackground(!s.transparentBackground)}
+            className={cn(
+              'flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left transition-colors',
+              s.transparentBackground ? 'border-white/15 bg-white/[0.05]' : 'border-white/[0.07]',
+            )}
+          >
+            <span>
+              <span className="block t-control text-gray-300">Transparent background</span>
+              <span className="block t-micro text-gray-600">Saves a PNG with a see-through background</span>
+            </span>
+            <span className={cn('t-mono text-xs', s.transparentBackground ? 'text-emerald-400' : 'text-gray-600')}>
+              {s.transparentBackground ? 'on' : 'off'}
+            </span>
+          </button>
+        )}
         {!isVideo && !isCloud && <Slider label="Batch size" min={1} max={8} step={1} value={s.batchSize} onChange={s.setBatchSize} />}
+        {showShots && (
+          <div className="space-y-2">
+            <Slider label="Shots" min={1} max={MAX_SHOTS} step={1} value={1 + s.videoShots.length} onChange={s.setVideoShotCount} />
+            {s.videoShots.map((text, i) => (
+              <label key={i} className="block space-y-1">
+                <span className="t-control text-gray-400">Shot {i + 2}</span>
+                <textarea
+                  rows={2}
+                  maxLength={MAX_SHOT_CHARS}
+                  value={text}
+                  onChange={(e) => s.setVideoShot(i, e.target.value)}
+                  placeholder="Describe the next shot…"
+                  className="w-full resize-none rounded-[var(--radius-control)] border border-white/[0.08] bg-white/[0.04] px-2.5 py-1.5 t-control text-gray-200 outline-none transition-colors placeholder:text-gray-600 focus:border-white/25"
+                />
+              </label>
+            ))}
+            <p className="t-micro text-gray-600">
+              {s.videoShots.length === 0
+                ? 'One shot. Add more to cut between shots in one clip.'
+                : 'Shot 1 is your prompt. Describe the same person the same way in every shot. More shots need a longer clip.'}
+            </p>
+          </div>
+        )}
         {isVideo && (
           <div className="grid grid-cols-2 gap-2">
             <Slider label="Frames" min={1} max={120} step={1} value={s.frames} onChange={s.setFrames} />
@@ -209,7 +275,7 @@ export function ParamGroups() {
 
       {/* Only render a section with controls the selected backend can use. */}
       {showExpert && (
-      <Section title="Expert" icon={FlaskConical} defaultOpen={false}>
+      <Section title="Expert" icon={FlaskConical} open={s.expertOpen} onOpenChange={s.setExpertOpen}>
         {/* Sampler/Scheduler are ComfyUI-only knobs — the hosted WaveSpeed
             endpoints don't accept them, so hide them on the cloud backend
             rather than let the user tune a control that's silently dropped. */}
@@ -234,7 +300,13 @@ export function ParamGroups() {
         {loraSupported && (
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
-              <div className="t-control text-gray-400">LoRA stack {s.selectedLoras.length > 0 && <span className="t-mono text-gray-600">· {s.selectedLoras.length} active</span>}</div>
+              <div className="t-control text-gray-400">LoRA stack {activeLoras > 0 && <span className="t-mono text-gray-600">· {activeLoras} active</span>}</div>
+              <div className="flex items-center gap-3">
+              {s.selectedLoras.length > 0 && (
+                <button onClick={s.clearLoras} title="Turn every LoRA off" className="t-control text-gray-500 hover:text-gray-300 inline-flex items-center gap-1">
+                  <X className="w-3 h-3" /> Clear
+                </button>
+              )}
               {/* GH #109: the list loads once per connect, so a file dropped
                   into models/loras later never appeared — and with an empty
                   list the whole section was invisible, which read as "no LoRA
@@ -242,6 +314,7 @@ export function ParamGroups() {
               <button onClick={() => { void refreshModelLists() }} title="Re-scan ComfyUI's models/loras folder" className="t-control text-gray-500 hover:text-gray-300 inline-flex items-center gap-1">
                 <RotateCcw className="w-3 h-3" /> Rescan
               </button>
+              </div>
             </div>
             {staleSelectedLoras(s.selectedLoras, loraList, s.comfyRunning).map((name) => (
               <div key={name} className="flex items-center justify-between gap-2 rounded-md border border-white/[0.06] px-2.5 py-1.5 t-control">
@@ -262,19 +335,27 @@ export function ParamGroups() {
             ))}
             {loraList.length === 0 ? (
               <div className="t-control text-gray-600">No LoRAs found yet. Drop .safetensors files into ComfyUI&apos;s models/loras folder and hit Rescan. Characters trained in Character Studio land there automatically.</div>
+            ) : stackRows.length === 0 ? (
+              <div className="t-control text-gray-600">The LoRAs in models/loras are made for other models. Pick the model they belong to, or drop in a LoRA for this one and hit Rescan.</div>
             ) : (
             <div className="space-y-1 max-h-44 overflow-y-auto scrollbar-thin">
-              {loraList.map((name) => {
+              {/* Gegenprobe 8 (02.10.): "Z-Image only" showed only after a
+                  click, and the strength had no number next to it.
+                  03.10.: the H3 turbo LoRA was offered on an image model, and
+                  its file name was cut off. A LoRA from the catalogue is
+                  listed where its family runs, under its catalogue name, with
+                  the file name as the tooltip (lib/lora-stack.ts). */}
+              {stackRows.map(({ name, label, file, fits, familyLabel }) => {
                 const active = s.selectedLoras.find((l) => l.name === name)
                 return (
                   <div key={name} className={cn('rounded-md border transition-colors', active ? 'border-white/15 bg-white/[0.06]' : 'border-white/[0.06]')}>
-                    <button onClick={() => s.toggleLora(name)} className="w-full flex items-center justify-between px-2.5 py-1.5 t-control text-left text-gray-300">
-                      <span className="truncate">{name.replace(/\.safetensors$/, '')}</span>
-                      <span className={cn('t-mono', active ? 'text-emerald-400' : 'text-gray-600')}>{active ? 'on' : 'off'}</span>
+                    <button onClick={() => s.toggleLora(name)} title={file} className="w-full flex items-center justify-between gap-2 px-2.5 py-1.5 t-control text-left text-gray-300">
+                      <span className="truncate">{label}</span>
+                      <span className={cn('t-mono shrink-0', active && fits ? 'text-emerald-400' : 'text-gray-600')}>{fits ? (active ? 'on' : 'off') : `${familyLabel} only`}</span>
                     </button>
-                    {active && (
+                    {active && fits && (
                       <div className="px-2.5 pb-2">
-                        <Slider min={0} max={2} step={0.05} value={active.strength} onChange={(v) => s.setLoraStrengthFor(name, v)} format={(v) => v.toFixed(2)} />
+                        <LoraStrength name={label} value={active.strength} onChange={(v) => s.setLoraStrengthFor(name, v)} />
                       </div>
                     )}
                   </div>
@@ -288,6 +369,11 @@ export function ParamGroups() {
         {!isCloud && !isVideo && (
           <Field label="VAE" help="Override the checkpoint's built-in VAE. 'auto' lets the checkpoint decide.">
             <Select size="sm" options={vaes.map((v) => ({ value: v, label: v }))} value={s.selectedVae} onChange={s.setSelectedVae} />
+          </Field>
+        )}
+        {encoderOptions.length > 0 && activeEncoder && (
+          <Field label="Text encoder" help={QWEN_ENCODER_HELP}>
+            <Select size="sm" ariaLabel="Text encoder" options={encoderOptions.map((o) => ({ value: o.id, label: o.label }))} value={activeEncoder} onChange={(v) => s.setQwenTextEncoder(v as QwenEncoderVariant)} />
           </Field>
         )}
         {!isCloud && !isVideo && (

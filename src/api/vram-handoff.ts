@@ -44,6 +44,7 @@
  * of call #2 and re-trigger the exact OOM we are avoiding.
  */
 
+import { setChatBackendsRestore } from '../lib/chat-backends-gate'
 import { backendCall, ollamaUrl, localFetch, isOllamaLocal, isWindows } from './backend'
 import type { ComfyApiGraph } from '../types/comfy-graph'
 import { asNumber, asRecordArray, asString, prop } from '../types/json-guards'
@@ -89,6 +90,8 @@ import { PaceTracker, overBudget, renderBudgetNotice, renderTimeoutNotice, warmu
 import { asComfyGpuMode } from '../lib/comfy-cpu-banner'
 import { comfyHoldsNoVram } from '../lib/comfy-device'
 import { log } from '../lib/logger'
+import { buildWithFixups, wasDeclined } from '../lib/render-fixups'
+import { renderFixupDeps } from './render-fixup-deps'
 
 /**
  * Is the ComfyUI we are about to render on running on the processor?
@@ -1247,6 +1250,23 @@ async function runHandoff(
 
 // ── Generation bodies ─────────────────────────────────────────────
 
+/** The agent's tool builds through the same question Create asks: a model
+ *  whose companion file is missing or whose ComfyUI is too old gets the
+ *  download or the update offered once, then the build runs again. Without it
+ *  the chat only ever read "needs ComfyUI 0.37.0 or newer" as a failure. */
+function buildFixable<T>(kind: 'image' | 'video', build: () => Promise<T>): Promise<T> {
+  return buildWithFixups(build, renderFixupDeps((line) => emitHandoff('loading_image_model', { kind, detail: line })))
+}
+
+/** How a build error reads in the tool result. A no to the question is the
+ *  user's own decision, not a failure. */
+function buildErrorResult(kind: 'image' | 'video', err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err)
+  return wasDeclined(err)
+    ? `${label(kind)} generation was not started. ${message}`
+    : `${label(kind)} generation failed: ${message}`
+}
+
 /** Image path — mirrors the legacy executeImageGenerate, via buildDynamicWorkflow. */
 async function generateImage(
   prompt: string,
@@ -1301,11 +1321,17 @@ async function generateImage(
     if (checkPromptSafety(`${loras.prompt} ${loras.negative}`).blocked) return `Cannot generate: ${SAFETY_BLOCK_MESSAGE}`
     let maskImage: string | undefined
     if (edit.mask) maskImage = (await resolveInputImage(edit.mask)).name
-    let workflow = await buildDynamicWorkflow(
+    // Qwen-Image 2.1: the agent loads the text encoder the user picked in
+    // Create's advanced settings, so a picture made in chat reads the prompt
+    // with the same one.
+    const { useCreateStore } = await import('../stores/createStore')
+    const qwenTextEncoder = useCreateStore.getState().qwenTextEncoder
+    let workflow = await buildFixable('image', () => buildDynamicWorkflow(
       {
         prompt: loras.prompt,
         negativePrompt: loras.negative,
         model,
+        ...(qwenTextEncoder !== 'auto' ? { qwenTextEncoder } : {}),
         sampler: tun.sampler,
         scheduler: tun.scheduler,
         steps: tun.steps,
@@ -1335,7 +1361,7 @@ async function generateImage(
         ...(listed?.parts ? { modelParts: listed.parts } : {}),
       },
       type,
-    )
+    ))
     // Native HiRes is a graph transform on the finished text-to-image graph,
     // exactly as the Create tab applies it (useCreate.ts).
     if (edit.hires) {
@@ -1360,7 +1386,7 @@ async function generateImage(
     return result
   } catch (err) {
     // Surface ComfyUI's message verbatim — an OOM must NOT be masked.
-    return `${label('image')} generation failed: ${err instanceof Error ? err.message : String(err)}`
+    return buildErrorResult('image', err)
   }
 }
 
@@ -1383,9 +1409,12 @@ async function generateVideo(
     // opens on it). Handle it HERE, before the SVD/FramePack I2V branch — wan22 now
     // matches isI2VModel(), but that branch's 25-frame / 8-fps tuning would butcher
     // it (wan22 is 24 fps, up to ~7 s). buildDynamicWorkflow routes to buildWan22.
-    if (type === 'wan22') {
+    // MiniMax H3 takes the same road: its encode node has an optional first
+    // frame, so one graph serves both modes, at 24 fps and up to ~15 s. LTX 2.5
+    // does the same through a first frame pinned into its latent.
+    if (type === 'wan22' || type === 'minimaxh3' || type === 'ltx25') {
       const { buildDynamicWorkflow } = await import('./dynamic-workflow')
-      const d = MODEL_TYPE_DEFAULTS.wan22
+      const d = MODEL_TYPE_DEFAULTS[type]
       const av = args as Record<string, unknown>
 
       // Optional source still (I2V). A wrong/hallucinated name falls back to the
@@ -1412,8 +1441,9 @@ async function generateVideo(
 
       const frameRej = videoFrameReject(model, args, caps)
       if (frameRej) return frameRej
-      // 24 fps native; up to ~7 s (169 frames). resolveClip honors `seconds`/`frames`.
-      const vMax = caps?.frameRange?.max ?? 169
+      // 24 fps native; Wan up to ~7 s (169 frames), MiniMax H3 up to ~15 s
+      // (362, the top of its trained range). resolveClip honors `seconds`/`frames`.
+      const vMax = caps?.frameRange?.max ?? (type === 'minimaxh3' ? 362 : type === 'ltx25' ? 242 : 169)
       const { frames, fps } = resolveClip(args, { defFps: d.fps, defFrames: d.frames, maxFrames: vMax })
       const tun = resolveTunables(args, caps, { steps: d.steps, cfg: d.cfg, sampler: d.sampler, scheduler: d.scheduler })
       if (tun.reject) return `Cannot generate: ${tun.reject}`
@@ -1426,13 +1456,13 @@ async function generateVideo(
       const tunCfg = (avq.cfg ?? avq.cfg_scale ?? avq.cfgScale) !== undefined ? tun.cfg : d.cfg
 
       // I2V → resolution from the source aspect (faithful framing); T2V → model default.
-      const base = inputImage ? resolveI2VResolution('wan22', srcW, srcH) : { width: d.width, height: d.height }
+      const base = inputImage ? resolveI2VResolution(type, srcW, srcH) : { width: d.width, height: d.height }
       const snapped = snapToVideoGrid(clampInt(av.width, base.width, 64, 2048), clampInt(av.height, base.height, 64, 2048))
       const seed = (typeof av.seed === 'number' && Number.isFinite(av.seed)) ? Math.floor(av.seed) : -1
 
       const loras = await resolveLoraAutomation(prompt, av, 'wan22', model)
       if (checkPromptSafety(`${loras.prompt} ${loras.negative}`).blocked) return `Cannot generate: ${SAFETY_BLOCK_MESSAGE}`
-      const workflow = await buildDynamicWorkflow(
+      const workflow = await buildFixable('video', () => buildDynamicWorkflow(
         {
           prompt: loras.prompt,
           negativePrompt: loras.negative,
@@ -1452,8 +1482,8 @@ async function generateVideo(
           ...wanLoraParams(av),
         },
         type,
-      )
-      log.info('vram_handoff.video.submit', { model, mode: inputImage ? 'i2v' : 't2v', wan22: true, steps: tunSteps, cfg: tunCfg })
+      ))
+      log.info('vram_handoff.video.submit', { model, mode: inputImage ? 'i2v' : 't2v', family: type, steps: tunSteps, cfg: tunCfg })
       const submitted = await submitCancellable(workflow, seq)
       if (submitted === CANCELLED) return `${label('video')} generation cancelled.`
       const promptId = submitted
@@ -1508,7 +1538,7 @@ async function generateVideo(
       )
       const seed = (typeof av.seed === 'number' && Number.isFinite(av.seed)) ? Math.floor(av.seed) : -1
       const motionBucketId = clampInt(av.motionBucketId ?? av.motion_bucket_id, 90, 1, 255)
-      const workflow = await buildDynamicWorkflow(
+      const workflow = await buildFixable('video', () => buildDynamicWorkflow(
         {
           prompt,
           negativePrompt: typeof args.negativePrompt === 'string' ? args.negativePrompt : '',
@@ -1527,7 +1557,7 @@ async function generateVideo(
           motionBucketId,
         },
         type,
-      )
+      ))
       log.info('vram_handoff.video.submit', { model, i2v: true })
       const submitted = await submitCancellable(workflow, seq)
       if (submitted === CANCELLED) return `${label('video')} generation cancelled.`
@@ -1584,7 +1614,7 @@ async function generateVideo(
     log.info('vram_handoff.video.submitted', { promptId })
     return await pollAndExtract(promptId, prompt, label('video'), getVideoTimeoutMs())
   } catch (err) {
-    return `${label('video')} generation failed: ${err instanceof Error ? err.message : String(err)}`
+    return buildErrorResult('video', err)
   }
 }
 
@@ -2192,12 +2222,36 @@ export function resolveI2VResolution(
 ): { width: number; height: number } {
   const landscapeDefault = { width: 1024, height: 576 }
   if (!srcW || !srcH || srcW <= 0 || srcH <= 0) {
+    if (type === 'minimaxh3') return { width: 1344, height: 768 }
+    if (type === 'ltx25') return { width: 1280, height: 704 }
     return (type === 'svd' || type === 'wan22') ? landscapeDefault : { width: 768, height: 768 }
   }
   const aspect = srcW / srcH
   if (type === 'svd') {
     // Square is closer to landscape than portrait; center-crop handles the rest.
     return aspect >= 0.95 ? { width: 1024, height: 576 } : { width: 576, height: 1024 }
+  }
+  if (type === 'ltx25') {
+    // The official template's 1280x704 canvas on the 64 pixel grid its half
+    // size first pass needs. Keeps the source aspect.
+    const MAX_PX = 1280 * 704
+    const scale = Math.sqrt(MAX_PX / (srcW * srcH))
+    const snap = (v: number) => Math.max(256, Math.round(v / 64) * 64)
+    return { width: snap(srcW * scale), height: snap(srcH * scale) }
+  }
+  if (type === 'minimaxh3') {
+    // The official templates' canvas: a 768 short edge, capped at 1344x768
+    // worth of pixels, snapped to 32. Keeps the source aspect.
+    const MAX_PX = 1344 * 768
+    let w = aspect >= 1 ? 768 * aspect : 768
+    let h = aspect >= 1 ? 768 : 768 / aspect
+    if (w * h > MAX_PX) {
+      const s = Math.sqrt(MAX_PX / (w * h))
+      w *= s
+      h *= s
+    }
+    const snap = (v: number) => Math.max(32, Math.round(v / 32) * 32)
+    return { width: snap(w), height: snap(h) }
   }
   if (type === 'wan22') {
     // Wan 2.2 5B trains at 1280×704 / 704×1280. Keep the SOURCE aspect (faithful
@@ -2300,19 +2354,60 @@ function evictionEmpty(e: RenderEviction): boolean {
 }
 
 // Evict/restore pairs run serialised through one chain so they never overlap.
-// A finished render parks its haul in _pendingRestore for a short grace
-// window; a NEW eviction inside that window inherits the haul instead of
-// letting it load, so back-to-back renders skip the pointless reload cycle.
+// A finished render parks its haul in _pendingRestore and the chat backends
+// stay out until somebody needs them (see restoreChatBackendsAfterRender); a
+// NEW eviction inherits the parked haul instead of letting it load, so
+// back-to-back renders skip the pointless reload cycle.
 let _renderJuggle: Promise<unknown> = Promise.resolve()
-let _renderEpoch = 0
 let _pendingRestore: RenderEviction | null = null
+let _restoreHolds = 0
+let _restoreTimer: ReturnType<typeof setTimeout> | null = null
+/** True while the Create view is on screen: the next thing the user does is
+ *  most likely another render. */
+let _renderSurfaceOpen = false
+/** True while a restore is reloading the chat backends. An eviction that
+ *  arrives now has to wait for that reload. */
+let _restoreInFlight = false
+/** How long a parked haul waits when no render surface is open (a render that
+ *  finished after the user left Create, the trainer). */
 export const RENDER_RESTORE_GRACE_MS = 2_000
+/** How long it waits while Create is open and nobody asks for the chat model.
+ *  After that the machine is put back the way it was found. */
+export const RENDER_RESTORE_IDLE_MS = 180_000
+
+function park(haul: RenderEviction | null): void {
+  _pendingRestore = haul
+  // A chat request that arrives while the haul is parked brings it back first
+  // (lib/chat-backends-gate, asked by the local providers).
+  setChatBackendsRestore(haul ? restoreChatBackendsNow : null)
+}
+
+function clearRestoreTimer(): void {
+  if (_restoreTimer) clearTimeout(_restoreTimer)
+  _restoreTimer = null
+}
+
+/**
+ * What the eviction is doing, for the waiting line of the run.
+ *
+ * Measured on the Windows box, 03.10.2026 (RTX 3060, LM Studio as the chat
+ * backend, a 6 GB chat model): the eviction itself is quick, 0.3 s for
+ * offload_local_models and 0.5 s for the LM Studio unload. The 25 to 30 s the
+ * stage stood on "Preparing workflow..." were the step before it: the previous
+ * render's restore was still reading the chat model back in, and an eviction
+ * waits its turn on the same chain, so the model is loaded completely and then
+ * unloaded again. The line now says which of the two is going on.
+ */
+export type RenderEvictionPhase = 'waiting-for-chat-model' | 'freeing'
 
 /** Test-only: reset the render-juggle chain state between unit tests. */
 export function __resetRenderJuggleForTests(): void {
   _renderJuggle = Promise.resolve()
-  _renderEpoch = 0
-  _pendingRestore = null
+  clearRestoreTimer()
+  park(null)
+  _restoreHolds = 0
+  _renderSurfaceOpen = false
+  _restoreInFlight = false
 }
 
 function mergeEvictions(base: RenderEviction | null, add: RenderEviction): RenderEviction {
@@ -2327,11 +2422,18 @@ function mergeEvictions(base: RenderEviction | null, add: RenderEviction): Rende
 /**
  * Free the GPU for a Create-tab render, remembering what was evicted so
  * restoreChatBackendsAfterRender can bring it back. Never throws; a failed
- * probe just means that backend is not in the haul.
+ * probe just means that backend is not in the haul. `onPhase` is told what
+ * the wait is spent on (RenderEvictionPhase).
  */
-export function evictChatBackendsForRender(): Promise<RenderEviction> {
-  _renderEpoch++
-  const run = _renderJuggle.catch(() => {}).then(() => evictBody())
+export function evictChatBackendsForRender(onPhase?: (phase: RenderEvictionPhase) => void): Promise<RenderEviction> {
+  // A restore that is only planned is called off here and now: this render
+  // inherits its haul (evictBody) instead of waiting for a reload.
+  clearRestoreTimer()
+  if (_restoreInFlight) onPhase?.('waiting-for-chat-model')
+  const run = _renderJuggle.catch(() => {}).then(() => {
+    onPhase?.('freeing')
+    return evictBody()
+  })
   _renderJuggle = run.catch(() => {})
   return run.catch(() => ({ ...EMPTY_EVICTION }))
 }
@@ -2340,7 +2442,7 @@ async function evictBody(): Promise<RenderEviction> {
   // A restore that has not run yet is inherited wholesale: whatever it wanted
   // to bring back stays evicted and becomes THIS render's restore duty.
   const inherited = _pendingRestore
-  _pendingRestore = null
+  park(null)
 
   if (getExclusiveVramMode() === 'never') {
     // The user opted out of VRAM juggling; do not touch the resident chat
@@ -2402,30 +2504,79 @@ async function evictBody(): Promise<RenderEviction> {
 }
 
 /**
- * Bring the evicted chat backends back after a render (success, failure or
- * cancel). Waits a short grace window first so a follow-up render can take
- * over the haul instead of paying reload-then-evict. Never throws.
+ * A render is over (success, failure or cancel): park what it evicted. The
+ * chat backends do NOT come straight back. The box, 04.10.2026 (LM Studio,
+ * a 6 GB chat model): the reload started 2 s after every render, and a second
+ * render started shortly after it waited up to 30 s for a model to finish
+ * loading that it then unloaded again. They come back when they are needed:
+ *
+ *   - a chat request to a local backend (restoreChatBackendsNow through
+ *     lib/chat-backends-gate), which covers the chat, the agents and
+ *     "Improve my prompt" written by the chat model,
+ *   - Create is left (setRenderSurfaceOpen),
+ *   - or nobody asked for RENDER_RESTORE_IDLE_MS.
+ *
+ * With no render surface open the wait is the short grace window, as before.
+ * A new render calls a planned restore off and inherits the haul. `delayMs`
+ * of 0 restores at once. Never throws.
  */
-export function restoreChatBackendsAfterRender(
-  evicted: RenderEviction,
-  graceMs: number = RENDER_RESTORE_GRACE_MS,
-): Promise<void> {
-  // Snapshot the epoch AT CALL TIME, not when the body gets its turn on the
-  // chain: an eviction that lands in between must count as "newer render".
-  const myEpoch = _renderEpoch
-  const run = _renderJuggle.catch(() => {}).then(() => restoreBody(evicted, graceMs, myEpoch))
+export function restoreChatBackendsAfterRender(evicted: RenderEviction, delayMs?: number): Promise<void> {
+  const run = _renderJuggle.catch(() => {}).then(() => {
+    if (!evictionEmpty(evicted)) park(mergeEvictions(_pendingRestore, evicted))
+    if (!_pendingRestore) return
+    if (_restoreHolds > 0) return // the run restores once, at its end
+    const wait = delayMs ?? (_renderSurfaceOpen ? RENDER_RESTORE_IDLE_MS : RENDER_RESTORE_GRACE_MS)
+    if (wait <= 0) return restoreParked()
+    clearRestoreTimer()
+    _restoreTimer = setTimeout(() => { void restoreChatBackendsNow() }, wait)
+  })
   _renderJuggle = run.catch(() => {})
   return run.catch(() => {})
 }
 
-async function restoreBody(evicted: RenderEviction, graceMs: number, myEpoch: number): Promise<void> {
-  if (evictionEmpty(evicted)) return
-  _pendingRestore = mergeEvictions(_pendingRestore, evicted)
-  if (_renderEpoch !== myEpoch) return // a newer render inherits the haul
-  if (graceMs > 0) await sleep(graceMs)
-  if (_renderEpoch !== myEpoch) return // a newer render inherits the haul
+/**
+ * Bring the parked chat backends back now, because somebody needs them.
+ * Resolves when they are loaded. Nothing parked, or a batch holding the
+ * restore: resolves at once and touches nothing. Never throws.
+ */
+export function restoreChatBackendsNow(): Promise<void> {
+  const run = _renderJuggle.catch(() => {}).then(() => (_restoreHolds > 0 ? undefined : restoreParked()))
+  _renderJuggle = run.catch(() => {})
+  return run.catch(() => {})
+}
+
+/**
+ * Create came on screen or left it. While it is open a finished render keeps
+ * the card for the next one; leaving it brings the chat backends back.
+ */
+export function setRenderSurfaceOpen(open: boolean): void {
+  _renderSurfaceOpen = open
+  if (!open) void restoreChatBackendsNow()
+}
+
+/**
+ * A run of several renders in a row (batch edit) holds the restore: each
+ * render still parks its haul, but nothing is freed or reloaded until the
+ * returned release is called. Then the haul waits like the one of a single
+ * render. Without the hold a picture of the batch could meet a restore that
+ * the idle time or a chat request had started, and ComfyUI read the image
+ * model back in before the next picture.
+ */
+export function holdRenderRestore(): () => void {
+  _restoreHolds++
+  let released = false
+  return () => {
+    if (released) return
+    released = true
+    _restoreHolds--
+    void restoreChatBackendsAfterRender({ ...EMPTY_EVICTION })
+  }
+}
+
+async function restoreParked(): Promise<void> {
+  clearRestoreTimer()
   const todo = _pendingRestore
-  _pendingRestore = null
+  park(null)
   if (!todo || evictionEmpty(todo)) return
 
   // Give the chat backends their VRAM back. freeMemory drops ComfyUI's
@@ -2453,41 +2604,46 @@ async function restoreBody(evicted: RenderEviction, graceMs: number, myEpoch: nu
   // the 14B lanes), and `exclusiveVramMode: 'never'` already turns the whole
   // juggle off. Trading a render's load time against a chat model's is David's
   // call, not a fixer's.
-  try { await freeMemory() } catch { /* best effort */ }
-  if (todo.bundled) {
-    try {
-      await startBundledEngine(todo.bundled.modelPath)
-      if (todo.bundled.slotSaved) {
-        const restored = await backendCall<{ ok?: boolean }>('kv_slot_action', { port: todo.bundled.port, action: 'restore' }).catch(() => null)
-        if (restored?.ok !== true) {
-          // Non-fatal: the next turn re-processes the history, the pre-#85 cost.
-          log.warn('render_juggle.kv_restore_failed', { port: todo.bundled.port })
+  _restoreInFlight = true
+  try {
+    try { await freeMemory() } catch { /* best effort */ }
+    if (todo.bundled) {
+      try {
+        await startBundledEngine(todo.bundled.modelPath)
+        if (todo.bundled.slotSaved) {
+          const restored = await backendCall<{ ok?: boolean }>('kv_slot_action', { port: todo.bundled.port, action: 'restore' }).catch(() => null)
+          if (restored?.ok !== true) {
+            // Non-fatal: the next turn re-processes the history, the pre-#85 cost.
+            log.warn('render_juggle.kv_restore_failed', { port: todo.bundled.port })
+          }
         }
+      } catch (e) {
+        log.warn('render_juggle.bundled_reload_failed', { err: String(e instanceof Error ? e.message : e) })
       }
-    } catch (e) {
-      log.warn('render_juggle.bundled_reload_failed', { err: String(e instanceof Error ? e.message : e) })
     }
-  }
-  if (todo.ollamaModel) {
-    try {
-      await loadModel(todo.ollamaModel)
-    } catch (e) {
-      // No ComfyUI-restart recovery here on purpose: on the Create tab the
-      // user's next step is usually another render, so stopping ComfyUI to
-      // rescue a chat model would be the wrong trade. Ollama lazy-loads on
-      // the next message anyway.
-      log.warn('render_juggle.ollama_reload_failed', { model: todo.ollamaModel, err: String(e instanceof Error ? e.message : e) })
+    if (todo.ollamaModel) {
+      try {
+        await loadModel(todo.ollamaModel)
+      } catch (e) {
+        // No ComfyUI-restart recovery here on purpose: on the Create tab the
+        // user's next step is usually another render, so stopping ComfyUI to
+        // rescue a chat model would be the wrong trade. Ollama lazy-loads on
+        // the next message anyway.
+        log.warn('render_juggle.ollama_reload_failed', { model: todo.ollamaModel, err: String(e instanceof Error ? e.message : e) })
+      }
     }
-  }
-  if (todo.lms) {
-    try {
-      await backendCall('lmstudio_load_model', {
-        model: todo.lms.id,
-        ...(todo.lms.contextLength ? { contextLength: todo.lms.contextLength } : {}),
-      })
-    } catch (e) {
-      log.warn('render_juggle.lms_reload_failed', { model: todo.lms.id, err: String(e instanceof Error ? e.message : e) })
+    if (todo.lms) {
+      try {
+        await backendCall('lmstudio_load_model', {
+          model: todo.lms.id,
+          ...(todo.lms.contextLength ? { contextLength: todo.lms.contextLength } : {}),
+        })
+      } catch (e) {
+        log.warn('render_juggle.lms_reload_failed', { model: todo.lms.id, err: String(e instanceof Error ? e.message : e) })
+      }
     }
+  } finally {
+    _restoreInFlight = false
   }
   log.info('render_juggle.restored', {
     ollama: todo.ollamaModel,

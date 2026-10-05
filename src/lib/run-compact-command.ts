@@ -38,7 +38,7 @@ import {
 import { estimateTokens } from './context-compaction'
 import { computeContextFill, type FillMessage } from './token-usage'
 import { shouldAutoCompact, MIN_MESSAGES_SINCE_COMPACT } from './compact-trigger'
-import { effectiveSendWindow } from './send-window'
+import { effectiveSendWindow, sendWindowFor } from './send-window'
 import { sendsToALanBackend } from './lan-openai-slot'
 import { useSendSizeStore } from '../stores/sendSizeStore'
 import type { CompactionRecord, Message } from '../types/chat'
@@ -316,7 +316,7 @@ export async function maybeAutoCompact(opts: {
     const gekappt = effectiveSendWindow({
       providerId: anbieter,
       modelWindow: window,
-      sendWindowTokens: st.codexSendWindowTokens,
+      sendWindowTokens: sendWindowFor(st, opts.activeModel),
       capEnabled: st.contextDecay !== false,
       smallModelMode: st.smallModelMode,
       localBackend: sendsToALanBackend(anbieter),

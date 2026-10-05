@@ -135,8 +135,17 @@ describe('both render paths gate the same fields', () => {
   const gatedFields = (src: string): string[] => {
     const call = /\w*Safety\(\s*`([^`]*)`/.exec(src)
     const lit = call?.[1] ?? ''
-    return [...lit.matchAll(/\$\{[a-zA-Z]+\.([a-zA-Z]+)\}/g)].map((m) => m[1]).sort()
+    // The prompt is gated as the run sends it: a bare name that both paths
+    // set from the store's prompt, empty where the view has no prompt field
+    // (finding M4, 2026-10-05). It counts as `prompt`.
+    const own = /\$\{(?:typedPrompt|prompt)\}/.test(lit) ? ['prompt'] : []
+    return [...own, ...[...lit.matchAll(/\$\{[a-zA-Z]+\.([a-zA-Z]+)\}/g)].map((m) => m[1])].sort()
   }
+
+  it('the gated prompt is the store prompt of a view that shows the field, on both paths', () => {
+    expect(local).toMatch(/const typedPrompt = intentTakesPrompt\([^\n]+\)\n\s+\? state\.prompt\n\s+: ''/)
+    expect(cloud).toMatch(/const prompt = intentTakesPrompt\(intent, characterUse\) \? s\.prompt : ''/)
+  })
 
   it('the local path reads prompt, negativePrompt, musicLyrics and triggerWord', () => {
     expect(gatedFields(local)).toEqual(['musicLyrics', 'negativePrompt', 'prompt', 'triggerWord'])

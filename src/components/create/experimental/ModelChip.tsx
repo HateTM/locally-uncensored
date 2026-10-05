@@ -1,17 +1,24 @@
 import { useCreateStore } from '../../../stores/createStore'
 import {
-  useCloudCatalogStore, cloudModelById, defaultCloudModel, opPickerModels, modelCostHint, isEditModel, shortCount,
+  useCloudCatalogStore, cloudModelById, defaultCloudModel, opPickerModels, modelCostHint, shortCount,
+  editCapableModels, animatePickerModels, videoPickerModels, studioOnlyImageModels,
+  resolveCharacterModel, characterGenerationModels,
 } from '../../../stores/cloudCatalogStore'
+import { DEFAULT_MODEL_IDS } from '../../../lib/render/cloud-models'
+import { groupForPicker, sortByTier, tierGroup, tierMarks } from '../../../lib/render/model-tier'
+import { localTier } from '../../../lib/render/local-model-tier'
 import { intentPickerModels, intentRoles, createStudioCost, isStudioModel } from '../../../lib/render/create-studio'
-import { resolveCharacterModel, characterGenerationModels } from '../../../hooks/useCloudCreate'
 import type { RenderOp } from '../../../lib/render/cloud-jobs'
 import type { PresetModel } from '../../../lib/render/preset-models'
 import { useSettingsStore } from '../../../stores/settingsStore'
 import { useUIStore } from '../../../stores/uiStore'
 import { useContentPolicy } from '../../../hooks/useContentPolicy'
-import { Select, type SelectOption } from '../ui/Select'
-import { TYPE_BADGE } from './badges'
-import { resolveLocalOpPick, videoLaneModels } from '../../../api/comfyui'
+import { Select, type SelectOption, type SelectTag } from '../ui/Select'
+import { TYPE_LABEL } from './badges'
+import { useLocalPick } from './localPick'
+import { useLocalModelFits } from '../../../hooks/useLocalModelFit'
+import { vramFitLabel } from '../../../lib/vram-fit'
+import { localModelLabel } from '../../../lib/local-model-name'
 
 // Portplan P7: lipsync/music/extend/motion reach the Studio track through the
 // SAME picker as their classic op-specialized twins, one list, matching what
@@ -20,19 +27,18 @@ import { resolveLocalOpPick, videoLaneModels } from '../../../api/comfyui'
 // this only prices each row, since a PresetModel carries no `credits` field.
 function pickerCostHint(m: PresetModel, musicDuration: number): string | undefined {
   const classic = cloudModelById(m.id)
-  if (classic) return modelCostHint(classic, m.op as RenderOp, m.op === 'music' ? musicDuration : undefined)
-  if (isStudioModel(m.id)) {
-    // No options chosen yet (this is the picker row, not the run), so use the
-    // model's own baseline preview, same figure studio-contract.ts's
-    // studioBaseCredits() would compute, just inlined to avoid a second
-    // import for one call site.
-    const cr = createStudioCost(m.id, {}, 100)
-    return `${shortCount(cr)} cr`
-  }
-  return undefined
+  if (classic && !isStudioModel(m.id)) return modelCostHint(classic, m.op as RenderOp, m.op === 'music' ? musicDuration : undefined)
+  return studioCostHint(m.id)
 }
 
-const CLOUD_BADGE = { label: 'Cloud', color: 'bg-violet-500/15 text-violet-500 dark:text-violet-200' }
+/** A Studio row prices from its own schema: no options chosen yet (this is the
+ *  picker row, not the run), so the model's own baseline preview, the same
+ *  figure studio-contract.ts's studioBaseCredits() would compute. */
+function studioCostHint(id: string): string | undefined {
+  return isStudioModel(id) ? `${shortCount(createStudioCost(id, {}, 100))} cr` : undefined
+}
+
+const CLOUD_BADGE: SelectTag = { label: 'Cloud' }
 // C2: the "No refusals" mark on models the provider ships with its own
 // filter off (CloudModel.adult, web parity: apps/web/components/create/
 // experimental/ModelChip.tsx). The mark says what the MODEL can do and
@@ -40,16 +46,20 @@ const CLOUD_BADGE = { label: 'Cloud', color: 'bg-violet-500/15 text-violet-500 d
 // (anything but 'off'), it stays pale, since the account setting is the
 // boundary, not the model. No adult vocabulary here, this surface sits on
 // the payment domain.
-const NO_REFUSALS_COLOR = {
-  filtering: 'text-gray-500 dark:text-gray-600',
-  open: 'text-purple-600 dark:text-purple-300',
-}
+const noRefusalsBadge = (policyOff: boolean): SelectTag =>
+  ({ label: 'No refusals', tone: policyOff ? 'accent' : 'quiet' })
 
 // Local-mode discovery (2.5.8): hosted models ride at the bottom of the local
 // picker as teaser rows — picking one opens the Cloud sheet instead of
 // changing the selection. Value prefix keeps them apart from real checkpoints.
+
 const TEASER_PREFIX = 'lu-cloud-teaser:'
 const TEASER_ROWS = 4
+/** The heading over the hosted rows at the end of the local picker. The list
+ *  draws a heading only where the group changes, so rows without one ran on
+ *  under "Older models" (the box, 03.10.2026). A hosted model is not an older
+ *  one, with or without a tier from the server. */
+export const CLOUD_GROUP = 'LU Cloud'
 
 // Badge-aware model picker (replaces the raw <select>). Local backend lists
 // the installed checkpoints; the cloud backend lists the hosted catalog
@@ -99,14 +109,18 @@ function CloudModelChip() {
   // user's choice was a lie. Edit needs masked-img2img (flux-dev); Animate needs
   // i2v; Video needs t2v (absent flag = capable, so today's dual-capable fleet
   // lists in full, and a future t2v-only model that sets i2v:false is excluded).
+  //
+  // 02.10.2026 (Web-Paritaet): Edit, Video und Animate fuehren hinter den
+  // klassischen Modellen die Studio-Modelle, die der Server kennt (siehe
+  // cloudCatalogStore.studioEntries); Image fuehrt die Studio-Bildmodelle, die
+  // in keinem klassischen Eintrag stehen. R5-58: Edit sieht auch die op-
+  // spezialisierten Endpunkte (qwen-image-edit hat `ops: ['edit']`).
   const list =
-    // R5-58: `m.edit` alone missed the 2.5.8 op-specialized edit endpoints
-    // (qwen-image-edit carries `ops: ['edit']`, not `edit: true`), so the
-    // picker never offered a model the catalog genuinely served.
-    intent === 'edit' ? models.filter((m) => m.kind === 'image' && isEditModel(m))
-    : intent === 'animate' ? models.filter((m) => m.kind === 'video' && m.i2v !== false)
-    : intent === 'video' ? models.filter((m) => m.kind === 'video' && m.t2v !== false)
+    intent === 'edit' ? editCapableModels()
+    : intent === 'animate' ? animatePickerModels()
+    : intent === 'video' ? videoPickerModels()
     : intent === 'character' && !characterUse ? opPickerModels('lora-train')
+    : kind === 'image' ? [...models.filter((m) => m.kind === 'image' && !m.ops), ...studioOnlyImageModels()]
     : models.filter((m) => m.kind === kind && !m.ops)
   const current = characterUse
     ? (resolveCharacterModel(selectedCharacter?.family ?? '', cloudOpModel) ?? '')
@@ -116,9 +130,12 @@ function CloudModelChip() {
   // Reflect the model the run will really use, so a leftover pick the current op
   // can't perform doesn't show as "selected".
   const roleOrCharacterIds = roleIntent ? roleModels : characterModels
+  // Faellt die Wahl heraus, gilt das Standardmodell dieser Unterkategorie (wie in
+  // modelForOp), und erst dahinter der erste Eintrag.
+  const standard = intent === 'edit' ? DEFAULT_MODEL_IDS.edit : intent === 'animate' ? DEFAULT_MODEL_IDS.animate : (defaultCloudModel(kind)?.id ?? '')
   const value = roleIntent || characterUse
     ? (roleOrCharacterIds.some((m) => m.id === current) ? current : (roleOrCharacterIds[0]?.id ?? current))
-    : list.some((m) => m.id === current) ? current : (list[0]?.id ?? current)
+    : list.some((m) => m.id === current) ? current : list.some((m) => m.id === standard) ? standard : (list[0]?.id ?? current)
 
   // The op this picker's models will run as, so the sublabel prices correctly
   // (a trainer bills a training run, not an image).
@@ -133,31 +150,40 @@ function CloudModelChip() {
     : intent === 'animate' ? 'animate'
     : 'generate'
   const options: SelectOption[] = roleIntent
-    ? roleModels.map((m) => ({
+    ? groupForPicker(roleModels).map(({ model: m, group }) => ({
         value: m.id,
         label: m.label,
         sublabel: pickerCostHint(m, musicDuration),
+        group,
+        tags: tierMarks(m),
         badge: m.adult
-          ? { label: 'No refusals', color: contentPolicy === 'off' ? NO_REFUSALS_COLOR.open : NO_REFUSALS_COLOR.filtering }
+          ? noRefusalsBadge(contentPolicy === 'off')
           : CLOUD_BADGE,
       }))
     : characterUse
-      ? characterModels.map((m) => ({
+      ? groupForPicker(characterModels).map(({ model: m, group }) => ({
           value: m.id,
           label: m.label,
           sublabel: modelCostHint(m, 'generate', undefined),
+          group,
+          tags: tierMarks(m),
           badge: m.adult
-            ? { label: 'No refusals', color: contentPolicy === 'off' ? NO_REFUSALS_COLOR.open : NO_REFUSALS_COLOR.filtering }
+            ? noRefusalsBadge(contentPolicy === 'off')
             : CLOUD_BADGE,
         }))
-      : list.map((m) => ({
+      : groupForPicker(list).map(({ model: m, group }) => ({
           value: m.id,
           label: m.label,
-          sublabel: modelCostHint(m, op, op === 'music' ? musicDuration : undefined),
+          sublabel: isStudioModel(m.id) ? studioCostHint(m.id) : modelCostHint(m, op, op === 'music' ? musicDuration : undefined),
+          // Nach Familie gruppiert, Beste zuerst, Aeltere gesammelt unten unter
+          // einer Zwischenzeile, nichts verschwindet (lib/render/model-tier).
+          // Die Marken stehen nur in der aufgeklappten Liste.
+          group,
+          tags: tierMarks(m),
           // adult models keep the standard Cloud badge everywhere EXCEPT the row
           // itself, where "No refusals" is strictly more informative, matching web.
           badge: m.adult
-            ? { label: 'No refusals', color: contentPolicy === 'off' ? NO_REFUSALS_COLOR.open : NO_REFUSALS_COLOR.filtering }
+            ? noRefusalsBadge(contentPolicy === 'off')
             : CLOUD_BADGE,
         }))
 
@@ -177,16 +203,6 @@ function CloudModelChip() {
 }
 
 function LocalModelChip() {
-  const mode = useCreateStore((s) => s.mode)
-  const intent = useCreateStore((s) => s.intent())
-  const imageModel = useCreateStore((s) => s.imageModel)
-  const videoModel = useCreateStore((s) => s.videoModel)
-  const localOpModel = useCreateStore((s) => s.localOpModel)
-  const imageModelList = useCreateStore((s) => s.imageModelList)
-  const videoModelList = useCreateStore((s) => s.videoModelList)
-  const audioModelList = useCreateStore((s) => s.audioModelList)
-  const lipsyncModelList = useCreateStore((s) => s.lipsyncModelList)
-  const motionModelList = useCreateStore((s) => s.motionModelList)
   const setImageModel = useCreateStore((s) => s.setImageModel)
   const setVideoModel = useCreateStore((s) => s.setVideoModel)
   const setLocalOpModel = useCreateStore((s) => s.setLocalOpModel)
@@ -194,33 +210,30 @@ function LocalModelChip() {
   const setCloudTeaser = useUIStore((s) => s.setCloudTeaser)
   const catalogModels = useCloudCatalogStore((s) => s.models)
 
-  const isVideo = mode === 'video'
-  // The 2.5.8 lanes with their own local model families. Extend is NOT here:
-  // it rides the regular i2v-capable video list (last-frame continue).
-  const laneList =
-    intent === 'music' ? audioModelList
-    : intent === 'lipsync' ? lipsyncModelList
-    : intent === 'motion' ? motionModelList
-    : null
+  // Which model a run takes lives in localPick, shared with the waiting area.
+  const { isVideo, laneList, list, value } = useLocalPick()
+  // A model that does not sit comfortably on the detected card says so on its
+  // row, here, where it is picked. Never at the prompt field. A model that
+  // fits, and a machine without a detected card, add nothing.
+  const { cardGb, fitOf } = useLocalModelFits(list)
+  const fitMarks = (name: string) => {
+    const fit = fitOf(name)
+    return fit === 'tight' || fit === 'big' ? [{ label: vramFitLabel(fit, cardGb) }] : []
+  }
 
-  // Mirror the cloud picker's op-gating (David 2026-07-17: "only offer models
-  // that can actually do it"): Animate/Extend list i2v-capable local models,
-  // Video lists t2v-capable ones (SVD/FramePack are i2v-only and drop there).
-  // Shared with Stage's missing-models gate so card and picker cannot drift.
-  const rawList = isVideo ? videoModelList : imageModelList
-  const list = laneList ?? (!isVideo ? rawList : videoLaneModels(rawList, intent))
-  const stored = laneList ? localOpModel : (isVideo ? videoModel : imageModel)
-  // Reflect the model the run will really use — a leftover pick the current
-  // op can't perform must not show as "selected". Lanes share the submit-side
-  // rule (resolveLocalOpPick) so chip, meter and run always agree.
-  const value = laneList
-    ? resolveLocalOpPick(stored, list)
-    : list.some((m) => m.name === stored) ? stored : (list[0]?.name ?? stored)
-
-  const options: SelectOption[] = list.map((m) => ({
+  // Beste oben mit der Marke "Best", Aeltere gesammelt unten unter "Older
+  // models", der Rest in gewohnter Reihenfolge; nichts verschwindet. Die
+  // lokalen Modelle bleiben in dieser Ordnung, nach Familie gruppiert werden
+  // nur die Cloud-Listen oben. `value` oben haelt sich an die ungeordnete Liste, denn die
+  // zeigt, welches Modell ein Lauf wirklich nimmt.
+  const options: SelectOption[] = sortByTier(list.map((m) => ({ m, tier: localTier(m) }))).map(({ m, tier }) => ({
     value: m.name,
-    label: prettyName(m.name),
-    badge: TYPE_BADGE[m.type],
+    // The catalogue's name for a file it knows, the file name as the tooltip
+    // (lib/local-model-name); any other file as before.
+    ...localModelLabel(m.name),
+    badge: { label: TYPE_LABEL[m.type] },
+    group: tierGroup({ tier }),
+    tags: [...tierMarks({ tier }), ...fitMarks(m.name)],
   }))
   // Discovery rows: a few hosted models of this kind at the list's tail.
   // Picking one opens the Cloud sheet; the local selection stays untouched.
@@ -232,6 +245,7 @@ function LocalModelChip() {
         label: m.label,
         sublabel: modelCostHint(m, 'generate'),
         badge: CLOUD_BADGE,
+        group: CLOUD_GROUP,
       })
     }
   }
@@ -262,8 +276,4 @@ function LocalModelChip() {
       }}
     />
   )
-}
-
-function prettyName(filename: string): string {
-  return filename.replace(/\.(safetensors|ckpt|pt|gguf)$/i, '').replace(/[_]+/g, ' ')
 }

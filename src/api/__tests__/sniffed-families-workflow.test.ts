@@ -97,6 +97,27 @@ describe('each sniffed family builds its official template graph', () => {
     expect(classTypes(wf)).not.toContain('TextEncodeQwenImageEditPlus')
   })
 
+  // GH #144: TextEncodeQwenImageEditPlus has image1 to image3, so the source
+  // plus two references, on both sides of the guidance.
+  it('Qwen-Image-Edit: references go in as image2 and image3, a third is dropped', async () => {
+    const wf = await buildDynamicWorkflow(run('qwen_image_edit_2509_fp8_e4m3fn.safetensors', {
+      inputImage: 'house.png', denoise: 0.7, referenceImages: ['door.png', 'cat.png', 'extra.png'],
+    }), 'qwenimage1')
+    const edits = Object.values(wf).filter((n) => n.class_type === 'TextEncodeQwenImageEditPlus')
+    expect(edits).toHaveLength(2)
+    for (const e of edits) {
+      expect(wf[(e.inputs!.image2 as [string, number])[0]].inputs!.image).toBe('door.png')
+      expect(wf[(e.inputs!.image3 as [string, number])[0]].inputs!.image).toBe('cat.png')
+      expect(e.inputs!.image4).toBeUndefined()
+    }
+  })
+
+  // Negative control: a family without reference slots builds as before.
+  it('Qwen-Image 1 (not an edit file) ignores references', async () => {
+    const wf = await buildDynamicWorkflow(run('qwen_image_fp8_e4m3fn.safetensors', { inputImage: 'src.png', denoise: 0.6, referenceImages: ['x.png'] }), 'qwenimage1')
+    expect(Object.values(wf).filter((n) => n.class_type === 'LoadImage')).toHaveLength(1)
+  })
+
   it('Qwen-Image-Edit: the source goes through TextEncodeQwenImageEditPlus on both sides, denoise 1, CFGNorm, shift 3', async () => {
     const wf = await buildDynamicWorkflow(run('qwen_image_edit_2509_fp8_e4m3fn.safetensors', { inputImage: 'house.png', denoise: 0.7 }), 'qwenimage1')
     const edits = Object.values(wf).filter((n) => n.class_type === 'TextEncodeQwenImageEditPlus')

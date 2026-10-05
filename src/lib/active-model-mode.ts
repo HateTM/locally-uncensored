@@ -82,8 +82,9 @@ export function pickForMode(
    * letzte Wolkenwahl des Nutzers.
    *
    * Zwei getrennte Erinnerungen loesen beides: jeder Modus bekommt zurueck, was
-   * er zuletzt hatte, und der Kopf der Liste springt nur noch ein, wenn es dort
-   * wirklich noch keine Wahl gab.
+   * er zuletzt hatte, und der Kopf der Liste springt nur noch lokal ein, und nur
+   * wenn es dort wirklich noch keine Wahl gab. In der Cloud springt er gar nicht
+   * mehr ein (05.10.2026, Begruendung unten am `fallback`).
    */
   remembered: RememberedPicks = { local: null, cloud: null },
 ): ModePick {
@@ -118,7 +119,15 @@ export function pickForMode(
     return { change: activeModel !== behalten.name, next: behalten.name, usedRequest: false }
   }
 
-  const fallback = models.find(model => wanted(model) && canAutoSelectChat(model))
+  // Der Kopf der Liste springt nur lokal ein. In der Cloud waehlt die App nie
+  // selbst: der Kopf des Katalogs ist `Llama 3.1 8B Turbo`, besteht die
+  // 7B-Regel, und ein neues Konto hat darauf geschrieben, ohne es je gewaehlt
+  // zu haben (gemessen 05.10.2026: es lehnt Erwachsenen-Fiktion ab, und eine
+  // Ablehnung im Verlauf uebernehmen danach auch die guten Modelle). Die
+  // benannte Zeile und die letzte eigene Cloud-Wahl oben bleiben.
+  const fallback = appMode === 'cloud'
+    ? undefined
+    : models.find(model => wanted(model) && canAutoSelectChat(model))
   if (activeModel === null && !fallback) return { change: false, next: null, usedRequest: false }
   return { change: true, next: fallback ? fallback.name : null, usedRequest: false }
 }

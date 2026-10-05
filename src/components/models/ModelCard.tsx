@@ -8,6 +8,7 @@ import { displayModelName } from '../../api/providers/model-name'
 import { splitForMiddleEllipsis } from '../../lib/model-label'
 import { isBuiltinEngineEntry } from '../../lib/lmstudio-match'
 import type { AIModel } from '../../types/models'
+import { fileFormat } from '../../lib/model-file-format'
 
 interface Props {
   model: AIModel
@@ -15,6 +16,8 @@ interface Props {
   onSelect: () => void
   onDelete: () => void
   onInfo: () => void
+  /** Tooltip of the Details button, when the row has more to say there. */
+  infoTitle?: string
   canDelete?: boolean
   /**
    * A16 (A14-4a): the Use button the 2.6.8 notes promise twice on this tile.
@@ -54,7 +57,7 @@ const TYPE_CONFIG = {
   video: { label: 'Video', icon: Video, color: 'text-green-400' },
 }
 
-export function ModelCard({ model, isActive, onSelect, onDelete, onInfo, canDelete = true, onUse, useBusy = false, engineStopped: luEngineRuht = false }: Props) {
+export function ModelCard({ model, isActive, onSelect, onDelete, onInfo, infoTitle, canDelete = true, onUse, useBusy = false, engineStopped: luEngineRuht = false }: Props) {
   const typeInfo = TYPE_CONFIG[model.type] || TYPE_CONFIG.text
   const TypeIcon = typeInfo.icon
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
@@ -144,8 +147,11 @@ export function ModelCard({ model, isActive, onSelect, onDelete, onInfo, canDele
         {model.type === 'text' && 'details' in model && model.details?.quantization_level && (
           <><span className="opacity-40">·</span><span>{model.details.quantization_level}</span></>
         )}
-        {(model.type === 'image' || model.type === 'video') && (
-          <><span className="opacity-40">·</span><span>{model.format || 'safetensors'}</span></>
+        {/* The file's own ending when nothing set a format. The fixed fallback
+            labelled an AnimateDiff .ckpt "safetensors" (3.0.4 Gegenprobe,
+            02.10.2026). */}
+        {(model.type === 'image' || model.type === 'video') && fileFormat(model) && (
+          <><span className="opacity-40">·</span><span>{fileFormat(model)}</span></>
         )}
       </span>
 
@@ -175,7 +181,7 @@ export function ModelCard({ model, isActive, onSelect, onDelete, onInfo, canDele
         <button
           onClick={(e) => { e.stopPropagation(); actions.info() }}
           className="p-1 rounded hover:bg-gray-100 dark:hover:bg-white/10 text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
-          title="Details"
+          title={infoTitle ?? 'Details'}
         >
           <Info size={12} />
         </button>

@@ -94,15 +94,26 @@ for (const { label, width, height } of sizes) {
     expectMittig(m)
   })
 
-  test(`Code-Leerzustand sitzt mittig bei ${label}`, async ({ page }) => {
+  // 3.0.4 Gegenprobe (02.10.2026): ohne Unterhaltung zeigte der Code-Bereich
+  // die Chat-Eingangsseite ohne Eingabefeld. Jetzt steht dort die Code-Ansicht
+  // mit ihrem Composer; ihr Leerblock muss genauso mittig sitzen.
+  test(`Code-Leerzustand sitzt mittig bei ${label} und hat ein Eingabefeld`, async ({ page }) => {
     await page.addInitScript(tauriMockInit, { assistantReply: DEFAULT_ASSISTANT_REPLY, modelName: DEFAULT_MODEL_NAME })
     await seedOnboardingDone(page)
     await page.setViewportSize({ width, height })
     await page.goto('/')
     await expect(page.getByTestId('chat-landing')).toBeVisible()
     await page.getByRole('button', { name: 'Code', exact: true }).click()
-    await expect(page.getByTestId('chat-landing')).toBeVisible()
-    const m = await measureLanding(page)
+    await expect(page.getByTestId('codex-landing')).toBeVisible()
+    await expect(page.getByRole('main').locator('textarea')).toBeVisible()
+    const m = await page.evaluate(() => {
+      const box = document.querySelector('[data-testid="codex-landing"]') as HTMLElement
+      const kids = Array.from(box.children) as HTMLElement[]
+      const top = Math.min(...kids.map((k) => k.getBoundingClientRect().top))
+      const bottom = Math.max(...kids.map((k) => k.getBoundingClientRect().bottom))
+      const a = box.getBoundingClientRect()
+      return { blockCenterY: (top + bottom) / 2, areaCenterY: (a.top + a.bottom) / 2, areaHeight: a.height, deviationPct: (((top + bottom) / 2 - (a.top + a.bottom) / 2) / a.height) * 100 }
+    })
     expectMittig(m)
   })
 }

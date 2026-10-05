@@ -14,6 +14,7 @@ import { PullModelDialog } from './PullModelDialog'
 import { DiscoverModels } from './DiscoverModels'
 import { CivitaiSearchPanel } from './CivitaiSearchPanel'
 import { LoraManager, LORA_USE_HINT, type LoraRow } from './LoraManager'
+import { LoraAddons } from './LoraAddons'
 import { Modal } from '../ui/Modal'
 import { GlowButton } from '../ui/GlowButton'
 import { showModel } from '../../api/ollama'
@@ -25,6 +26,7 @@ import { customModelDirs, deleteBundledModel, stopBundledEngine } from '../../ap
 import { counterView } from '../../lib/inventory-counter'
 import { groupInstalledByProvider, needsBackendSwitchHeading, foldedRowsSentence, LU_ENGINE_GROUP } from '../../lib/lu-engine-rows'
 import { isBuiltinEngineEntry } from '../../lib/lmstudio-match'
+import { externalDeleteHint, servesItsOwnFiles } from '../../lib/external-model-hint'
 import { installedRowMatchesSearch } from '../../lib/model-search'
 import { isLoraRow } from '../../lib/lora-rows'
 import { useBuiltinEngineStatus, engineIsIdle } from '../../hooks/useBuiltinEngineStatus'
@@ -153,10 +155,23 @@ export function ModelManager() {
   const luEngineFile = (m: AIModel): m is AIModel & { path: string } =>
     m.type === 'text' && isBuiltinEngineEntry(m) && 'path' in m && typeof m.path === 'string' && m.path.length > 0
 
+  // A chat model another app serves (LM Studio, any OpenAI-compatible
+  // server). Neither Ollama nor LU can delete it, and Details used to ask
+  // Ollama about it and then show nothing at all.
+  const externalTextModel = (m: AIModel): boolean =>
+    m.type === 'text' && 'provider' in m && !isBuiltinEngineEntry(m)
+    && servesItsOwnFiles(m.provider, 'providerName' in m ? m.providerName : undefined)
+
   const handleInfo = async (name: string) => {
     const model = models.find((m: AIModel) => m.name === name)
     if (model && luEngineFile(model)) {
       setModelInfo({ name, file: model.path, size: model.size, engine: model.providerName ?? LU_ENGINE_GROUP })
+      setInfoOpen(true)
+      return
+    }
+    if (model && externalTextModel(model)) {
+      const providerName = 'providerName' in model ? model.providerName : undefined
+      setModelInfo({ name, engine: providerName, deleteHint: externalDeleteHint(providerName) })
       setInfoOpen(true)
       return
     }
@@ -579,6 +594,7 @@ export function ModelManager() {
                               engineStopped={engineRuht}
                               onDelete={() => setConfirmDelete(model.name)}
                               onInfo={() => handleInfo(model.name)}
+                              infoTitle={externalTextModel(model) ? `Details. ${externalDeleteHint('providerName' in model ? model.providerName : undefined)}` : undefined}
                               canDelete={
                                 // Ollama text models via the Ollama API; image/video
                                 // models are ComfyUI files we can delete from disk;
@@ -615,6 +631,7 @@ export function ModelManager() {
                 <p className="px-1 t-micro text-gray-500 dark:text-gray-500">
                   Downloads land in ComfyUI&apos;s models/loras folder. {LORA_USE_HINT}
                 </p>
+                <LoraAddons search={searchQuery} />
                 <CivitaiSearchPanel
                   modelType="LORA"
                   title="Search CivitAI for LoRAs"
@@ -665,6 +682,9 @@ export function ModelManager() {
       </Modal>
 
       <Modal open={infoOpen} onClose={() => setInfoOpen(false)} title={modelInfo?.name || 'Model Info'}>
+        {typeof modelInfo?.deleteHint === 'string' && (
+          <p className="t-label text-gray-700 dark:text-gray-200 mb-3">{modelInfo.deleteHint}</p>
+        )}
         {modelInfo && (
           <pre className="t-micro text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-black/30 rounded-lg p-3 overflow-auto max-h-80 scrollbar-thin font-mono">
             {JSON.stringify(modelInfo, null, 2)}

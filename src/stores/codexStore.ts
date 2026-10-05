@@ -55,6 +55,16 @@ interface CodexState {
    */
   modeByConversation: Record<string, CodexMode>
   /**
+   * The last Ask or Bypass the user picked anywhere. A NEW conversation is
+   * stamped with it when it is created (startConversationMode), instead of
+   * falling back to Ask, which made every "New" undo the user's choice
+   * (Gegenprobe 01.10.2026). Stamped, not used as a fallback: an older
+   * conversation that never picked keeps running in what it always ran in.
+   * Plan is per task and never carried over: a fresh conversation does not
+   * start read-only. Persisted, additive, a downgrade only loses this key.
+   */
+  lastPickedMode: Exclude<CodexMode, 'plan'> | null
+  /**
    * A mode picked while a run is in flight. It does NOT touch the running turn:
    * a switch takes effect from the next send, which is what the dropdown says.
    * Transient on purpose, an app restart has no run to park anything for.
@@ -111,6 +121,8 @@ interface CodexState {
    * PARKED and applied by the next send; otherwise it lands immediately.
    */
   chooseCodexMode: (conversationId: string, mode: CodexMode, runActive: boolean) => void
+  /** A Code conversation was just created: it starts in the last Ask/Bypass pick. */
+  startConversationMode: (conversationId: string) => void
   /** Apply a parked pick. Called once at the start of every send. */
   applyParkedMode: (conversationId: string) => void
   /** The conversation's mode, falling back to the global default. */
@@ -147,6 +159,7 @@ export const useCodexStore = create<CodexState>()(
       workingDirectory: '',
       fileTreeVersion: 0,
       modeByConversation: {},
+      lastPickedMode: null,
       parkedModeByConversation: {},
       prePlanModeByConversation: {},
       planApprovalByConversation: {},
@@ -186,7 +199,8 @@ export const useCodexStore = create<CodexState>()(
           // what "Approve and run" reads to decide its target mode. While a run
           // is active that is all it is, the running turn keeps its own mode.
           const parked = { ...state.parkedModeByConversation, [conversationId]: mode }
-          if (runActive) return { parkedModeByConversation: parked }
+          const lastPickedMode = mode === 'plan' ? state.lastPickedMode : mode
+          if (runActive) return { parkedModeByConversation: parked, lastPickedMode }
           const current = state.modeByConversation[conversationId]
           const prePlan =
             mode === 'plan' && current !== 'plan' && current
@@ -196,7 +210,14 @@ export const useCodexStore = create<CodexState>()(
             parkedModeByConversation: parked,
             prePlanModeByConversation: prePlan,
             modeByConversation: { ...state.modeByConversation, [conversationId]: mode },
+            lastPickedMode,
           }
+        }),
+
+      startConversationMode: (conversationId) =>
+        set((state) => {
+          if (!state.lastPickedMode || state.modeByConversation[conversationId]) return state
+          return { modeByConversation: { ...state.modeByConversation, [conversationId]: state.lastPickedMode } }
         }),
 
       applyParkedMode: (conversationId) =>
@@ -339,6 +360,7 @@ export const useCodexStore = create<CodexState>()(
       partialize: (state) => ({
         workingDirectory: state.workingDirectory,
         modeByConversation: state.modeByConversation,
+        lastPickedMode: state.lastPickedMode,
       }),
       // Existing installs have a persisted `chatMode: 'codex'` (or similar) in
       // localStorage from v2.3.8 and earlier. partialize only affects writes,

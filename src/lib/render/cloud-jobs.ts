@@ -8,8 +8,9 @@
 // type-only import back to createStore here would close that into a module
 // cycle (`npm run cycles`, madge, counts type-only edges too). The two sets
 // must be kept in sync by hand; CreateIntent in stores/createStore.ts is the
-// source of truth.
-type CreateIntentLike =
+// source of truth. Exported for create-studio.ts, which createStore imports
+// too and which therefore cannot name CreateIntent either.
+export type CreateIntentLike =
   | 'image' | 'edit' | 'removebg' | 'video' | 'animate' | 'upscale' | 'eraser'
   | 'character' | 'lipsync' | 'music' | 'extend' | 'motion'
 

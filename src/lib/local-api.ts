@@ -167,3 +167,52 @@ export function corsText(origins: string[]): string {
     ? `Open to ${origins[0]} only.`
     : `Open to ${origins.length} origins: ${origins.join(', ')}.`
 }
+
+// ── Was ueber die API gelaufen ist (GH Discussion #4, kreake 2026-09-22) ──
+
+/** Die Zahlen, die `local_api_usage` seit dem letzten Start liefert. */
+export interface LocalApiNutzung {
+  since: number
+  requests: number
+  failed: number
+  active: number
+  promptTokens: number
+  completionTokens: number
+  withoutCounts: number
+  lastModel: string | null
+  lastAt: number | null
+}
+
+const zahl = (n: number) => n.toLocaleString('en-US')
+
+function vorWieLangem(ms: number, jetzt: number): string {
+  const s = Math.max(0, Math.round((jetzt - ms) / 1000))
+  if (s < 60) return 'just now'
+  const m = Math.round(s / 60)
+  if (m < 60) return `${m} min ago`
+  const h = Math.round(m / 60)
+  return h < 24 ? `${h} h ago` : `${Math.round(h / 24)} d ago`
+}
+
+/** Die Zeilen fuer das Panel. Sichtbarer Text ist Englisch. */
+export function nutzungZeilen(u: LocalApiNutzung, jetzt: number): Array<{ feld: string; wert: string }> {
+  return [
+    // Gezaehlt wird, was ein Modell erreicht (chat, completions, embeddings),
+    // nicht das Abfragen der Modellliste, das viele Werkzeuge im Sekundentakt
+    // tun. Die 3.0.4-Gegenprobe (02.10.2026) rief /v1/models auf und las
+    // "Requests 0" als Fehler; der Name sagt jetzt, was gezaehlt wird.
+    { feld: 'Model requests', wert: u.failed > 0 ? `${zahl(u.requests)} (${zahl(u.failed)} failed)` : zahl(u.requests) },
+    { feld: 'Running now', wert: zahl(u.active) },
+    { feld: 'Tokens in', wert: zahl(u.promptTokens) },
+    { feld: 'Tokens out', wert: zahl(u.completionTokens) },
+    { feld: 'Last model', wert: u.lastModel ? `${u.lastModel}, ${vorWieLangem(u.lastAt ?? jetzt, jetzt)}` : 'none yet' },
+  ]
+}
+
+/** Tokens kennt nur der Modellserver. Wo er keine meldet, steht das da,
+ *  statt dass eine Schaetzung als Zaehlung auftritt. */
+export function ohneZahlenText(u: LocalApiNutzung): string | null {
+  if (u.withoutCounts === 0) return null
+  const wer = u.withoutCounts === 1 ? '1 answer' : `${zahl(u.withoutCounts)} answers`
+  return `${wer} came without token counts from the model server, so the totals above leave them out.`
+}

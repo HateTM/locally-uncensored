@@ -205,6 +205,9 @@ export function CodeBlock({ code, language }: Props) {
           background: 'rgba(0, 0, 0, 0.3)',
           fontSize: '0.75rem',
         }}
+        // The theme gives the inner <code> its own background. It is an
+        // inline element, so that colour showed as a band behind every line.
+        codeTagProps={{ style: { background: 'transparent' } }}
       >
         {displayCode}
       </SyntaxHighlighter>

@@ -4,6 +4,7 @@
 // handlers (Ollama routing, sharded confirm, bundle retry/clear, …) keep
 // working unchanged behind a new surface.
 import { useEffect, useRef, useState } from 'react'
+import { usePopoverPlatz } from '../../hooks/usePopoverPlatz'
 import { isBelowChatMinimum, SMALL_CHAT_MODEL_WARNING } from '../../lib/chat-model-minimum'
 import {
   Download, ExternalLink, Info, Check, ChevronDown, Loader2, RefreshCw,
@@ -12,8 +13,10 @@ import {
 import type { LucideIcon } from 'lucide-react'
 import type { DiscoverModel, DownloadProgress, ModelBundle } from '../../api/discover'
 import { formatBytes, countLabel } from '../../lib/formatters'
-import { bundleVramNeedGb } from '../../lib/hardware'
+import { vramFit, vramFitLine, vramNeedTitle, type VramFit } from '../../lib/vram-fit'
+import { tierMarks } from '../../lib/render/model-tier'
 import { modelTileAction } from '../../lib/model-tile-action'
+import { bundleGetPlan } from '../../lib/bundle-state'
 import { ICON_SM } from '../ui/icon-size'
 
 // ─── Hardware fit ───────────────────────────────────────────────────
@@ -137,11 +140,11 @@ const TILE_STATE =
 /** ANZEIGE. Bleibt bewusst flach und ohne Hover: sie ist die Groesse, nicht
  *  die Wahl der Groesse. Wo es etwas zu waehlen gibt, steht an derselben
  *  Stelle das Control (siehe `ModelTile`). */
-export function SizePill({ sizeGB }: { sizeGB?: number }) {
-  if (!sizeGB) return null
+export function SizePill({ sizeGB, bytes }: { sizeGB?: number; bytes?: number }) {
+  if (!sizeGB && !bytes) return null
   return (
     <span className="t-micro px-1.5 py-0.5 rounded-md bg-gray-100 dark:bg-white/[0.06] text-gray-600 dark:text-gray-300 font-medium tabular-nums">
-      {sizeGB} GB
+      {bytes ? formatBytes(bytes) : `${sizeGB} GB`}
     </span>
   )
 }
@@ -343,6 +346,8 @@ export function ModelTile({ variants, vramGb, ctx, isInstalled, dlState, onDownl
   const [pickerOpen, setPickerOpen] = useState(false)
   const [chosen, setChosen] = useState<string | null>(null)
   const pickerRef = useRef<HTMLDivElement>(null)
+  const variantListRef = useRef<HTMLDivElement>(null)
+  const variantList = usePopoverPlatz(variantListRef, pickerOpen)
 
   const def = pickDefaultVariant(variants, vramGb, isInstalled, dlState, ctx)
   const sel = variants.find(v => v.name === chosen) ?? def
@@ -431,7 +436,9 @@ export function ModelTile({ variants, vramGb, ctx, isInstalled, dlState, onDownl
               <div
                 role="listbox"
                 aria-label={`Size and quality for ${groupTitle}`}
-                className="absolute z-30 left-0 top-full mt-1 w-56 rounded-lg lu-elevated p-1"
+                ref={variantListRef}
+                style={variantList.style}
+                className={`absolute z-30 left-0 w-56 rounded-lg lu-elevated p-1 overflow-y-auto scrollbar-thin ${variantList.nachOben ? 'bottom-full mb-1' : 'top-full mt-1'}`}
               >
                 {variants.map(v => {
                   const vFit = computeFit(v.sizeGB, vramGb, ctx)
@@ -531,8 +538,16 @@ export function ModelTile({ variants, vramGb, ctx, isInstalled, dlState, onDownl
 
 export interface BundleTileProps {
   bundle: ModelBundle
+  /** Which Create lane a non-video bundle belongs to (Music, Lip sync, Motion). */
+  lane?: string
   vramGb: number | null
+  /** True where graphics unit and processor share one memory pool (a Mac).
+   *  There is no card to name there, so the tile keeps the general hint. */
+  sharedMemory?: boolean
   complete: boolean
+  /** The bundle's files that are on disk already (bundles share files). The
+   *  card announces only what Get will really fetch. */
+  filesOnDisk?: ReadonlySet<string>
   downloading: boolean
   hasErrors: boolean
   onInstall: () => void
@@ -541,7 +556,9 @@ export interface BundleTileProps {
   onOpenUrl: (url: string) => void
 }
 
-export function BundleTile({ bundle, vramGb, complete, downloading, hasErrors, onInstall, onRetry, onClear, onOpenUrl }: BundleTileProps) {
+const NO_FILES: ReadonlySet<string> = new Set()
+
+export function BundleTile({ bundle, lane, vramGb, sharedMemory = false, complete, filesOnDisk = NO_FILES, downloading, hasErrors, onInstall, onRetry, onClear, onOpenUrl }: BundleTileProps) {
   // No COMING SOON overlay any more (2026-07-24). It was driven by
   // `!bundle.verified && !complete`, a hand-set boolean, and it dimmed the tile
   // behind a full-cover "COMING SOON" pill while that tile's own working
@@ -554,10 +571,25 @@ export function BundleTile({ bundle, vramGb, complete, downloading, hasErrors, o
   // wrapper-node-names pins every node name the builder emits against real
   // wrapper registries. A lane that cannot run gets pulled (see the CogVideoX
   // and Pyramid Flow removals) rather than shipped behind a badge.
-  // bundleVramNeedGb, not a local parser: the add-on bundles say "any" and the
-  // old local one answered 99 GB to that, which painted a 0.17 GB LoRA red.
-  const need = bundleVramNeedGb(bundle)
-  const fit: Fit = !vramGb ? 'unknown' : need <= vramGb ? 'fits' : need <= vramGb + 2 ? 'tight' : 'big'
+  // One rule for every bundle (lib/vram-fit): below the catalogue's minimum the
+  // card needs more, from the comfortable value up it fits, between the two it
+  // is tight. The add-ons say "any" and fit every card, the companion files
+  // name no number and get no verdict.
+  const fit: Fit = vramFit(bundle, vramGb)
+  // With a detected card the tile names it and says what tight costs: the
+  // owner's 12 GB box sat five minutes in a load the old "10-16 GB" never
+  // announced. Shared memory has no card to name and keeps the general hint.
+  // An add-on carries no verdict of its own: it says what it belongs to, and
+  // that model's card says whether it runs here. The box, 03.10.2026, read
+  // "Needs more than your 12 GB card" under the 1.82 GB H3 turbo LoRA.
+  const addonLine = bundle.addonFor ? `For ${bundle.addonFor}` : ''
+  const cardLine = sharedMemory || addonLine ? '' : vramFitLine(fit, vramGb)
+  // Sizes come from the files' own byte counts, and Get names what is still
+  // missing: the box, 03.10.2026, read "Get · 16.1 GB" on a card whose click
+  // fetched one file of 8.7 GB, the other two being shared and already there.
+  const plan = bundleGetPlan(bundle, filesOnDisk)
+  const fetchSize = formatBytes(plan.fetchBytes)
+  const alreadyHere = plan.present > 0 ? `, ${plan.present} already here` : ''
 
   return (
     <div
@@ -569,9 +601,28 @@ export function BundleTile({ bundle, vramGb, complete, downloading, hasErrors, o
           <div className="flex items-center gap-1.5 min-w-0">
             <h3 className="text-[0.78rem] font-semibold text-gray-900 dark:text-white truncate">{bundle.name}</h3>
             {bundle.hot && !complete && <HotMark />}
+            {lane && (
+              <span data-bundle-lane={lane} className="shrink-0 rounded px-1.5 py-0.5 t-micro font-semibold bg-gray-200 text-gray-600 dark:bg-white/10 dark:text-gray-300">{lane}</span>
+            )}
+            {tierMarks(bundle).map((t) => (
+              <span key={t.label} className={`shrink-0 rounded px-1.5 py-0.5 t-micro font-semibold ${t.tone === 'accent' ? 'bg-lu-accent/15 text-lu-accent' : 'text-gray-500 dark:text-gray-600'}`}>{t.label}</span>
+            ))}
           </div>
           {bundle.description && (
             <p className="t-micro text-gray-500 dark:text-gray-400 leading-snug mt-0.5 line-clamp-2">{bundle.description}</p>
+          )}
+          {addonLine && (
+            <p className="mt-1.5 t-micro text-gray-500 dark:text-gray-400" data-bundle-addon-for={bundle.addonFor}>{addonLine}</p>
+          )}
+          {cardLine && (
+            <p
+              className="flex items-center gap-1.5 mt-1.5 t-micro text-gray-500 dark:text-gray-400"
+              data-bundle-fit={fit}
+              title={vramNeedTitle(bundle)}
+            >
+              <span className={`w-1.5 h-1.5 shrink-0 rounded-full ${FIT_META[fit].dot}`} />
+              <span>{cardLine}</span>
+            </p>
           )}
         </div>
         {bundle.url && (
@@ -587,9 +638,9 @@ export function BundleTile({ bundle, vramGb, complete, downloading, hasErrors, o
       </div>
 
       <div className="flex items-center gap-2 mt-2.5 min-h-[var(--control-h-sm)]">
-        <SizePill sizeGB={bundle.totalSizeGB} />
+        <SizePill bytes={plan.totalBytes} />
         <span className="text-[0.55rem] text-gray-400 dark:text-gray-500">{countLabel(bundle.files.length, 'file')}</span>
-        <FitHint fit={fit} />
+        {!cardLine && !addonLine && <FitHint fit={fit} />}
 
         <div className="flex items-center gap-1 shrink-0 ml-auto">
           {complete ? (
@@ -625,9 +676,9 @@ export function BundleTile({ bundle, vramGb, complete, downloading, hasErrors, o
             <button
               onClick={onInstall}
               className={TILE_ACTION}
-              title={`Install ${countLabel(bundle.files.length, 'file')} (${bundle.totalSizeGB} GB)`}
+              title={`Install ${countLabel(plan.fetchFiles, 'file')} (${fetchSize})${alreadyHere}`}
             >
-              <Download size={ICON_SM} /> Get · {bundle.totalSizeGB} GB
+              <Download size={ICON_SM} /> Get · {fetchSize}
             </button>
           )}
         </div>

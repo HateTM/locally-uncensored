@@ -54,12 +54,14 @@ function Feldname({ text }: { text: string }) {
   return <span className="t-control text-gray-400">{text}</span>
 }
 
-export function SchemaControl({ name, schema, value, onChange, disabled, className }: {
+export function SchemaControl({ name, schema, value, onChange, disabled, className, title }: {
   name: string; schema: Schema; value: unknown; onChange: (v: unknown) => void; disabled: boolean; className?: string
+  /** What the field is called where the schema's own name misleads. */
+  title?: string
 }) {
   const fieldClass = className ?? baseFieldClass
   const current = value ?? schema.default ?? (schema.type === 'boolean' ? false : '')
-  const titel = name === 'preset' ? 'Style preset' : label(name)
+  const titel = title ?? (name === 'preset' ? 'Style preset' : label(name))
 
   if (schema.type === 'array' && name === 'loras') {
     const rows = (Array.isArray(value) ? value : []) as { path: string; scale?: number }[]

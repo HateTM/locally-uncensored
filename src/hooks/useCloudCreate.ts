@@ -22,25 +22,38 @@ import {
   CloudJobError,
   QuoteChangedError,
   type CloudJobParams,
+  type CloudJob,
 } from '../api/cloud/jobs'
 import {
   defaultCloudModel,
+  editNeedsMask,
   modelForOp,
+  utilityOpModel,
   resolveOpPick,
   cloudModelById,
   cloudMediaLive,
-  loraGenModels,
+  resolveCharacterModel,
 } from '../stores/cloudCatalogStore'
 import { checkPromptSafety, blockMessageFor, type SafetyVerdict } from '../lib/render/safety'
 import { contentPolicySnapshot, loadContentPolicy } from './useContentPolicy'
 import { signalCreditsExhausted } from '../lib/credits-exhausted'
 import { resolveRunSeed } from '../lib/run-seed'
-import { intentRoles, intentRequiredInputs, isStudioModel, resolveIntentPick } from '../lib/render/create-studio'
+import { intentRoles, intentRequiredInputs, isStudioModel, resolveIntentPick, studioExtraPhotoSlots } from '../lib/render/create-studio'
+import { bumpSeed, runImageCount } from '../lib/render/image-count'
 import { STUDIO_MODELS, studioFields } from '../lib/render/studio-contract'
 import { modelLabel } from '../lib/render/preset-models'
+import { IMPROVING_PROMPT } from '../lib/render/improve-prompt'
+import { improveKindForRun } from '../lib/render/music-ui'
+import { intentTakesPrompt } from '../components/create/experimental/intents'
+import { rewrittenByName } from '../lib/render/qwen-enhancer'
+import { elapsedLine } from '../lib/elapsed-line'
+import { improvePrompt } from '../lib/render/improve-prompt-run'
+import { currentHelperModel } from '../lib/cloud-helper-model'
 import { bookedVideoSeconds } from '../lib/render/video-duration'
 import { studioQuote, StudioQuoteChangedError } from '../api/cloud/studio'
 import { dataUrlToBlob } from '../lib/data-url'
+import { MIN_TRAIN_IMAGES, maxTrainImages } from '../lib/train-image-cap'
+>>>>>>> upstream/master
 
 // B3 (review-w2ui.md, 18.09.2026): the CSAM floor above runs regardless of
 // tier, but the adult half of safety.ts (ADULT_SOFT_TERMS/ADULT_HARD_TERMS)
@@ -56,38 +69,6 @@ function clientSafety(text: string): SafetyVerdict {
   const policy = contentPolicySnapshot()
   if (!policy) void loadContentPolicy() // for the next run
   return checkPromptSafety(text, { tier: 'cloud', policy: policy ?? 'off' })
-}
-
-// Which generation models accept which trained-LoRA family. Ported from
-// uselu main 5be5dec3 (apps/web/lib/render/cloud-models.ts,
-// CHARACTER_MODEL_FAMILY): the picker (ModelChip), the meter (CreditsMeter)
-// and this submit path all resolve through the SAME table now, so the UI
-// cannot show Flux while quietly running Z-Image. Replaces the old fixed
-// single-entry default (CHARACTER_GEN_DEFAULT) that only ever offered ONE
-// endpoint per family and silently ignored the catalog. `qwen-image-lora` is
-// already in the desktop seed (cloud-models.ts); flux/z-image keep their two
-// endpoints each (a fast + a slower/quality one).
-export const CHARACTER_MODEL_FAMILY: Readonly<Record<string, string>> = {
-  'flux-schnell-lora': 'flux',
-  'flux-dev-lora-ultra-fast': 'flux',
-  'z-image-turbo-lora': 'z-image',
-  'z-image-base-lora': 'z-image',
-  'qwen-image-lora': 'qwen-image',
-  'ltx-2': 'ltx-2',
-  'ltx-2.3': 'ltx-2',
-}
-
-/** Generation models that accept this trained-LoRA family's weights. */
-export function characterGenerationModels(family: string) {
-  return loraGenModels().filter((m) => CHARACTER_MODEL_FAMILY[m.id] === family)
-}
-
-/** The model a character run will really use: the stored pick if it still
- *  fits the trained family, else the family's first compatible model, else
- *  null (no compatible generation endpoint exists yet for this family). */
-export function resolveCharacterModel(family: string, pickedId: string): string | null {
-  const list = characterGenerationModels(family)
-  return list.some((m) => m.id === pickedId) ? pickedId : (list[0]?.id ?? null)
 }
 
 // Gallery label for ops that never read the composer prompt. Without this
@@ -172,7 +153,14 @@ export { dataUrlToBlob }
 // died with the Create view's remount, leaving the Cancel button a no-op
 // mid-render. At most one cloud job runs per app (the store-level isGenerating
 // gate), so a singleton is correct.
+/** Shown when Cancel reaches a job a GPU already took. */
+export const RENDER_CANNOT_STOP =
+  "This render already started and can't be stopped. It will finish, is charged, and lands in your gallery."
+
 let activeJobId: string | null = null
+// Alle Auftraege eines Laufs mit mehreren Bildern; der erste steht auch in
+// activeJobId. Cancel bricht jeden einzelnen ab.
+let activeJobIds: string[] = []
 let activeAbort: AbortController | null = null
 
 /** True while a cloud run (generate or enhance) is in flight. CreateContext
@@ -181,12 +169,25 @@ let activeAbort: AbortController | null = null
  *  mid-render, and a mis-routed cancel strands a billing cloud job. */
 export const hasActiveCloudRun = (): boolean => activeAbort !== null
 
+/** Why the last generate() was refused, when the reason holds for the next run
+ *  too. A batch over several source images (lib/batch-edit) reads it after each
+ *  image to decide whether going on makes sense. A code, never the message. */
+export interface CloudRunStop { reason: 'credits' | 'price' | 'auth' | 'throttle'; retryAfterMs?: number }
+let lastRunStop: CloudRunStop | null = null
+/** Reads the reason once and clears it. */
+export function takeCloudRunStop(): CloudRunStop | null {
+  const stop = lastRunStop
+  lastRunStop = null
+  return stop
+}
+
 export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
   const { onQuotaChange } = opts
 
   const generate = useCallback(async () => {
     const s = useCreateStore.getState()
     if (s.isGenerating) return
+    lastRunStop = null
     const intent = s.intent()
     let { kind, op } = intentToJob(intent)
     // Character-Studio 'use' surface: a plain image generate with the trained
@@ -219,16 +220,29 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
     } else {
       picked = (kind === 'video' ? s.cloudVideoModel : s.cloudImageModel) || defaultCloudModel(kind)?.id || ''
     }
-    // A Studio pick runs its own schema-driven endpoint (op: 'studio'), never
-    // through modelForOp's classic op coercion, STUDIO_MODELS is a disjoint
-    // registry the classic picker functions do not know about.
-    const studioModel = !characterUse && isStudioModel(picked) ? picked : undefined
-    if (studioModel) kind = STUDIO_MODELS[studioModel].kind
     // Coerce a leftover/incapable pick onto a model that can run this op
     // (edit→i2i, animate→i2v, video→t2v, specialized ops→their family) so the
-    // submit never 400s.
-    const model = studioModel ?? modelForOp(kind, op, picked)
+    // submit never 400s. Seit 02.10.2026 fuehren Image, Edit, Video und Animate
+    // auch Studio-Modelle (Web-Paritaet), also laeuft die Wahl IMMER durch
+    // modelForOp, und erst das Ergebnis sagt, ob der Lauf ein Studio-Lauf ist.
+    // Eine Rollen-Absicht behaelt ihre Wahl.
+    const model = roleIntent ? picked : modelForOp(kind, op, picked)
+    // A Studio pick runs its own schema-driven endpoint (op: 'studio'), never a
+    // classic op shape. The character use-surface stays on its fixed -lora family.
+    const studioModel = !characterUse && isStudioModel(model) ? model : undefined
+    if (studioModel) kind = STUDIO_MODELS[studioModel].kind
+    // The result carries the customer's own pick. A utility op that swapped a
+    // Studio pick out (utilityOpModel) must not make addToGallery jump the
+    // picker to the default or overwrite a saved choice.
+    const galleryModel = !roleIntent && model !== picked && model === utilityOpModel(kind, op, picked) ? picked : model
 
+    // Bilder in diesem Lauf: nur Bild und Bearbeiten kennen mehr als eins.
+    const count = runImageCount(intent, s.cloudImageCount, characterUse)
+    // The prompt of this run. A view without a prompt field (Talking Character,
+    // Motion Control, the utility ops, training) sends none: the store holds one
+    // prompt for every tab, and the text left from another tab would steer the
+    // run unseen or fail the content check for words nobody sees here.
+    const prompt = intentTakesPrompt(intent, characterUse) ? s.prompt : ''
     s.setError(null)
     if (!cloudMediaLive()) {
       // Server MEDIA_LIVE switch is off — the GPU fleet isn't up, a submit
@@ -236,7 +250,7 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
       s.setError('Cloud rendering is coming soon, the GPU fleet is not live yet.')
       return
     }
-    if ((op === 'generate' || op === 'music' || op === 'tts') && s.prompt.trim().length === 0) {
+    if ((op === 'generate' || op === 'music' || op === 'tts') && prompt.trim().length === 0) {
       s.setError('Please enter a prompt.')
       return
     }
@@ -246,7 +260,7 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
     // below either way; this only saves the round trip when the client
     // already knows the verdict (B3).
     {
-      const verdict = clientSafety(`${s.prompt} ${s.negativePrompt} ${s.musicLyrics} ${s.triggerWord}`)
+      const verdict = clientSafety(`${prompt} ${s.negativePrompt} ${s.musicLyrics} ${s.triggerWord}`)
       if (verdict.blocked) {
         s.setError(blockMessageFor(verdict.reason))
         return
@@ -261,8 +275,14 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
       s.setError('This character has no compatible generation model yet.')
       return
     }
-    if (op === 'lora-train' && s.trainImages.length < 4) {
-      s.setError('Add at least 4 photos of your character (more is better, up to 30).')
+    if (op === 'lora-train' && s.trainImages.length < MIN_TRAIN_IMAGES) {
+      s.setError(`Add at least ${MIN_TRAIN_IMAGES} photos of your character (more is better, up to ${maxTrainImages('cloud')}).`)
+      return
+    }
+    // Staged locally, where the limit is higher, then switched to Cloud: the
+    // job API refuses more than its cap, so say how many to remove first.
+    if (op === 'lora-train' && s.trainImages.length > maxTrainImages('cloud')) {
+      s.setError(`Cloud training takes up to ${maxTrainImages('cloud')} photos. Remove ${s.trainImages.length - maxTrainImages('cloud')} and try again.`)
       return
     }
     // A Studio pick names its own required inputs (studio-contract.ts's
@@ -361,7 +381,10 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
               cfg: s.cfgScale,
               seed: runSeed,
             }
-      if (kind === 'video' && !bare) {
+      // Ein Studio-Modell traegt Laenge und Aufloesung in studio_options (sein
+      // Schema), nicht in frames/fps: bookedVideoSeconds kennt nur die klassischen
+      // Laengenlisten und wuerfe fuer ein Studio-Modell einen Fehler.
+      if (kind === 'video' && !bare && !studioModel) {
         // dd29f359 (Portplan Abschnitt 6), review A2 (Runde 2): book exactly
         // a length the model prices, read from the SAME catalog-first list
         // LaneControls shows (effectiveVideoDurations, in video-duration.ts),
@@ -387,7 +410,11 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
       if (characterUse && s.selectedCharacter) {
         params.loras = [{ id: s.selectedCharacter.id }]
       }
-      if (op === 'edit') {
+      // Instruction editors (maskless in the catalog, every studio editor) edit
+      // from the prompt alone: no mask demand, no inpaint knobs, and a leftover
+      // painted mask is not sent (the endpoint has no input for it).
+      const editIsMaskless = op === 'edit' && !editNeedsMask(model)
+      if (op === 'edit' && !studioModel) {
         params.denoise = s.denoise
         params.grow_mask_by = s.growMaskBy
         // The mask is exported at the SOURCE image's resolution, so the output
@@ -399,7 +426,8 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
           params.height = s.source.height
         }
       }
-      if (op === 'upscale') {
+      // Ein Studio-Upscaler traegt sein Ziel in studio_options.
+      if (op === 'upscale' && !studioModel) {
         params.target_resolution = s.targetResolution
       }
       // ImageRef.url is always a data URL preview; the cloud path re-uploads
@@ -409,8 +437,28 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
       // field instead of a fixed param.
       if (op !== 'generate' && s.source) {
         params.source_path = await uploadInput(dataUrlToBlob(s.source.url), 'source')
+        // Ein Studio-Modell, das eine Bilderliste liest (Edit mit mehreren
+        // Vorlagen, Referenz zu Video), bekommt das Standbild der Oberflaeche als
+        // einzigen Eintrag. Liest es kein source_path, geht das Bild nur dorthin.
+        if (studioModel) {
+          const reads = Object.values(STUDIO_MODELS[studioModel].inputs)
+          if (reads.includes('image_paths')) {
+            // Das Standbild ist das erste Foto, die Leiste liefert die weiteren
+            // bis zur Grenze dieses Modells. Jedes geht in die eigene Ablage.
+            const extras = intent === 'edit' || intent === 'animate'
+              ? s.references.slice(0, studioExtraPhotoSlots(studioModel)) : []
+            const more: string[] = []
+            for (const [i, ref] of extras.entries()) {
+              if (ac.signal.aborted) return
+              s.setProgress(6, `Uploading photos… ${i + 2}/${extras.length + 1}`)
+              more.push(await uploadInput(dataUrlToBlob(ref.url), 'source'))
+            }
+            params.image_paths = [params.source_path, ...more]
+          }
+          if (!reads.includes('source_path')) delete params.source_path
+        }
       }
-      if (op === 'edit' || op === 'eraser') {
+      if ((op === 'edit' && !editIsMaskless) || op === 'eraser') {
         if (!s.mask) {
           s.setError(
             op === 'eraser'
@@ -473,6 +521,29 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
         }
       }
 
+      // "Improve my prompt": the chat model the user picked rewrites the prompt
+      // for this model before the run. On LU Cloud that is a small chat call,
+      // billed like chat. The run sends the rewrite and the gallery keeps both.
+      // A rewrite that fails never stops the run.
+      let runPrompt = prompt
+      let promptOriginal: string | undefined
+      let rewrittenBy: string | undefined
+      let improveFailed = false
+      const improveKind = s.improvePrompt && !characterUse ? improveKindForRun(intent, model) : null
+      if (improveKind && prompt.trim() && !ac.signal.aborted) {
+        const improving = elapsedLine((text) => s.setProgress(8, text), IMPROVING_PROMPT)
+        const out = await improvePrompt(prompt, { kind: improveKind, modelLabel: modelLabel(model) }, ac.signal).finally(improving.stop)
+        // The safety check covers the rewrite too: the user wrote an allowed
+        // prompt, the model must not turn it into a refusal.
+        if (out.status === 'improved' && !clientSafety(out.prompt).blocked) {
+          runPrompt = out.prompt
+          promptOriginal = prompt
+          rewrittenBy = rewrittenByName('chat', currentHelperModel())
+        } else if (out.status !== 'unchanged' && !ac.signal.aborted) {
+          improveFailed = true
+        }
+      }
+
       // Bail before the (credit-claiming) submit if the user cancelled while
       // we were uploading inputs.
       if (ac.signal.aborted) return
@@ -504,10 +575,10 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
       if (studioModel) {
         s.setProgress(9, 'Confirming the price…')
         const quoteFields: Record<string, unknown> = {}
-        for (const k of ['source_path', 'mask_path', 'audio_path', 'audio2_path', 'video_path', 'last_image_path', 'shot_type'] as const) {
+        for (const k of ['source_path', 'image_paths', 'mask_path', 'audio_path', 'audio2_path', 'video_path', 'last_image_path', 'shot_type'] as const) {
           if (params[k] !== undefined) quoteFields[k] = params[k]
         }
-        const quote = await studioQuote(studioModel, s.prompt, {
+        const quote = await studioQuote(studioModel, runPrompt, {
           op: 'studio',
           studio_options: studioOptionsFiltered ?? {},
           ...quoteFields,
@@ -547,7 +618,7 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
       // list view (GET /api/jobs), not the only source of the gallery name.
       let label: string | undefined
       if (studioModel) {
-        label = s.prompt.trim() ? undefined : modelLabel(studioModel)
+        label = prompt.trim() ? undefined : modelLabel(studioModel)
         if (label) params.label = label
       } else if (OP_GALLERY_LABEL[op]) {
         label = OP_GALLERY_LABEL[op]
@@ -555,26 +626,108 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
       }
 
       s.setProgress(10, 'Submitting to the render queue…')
-      const { id } = await submitCloudJob({ kind, model, prompt: s.prompt, params })
+      // Mehrere Bilder: der Server bucht jedes als eigenen Auftrag und nennt alle.
+      if (count > 1) params.count = count
+      const submitted = await submitCloudJob({ kind, model, prompt: runPrompt, params })
+      const id = submitted.id
+      // Ein Server, der die Anzahl nicht kennt, bucht genau einen Auftrag und
+      // nennt keine Liste: dann laeuft ein Bild, und der Kunde erfaehrt es.
+      const ids = submitted.jobs?.map((j) => j.id) ?? [id]
+      const oneOnly = count > 1 && !submitted.jobs
       // A Cancel during the submit round-trip saw activeJobId still null, so
       // nothing was cancelled server-side. Now that the id exists, cancel the
       // just-queued job so its claimed credits refund instead of orphaning a
       // render we're no longer watching.
       if (ac.signal.aborted) {
-        cancelJob(id).then(() => onQuotaChange?.()).catch(() => {})
+        for (const jid of ids) cancelJob(jid).then(() => onQuotaChange?.()).catch(() => {})
         return
       }
       activeJobId = id
+      activeJobIds = ids
       onQuotaChange?.()
-      if (s.prompt.trim()) s.addToPromptHistory(s.prompt.trim())
+      if (prompt.trim()) s.addToPromptHistory(prompt.trim())
 
       const startedAt = Date.now()
       // Video renders and character training routinely run several minutes
       // and can queue behind other jobs on the shared fleet — give them a
       // much longer client deadline than images.
       const verb = opProgressVerb(op)
+      const timeoutMs = kind === 'video' || op === 'lora-train' ? 45 * 60_000 : 15 * 60_000
+      const addResult = (job: CloudJob, index = 0) => useCreateStore.getState().addToGallery({
+        ...galleryItemFromJob(job),
+        model: galleryModel,
+        prompt: OP_GALLERY_LABEL[op] ?? runPrompt,
+        promptOriginal,
+        rewrittenBy,
+        improveFailed: improveFailed || undefined,
+        label,
+        negativePrompt: s.negativePrompt,
+        // Jeder Auftrag eines Laufs rechnet mit Keim + Index (der Server bumpt
+        // den klassischen Keim; ein Studio-Lauf schickt keinen).
+        seed: studioModel ? runSeed : bumpSeed(runSeed, index),
+        steps: s.steps,
+        cfgScale: s.cfgScale,
+        sampler: s.sampler,
+        scheduler: s.scheduler,
+        width: s.width,
+        height: s.height,
+        intent,
+      })
+
+      if (ids.length > 1) {
+        // Jedes Bild landet in der Galerie, sobald es fertig ist. Ein Auftrag,
+        // der scheitert, stoppt die anderen nicht und gibt nur seinen Preis zurueck.
+        if (submitted.stopped === 'credits_exhausted') {
+          signalCreditsExhausted('credits')
+          lastRunStop = { reason: 'credits' }
+        }
+        const finished = new Set<string>()
+        const outcomes = await Promise.allSettled(ids.map(async (jid, index) => {
+          const job = await pollJob(jid, {
+            timeoutMs,
+            signal: ac.signal,
+            onTick: (j) => {
+              const st = useCreateStore.getState()
+              const elapsed = Math.round((Date.now() - startedAt) / 1000)
+              const base = 20 + Math.round((70 * finished.size) / ids.length)
+              if (j.status === 'running') st.setProgressPhase('sampling')
+              st.setProgress(Math.min(90, Math.max(base, 20 + elapsed)), `${verb} ${finished.size} of ${ids.length} done, ${elapsed}s`)
+            },
+          })
+          finished.add(jid)
+          if (job.status === 'succeeded' && job.result_url) addResult(job, index)
+          return job
+        }))
+        const jobs = outcomes.flatMap((o) => (o.status === 'fulfilled' ? [o.value] : []))
+        const landed = jobs.filter((j) => j.status === 'succeeded' && j.result_url).length
+        const failed = jobs.filter((j) => j.status === 'failed')
+        const lost = outcomes.flatMap((o) => (o.status === 'rejected' ? [o.reason] : []))
+          .filter((e) => !(e instanceof CloudJobError && e.message === 'polling aborted'))
+        const st = useCreateStore.getState()
+        if (landed > 0) {
+          st.setProgressPhase('complete')
+          st.setProgress(100, 'Complete!')
+        }
+        const notes: string[] = []
+        if (failed.length) notes.push(`${failed.length} of ${ids.length} images failed${failed[0].error ? `: ${failed[0].error}` : ''}. Failed images are refunded.`)
+        if (lost.some((e) => e instanceof CloudJobError && e.message === 'render timed out')) {
+          notes.push('Still rendering, some images are taking longer than expected. When they complete you can view them in your account at lu-labs.ai.')
+        } else if (lost.length) {
+          notes.push(lost[0] instanceof Error ? lost[0].message : String(lost[0]))
+        }
+        if (submitted.stopped) {
+          notes.push(
+            `Started ${ids.length} of ${submitted.requested ?? count} images. ` +
+            (submitted.stopped === 'credits_exhausted' ? 'There were not enough credits for the rest.' : 'The rest could not be prepared. Nothing was charged for them.'),
+          )
+        }
+        if (notes.length) st.setError(notes.join(' '))
+        onQuotaChange?.() // Abbruch und Fehlschlag geben die Einheiten zurueck
+        return
+      }
+
       const job = await pollJob(id, {
-        timeoutMs: kind === 'video' || op === 'lora-train' ? 45 * 60_000 : 15 * 60_000,
+        timeoutMs,
         signal: ac.signal,
         onTick: (j) => {
           const st = useCreateStore.getState()
@@ -601,20 +754,8 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
       } else if (job.status === 'succeeded' && job.result_url) {
         st.setProgressPhase('complete')
         st.setProgress(100, 'Complete!')
-        st.addToGallery({
-          ...galleryItemFromJob(job),
-          prompt: OP_GALLERY_LABEL[op] ?? s.prompt,
-          label,
-          negativePrompt: s.negativePrompt,
-          seed: runSeed,
-          steps: s.steps,
-          cfgScale: s.cfgScale,
-          sampler: s.sampler,
-          scheduler: s.scheduler,
-          width: s.width,
-          height: s.height,
-          intent,
-        })
+        addResult(job)
+        if (oneOnly) st.setError('This server renders one image per run, so one image was made and charged.')
       } else if (job.status === 'canceled') {
         st.setError(null)
       } else {
@@ -644,10 +785,16 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
         // new quote against the number this message just showed, and books.
         st.setCloudStudioCredits(err.credits)
         st.setError(`The price changed to ${err.credits.toLocaleString('en-US')} credits. Review it, then hit Create again.`)
+        lastRunStop = { reason: 'price' }
       } else if (err instanceof CloudJobError && err.status === 429) {
         st.setError(throttleMessage(err))
+        // The three money codes end a batch, a plain "too fast" only pauses it.
+        lastRunStop = err.code === 'credits_exhausted' || err.code === 'video_budget_exhausted' || err.code === 'trainings_exhausted'
+          ? { reason: 'credits' }
+          : { reason: 'throttle', retryAfterMs: err.retryAfterMs }
       } else if (err instanceof CloudJobError && err.status === 401) {
         st.setError('Sign in to your LU Cloud account to render in the cloud.')
+        lastRunStop = { reason: 'auth' }
       } else if (err instanceof CloudJobError && err.message === 'render timed out') {
         // The desktop app has no jobs-history view — point at the account
         // page instead of promising an in-app surface that doesn't exist.
@@ -658,6 +805,7 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
       onQuotaChange?.()
     } finally {
       activeJobId = null
+      activeJobIds = []
       activeAbort = null
       const st = useCreateStore.getState()
       st.setIsGenerating(false)
@@ -666,15 +814,26 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
   }, [onQuotaChange])
 
   const cancel = useCallback(async () => {
-    const id = activeJobId
-    activeAbort?.abort() // stop polling immediately either way
-    if (!id) return
-    try {
-      await cancelJob(id)
-      onQuotaChange?.() // queued-cancel refunds
-    } catch {
-      // 409 (already running/finished) — poll stop is all the client can do
+    const ids = activeJobIds.length ? activeJobIds : activeJobId ? [activeJobId] : []
+    if (!ids.length) {
+      activeAbort?.abort()
+      return
     }
+    // Bei mehreren Bildern wird jeder Auftrag einzeln abgebrochen: die noch
+    // wartenden geben ihren Preis zurueck, ein schon laufender nicht.
+    const results = await Promise.allSettled(ids.map((id) => cancelJob(id)))
+    // 409: a GPU already took the job (bug hunt 01.10.2026, K7). The cancel
+    // used to stop the polling and say nothing, so it looked cancelled while
+    // it finished and kept its credits, and the desktop has no job list to
+    // bring it back later. Say so, and keep polling so the result lands.
+    const running = results.some((r) => r.status === 'rejected' && r.reason instanceof CloudJobError && r.reason.status === 409)
+    if (running) {
+      useCreateStore.getState().setError(RENDER_CANNOT_STOP)
+      if (results.some((r) => r.status === 'fulfilled')) onQuotaChange?.() // the queued ones refunded
+      return
+    }
+    activeAbort?.abort()
+    if (results.some((r) => r.status === 'fulfilled')) onQuotaChange?.() // queued-cancel refunds
   }, [onQuotaChange])
 
   // Talking-character voice maker (qwen3-tts speak/design): a small tts run

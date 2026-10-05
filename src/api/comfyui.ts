@@ -8,7 +8,7 @@ import { resolveRunSeed } from '../lib/run-seed'
 // dynamischer Import, der nur den Zyklus comfyui ↔ dynamic-workflow
 // verdeckt hat. Beide sind reine Graph-Bausteine und wohnen jetzt in
 // comfyui-graph.ts, das nichts importiert.
-import { videoDecodeNode, promptFilenamePrefix, addVideoSaveNodes } from './comfyui-graph'
+import { videoDecodeNode, promptFilenamePrefix, addVideoSaveNodes, tagOutputPrefixes, newRunTag } from './comfyui-graph'
 import type { ComfyApiGraph, ComfyApiNode, ComfyHistoryEntry } from '../types/comfy-graph'
 import type { ComfyModelSource } from '../types/models'
 import { isRecord, asString, asRecordArray } from '../types/json-guards'
@@ -17,6 +17,9 @@ import { isRecord, asString, asRecordArray } from '../types/json-guards'
 // Bundle-Daten gehören weder hierher noch nach discover.ts — sie liegen
 // jetzt in model-bundles.ts, das beide Seiten statisch lesen.
 import { getImageBundles, getVideoBundles } from './model-bundles'
+import { isQwenEnhancerFile } from '../lib/render/qwen-enhancer'
+import { pickQwenEncoder, qwenEncoderFile, type QwenEncoderChoice } from '../lib/render/qwen-text-encoder'
+import { COMPONENT_REGISTRY, type ComponentSpec } from './component-registry'
 
 // ─── Control-plane fetch timeouts ───
 //
@@ -52,11 +55,21 @@ export interface GenerateParams {
   seed: number
   batchSize: number
   inputImage?: string   // I2I source image filename (uploaded to ComfyUI)
+  /** Edit: further reference images (ComfyUI upload names) after the source,
+   *  for the families lib/edit-references names. GH #144. */
+  referenceImages?: string[]
   /** What the model file carries besides the diffusion model (header sniff).
    *  Lets an all-in-one file in models/checkpoints use its own encoder/VAE. */
   modelParts?: { textEncoder: boolean; vae: boolean }
   denoise?: number      // I2I denoise strength (0.0–1.0, default 1.0 = full txt2img)
   removebg?: boolean    // Background removal: LoadImage → RMBG → SaveImage cutout (no diffusion)
+  /** Qwen-Image 2.1 text-to-image only: ask for an RGBA picture with a
+   *  transparent background (lib/transparent-image.ts). Ignored elsewhere. */
+  transparent?: boolean
+  /** Qwen-Image 2.1 only: which installed text encoder reads the prompt, the
+   *  official one or the edition without refusals
+   *  (lib/render/qwen-text-encoder.ts). Ignored elsewhere. */
+  qwenTextEncoder?: QwenEncoderChoice
   // Local Edit (mask inpaint): ComfyUI /upload/image filename of the painted
   // mask (white = repaint). With inputImage set this selects the inpaint
   // pipeline (VAEEncodeForInpaint / InpaintModelConditioning) on the
@@ -156,7 +169,7 @@ export function galleryTypeForFile(
 // 2.5.8: ace / wans2v / wananimate / wanvace are the specialized local-lane
 // architectures (music, talking character, motion control). They are neither
 // image nor video picker material — each lane has its own model list.
-export type ModelType = 'flux' | 'flux2' | 'krea2' | 'zimage' | 'ernie_image' | 'qwenimage' | 'qwenimage1' | 'chroma' | 'hidream' | 'sd3' | 'lumina2' | 'sdxl' | 'sd15' | 'wan' | 'wan22' | 'hunyuan' | 'ltx' | 'mochi' | 'cosmos' | 'cogvideo' | 'svd' | 'framepack' | 'pyramidflow' | 'allegro' | 'ace' | 'wans2v' | 'wananimate' | 'wanvace' | 'animatediff' | 'unknown'
+export type ModelType = 'flux' | 'flux2' | 'krea2' | 'zimage' | 'ernie_image' | 'qwenimage' | 'qwenimage1' | 'chroma' | 'hidream' | 'sd3' | 'lumina2' | 'sdxl' | 'sd15' | 'wan' | 'wan22' | 'hunyuan' | 'ltx' | 'ltx25' | 'mochi' | 'cosmos' | 'cogvideo' | 'svd' | 'framepack' | 'pyramidflow' | 'allegro' | 'ace' | 'yue2' | 'wans2v' | 'wananimate' | 'wanvace' | 'animatediff' | 'minimaxh3' | 'unknown'
 export type VideoBackend = 'wan' | 'animatediff' | 'none'
 
 export interface ClassifiedModel {
@@ -229,6 +242,13 @@ const KNOWN_MODELS: Record<string, ModelType> = {
   absolutereality: 'sd15',
 }
 
+/** FastVideo's distilled MiniMax H3 (fastvideo_fasth3_8step_v2_*). A full
+ *  checkpoint, not a LoRA, and it only does text to video: the model card says
+ *  the first/last frame and reference tasks were not distilled. */
+export function isFastH3(name: string): boolean {
+  return name.toLowerCase().includes('fasth3')
+}
+
 export function classifyModel(name: string | null | undefined): ModelType {
   // Defensive: treat empty/missing names as unknown. Older installs can persist
   // stale model strings that no longer exist; callers should not crash on those.
@@ -247,10 +267,21 @@ export function classifyModel(name: string | null | undefined): ModelType {
   // would otherwise offer a motion module in the image picker).
   if (lower.includes('animatediff')) return 'animatediff'
   if (lower.includes('ace_step') || lower.includes('ace-step') || lower.includes('acestep')) return 'ace'
+  // YuE2 (Comfy-Org/YuE2, ComfyUI 0.36.0): an all in one music checkpoint
+  // that lives in models/checkpoints next to ACE Step, so it needs its own
+  // type or it would land in the image picker as 'unknown'.
+  if (/(^|[^a-z0-9])yue[._-]?2/.test(lower)) return 'yue2'
   // Merged 14B "rapid AIO" builds (e.g. wan2.2-i2v-rapid-aio) are Wan 14B
   // architecture: classic WanImageToVideo graph + wan_2.1_vae — NOT the
   // TI2V-5B path the wan2.2 tag would otherwise route them onto.
   if (lower.includes('rapid') && lower.includes('aio')) return 'wan'
+
+  // MiniMax H3 (Comfy-Org/MiniMax-H3): video with its own sound track, from
+  // text, a first/last frame (fl2va) or references (ref2va). Before every
+  // generic tag: its CivitAI repacks carry anything in their names.
+  // FastH3 (FastVideo's 8 step distillation of H3) is the same architecture
+  // under a file name that never says "minimax": fastvideo_fasth3_8step_v2_*.
+  if (lower.includes('minimax_h3') || lower.includes('minimaxh3') || lower.includes('minimax-h3') || isFastH3(lower)) return 'minimaxh3'
 
   // Video models — most specific first (order matters: specific before generic)
   if (lower.includes('cogvideo')) return 'cogvideo'
@@ -268,6 +299,9 @@ export function classifyModel(name: string | null | undefined): ModelType {
   if (lower.includes('ti2v') || lower.includes('wan2.2') || lower.includes('wan2_2') || lower.includes('wan22')) return 'wan22'
   if (lower.includes('wan')) return 'wan'
   if (lower.includes('hunyuan')) return 'hunyuan'
+  // LTX 2.5 (Lightricks, Aug 2026) has its own two pass graph with sound, so
+  // it must beat the generic LTX match below, which is the 2.3 pipeline.
+  if (/ltx[._\- ]?2[._\- ]?5/.test(lower)) return 'ltx25'
   if (lower.includes('ltx')) return 'ltx'
 
   // ERNIE-Image (Baidu, uses flux2 CLIP type + ConditioningZeroOut for negative)
@@ -292,6 +326,11 @@ export function classifyModel(name: string | null | undefined): ModelType {
   // Before the 'krea' check and the 'xl' suffix scan below, so no later tag
   // can take a 2.1 file first.
   if (/qwen[._-]?image/.test(lower) && /2[._-]?1/.test(lower)) return 'qwenimage'
+  // Noct Q (Noctaluna, September 2026): a Qwen-Image 2.1 finetune whose file
+  // names say neither "qwen" nor "2.1" (NoctQ_V4_int8_convrot.safetensors on
+  // Hugging Face, the CivitAI spelling noctQ_v4). Its header carries the
+  // tensor names and shapes of the official file, so it runs on the same lane.
+  if (/(^|[^a-z0-9])noct[._ -]?q(?![a-z])/.test(lower)) return 'qwenimage'
   // Qwen-Image 1 (2508, 2512) and Qwen-Image-Edit (2509, 2511, FireRed):
   // Qwen2.5-VL 7B encoder, qwen_image_vae, and for the edit files
   // TextEncodeQwenImageEditPlus (Discord 2026-09-28: "every model except
@@ -373,8 +412,9 @@ export function isImageModelType(type: ModelType): boolean {
 }
 
 export function isVideoModelType(type: ModelType): boolean {
-  return type === 'wan' || type === 'wan22' || type === 'hunyuan' || type === 'ltx' || type === 'mochi' || type === 'cosmos'
+  return type === 'wan' || type === 'wan22' || type === 'hunyuan' || type === 'ltx' || type === 'ltx25' || type === 'mochi' || type === 'cosmos'
     || type === 'cogvideo' || type === 'svd' || type === 'framepack' || type === 'pyramidflow' || type === 'allegro'
+    || type === 'minimaxh3'
 }
 
 /**
@@ -386,11 +426,13 @@ export function isVideoModelType(type: ModelType): boolean {
  */
 export function isI2VModel(name: string): boolean {
   const lower = name.toLowerCase()
+  // FastH3 is text to video only (see isFastH3), whatever its H3 family says.
+  if (isFastH3(lower)) return false
   // An A14B expert is either t2v or i2v, its name says which.
   if (wan22Expert(name)) return lower.includes('i2v')
   return lower.includes('i2v') || lower.includes('svd') || lower.includes('framepack')
     || lower.includes('ti2v') || lower.includes('wan2.2') || lower.includes('wan2_2') || lower.includes('wan22')
-    || lower.includes('ltx') || lower.includes('video2world')
+    || lower.includes('ltx') || lower.includes('video2world') || classifyModel(name) === 'minimaxh3'
 }
 
 /**
@@ -518,6 +560,16 @@ export const MODEL_TYPE_DEFAULTS: Record<string, ModelTypeDefaults> = {
   wan22: { steps: 30, cfg: 5.0, sampler: 'euler', scheduler: 'simple', width: 1024, height: 576, frames: 49, fps: 24 },
   hunyuan: { steps: 30, cfg: 6.0, sampler: 'euler', scheduler: 'normal', width: 848, height: 480, frames: 45, fps: 24 },
   ltx: { steps: 20, cfg: 3.0, sampler: 'euler', scheduler: 'normal', width: 768, height: 512, frames: 97, fps: 24 },
+  // LTX 2.5 (official Comfy-Org templates video_ltx2_5_t2v / _i2v, read
+  // 2026-10-02): the distilled model runs two fixed sigma passes (8 steps, then
+  // 3) on euler_ancestral at CFG 1, so steps and sampler here are only what the
+  // sliders show. 1280x704 is the template's 16:9 canvas on the 64 pixel grid
+  // the half size first pass needs; 121 frames at 24 fps is its 5 second default.
+  ltx25: { steps: 8, cfg: 1.0, sampler: 'euler_ancestral', scheduler: 'simple', width: 1280, height: 704, frames: 121, fps: 24 },
+  // Official templates video_minimax_h3_t2v / _i2v (Comfy-Org/workflow_templates,
+  // read 2026-10-01): res_multistep / simple, 20 steps, BasicGuider (no CFG),
+  // 1344x768 native canvas, 24 fps, 124 frames is the node's ~5 s default.
+  minimaxh3: { steps: 20, cfg: 1.0, sampler: 'res_multistep', scheduler: 'simple', width: 1344, height: 768, frames: 124, fps: 24 },
   mochi: { steps: 30, cfg: 4.5, sampler: 'euler', scheduler: 'normal', width: 848, height: 480, frames: 84, fps: 24 },
   cosmos: { steps: 35, cfg: 7.0, sampler: 'euler', scheduler: 'normal', width: 1024, height: 1024, frames: 121, fps: 24 },
   cogvideo: { steps: 50, cfg: 6.0, sampler: 'euler_ancestral', scheduler: 'normal', width: 480, height: 480, frames: 49, fps: 8 },
@@ -534,6 +586,10 @@ export const MODEL_TYPE_DEFAULTS: Record<string, ModelTypeDefaults> = {
   // ACE-Step music: width/height are unused by the audio graph but keep the
   // shared param scaffolding happy; track length lives in musicDuration.
   ace: { steps: 50, cfg: 5.0, sampler: 'euler', scheduler: 'simple', width: 1024, height: 1024, frames: 1, fps: 1 },
+  // YuE2 (official template audio_yue2_text2music): KSampler 32 steps, cfg 1,
+  // dpm_2 on sgm_uniform. The audio graph reads none of it from the sliders but
+  // the scaffold wants the fields.
+  yue2: { steps: 32, cfg: 1.0, sampler: 'dpm_2', scheduler: 'sgm_uniform', width: 1024, height: 1024, frames: 1, fps: 1 },
   // Wan 2.2 S2V — node defaults 832×480, length 77 @ 16 fps.
   wans2v: { steps: 20, cfg: 6.0, sampler: 'euler', scheduler: 'simple', width: 832, height: 480, frames: 77, fps: 16 },
   // Wan 2.2 Animate — node defaults 832×480, length 77 @ 16 fps.
@@ -794,7 +850,13 @@ export async function getCLIPModels(): Promise<string[]> {
  * dropped into `<comfyui>/models/loras/`.
  */
 export async function getLoraModels(): Promise<string[]> {
-  return (await folderOptions('loras')) ?? []
+  return (await listedLoras()) ?? []
+}
+
+/** The same list, or null when ComfyUI could not be asked. Only a real list
+ *  may prune the LoRA stack (GH #146). */
+export async function listedLoras(): Promise<string[] | null> {
+  return folderOptions('loras')
 }
 
 /** The five folders the R5 re-measure (2026-08-30) found missing entirely.
@@ -978,7 +1040,7 @@ export function isStrayAddonFile(name: string): boolean {
 const SNIFF_TYPES: Record<string, ModelType> = {
   flux: 'flux', flux2: 'flux2', krea2: 'krea2', zimage: 'zimage', ernie_image: 'ernie_image',
   qwenimage: 'qwenimage', qwenimage1: 'qwenimage1', chroma: 'chroma', hidream: 'hidream',
-  sd3: 'sd3', lumina2: 'lumina2', sdxl: 'sdxl', sd15: 'sd15', wan: 'wan',
+  sd3: 'sd3', lumina2: 'lumina2', sdxl: 'sdxl', sd15: 'sd15', wan: 'wan', minimaxh3: 'minimaxh3',
 }
 
 /** Name types the header may overrule: the image families and 'unknown'. A
@@ -1146,8 +1208,8 @@ async function inventoryLane(
  *  Two additions over getVideoModels, both of them things ComfyUI really can
  *  serve as video right now:
  *   - the motion modules themselves, wherever the pack keeps them
- *   - the SD checkpoints the AnimateDiff lane drives, but ONLY while motion
- *     modules exist, which is the same condition selectStrategy uses before it
+ *   - the SD checkpoints the catalogue's AnimateDiff bundles ship, but ONLY
+ *     while motion modules exist, which is the same condition selectStrategy uses before it
  *     routes a video request onto the animatediff pipeline. That is the second
  *     file of both AnimateDiff bundles (Realistic Vision), which used to be
  *     counted under Image alone, so a video bundle showed up half in the wrong
@@ -1163,9 +1225,18 @@ export async function getInstalledVideoModels(): Promise<ClassifiedModel[]> {
   ])
   const out: ClassifiedModel[] = [...videoModels, ...motionModels]
   if (motionModels.length > 0) {
+    // Only the checkpoints a video bundle of the catalogue ships, which is
+    // what "the second file of both AnimateDiff bundles" always meant. This
+    // used to take EVERY image checkpoint once a motion module was on disk,
+    // so sd_turbo (an image model no motion module here can drive) stood in
+    // the Video list of the box on 03.10.2026.
+    const bundled = new Set(getVideoBundles().flatMap((b) => b.files)
+      .filter((f) => f.subfolder === 'checkpoints' && f.filename)
+      .map((f) => f.filename!.toLowerCase()))
     const imageModels = await inventoryLane('image', getInstalledMainImageModels)
     for (const m of imageModels) {
       if (m.source !== 'checkpoint') continue
+      if (!bundled.has((m.name.split(/[\\/]/).pop() ?? m.name).toLowerCase())) continue
       if (out.some((x) => x.name === m.name)) continue
       out.push(m)
     }
@@ -1355,6 +1426,9 @@ export const COMFY_MODEL_FOLDERS: Array<{
   { subfolder: 'loras', read: () => nodeOptionsOrNull('LoraLoader', 'lora_name') },
   { subfolder: 'controlnet', read: () => nodeOptionsOrNull('ControlNetLoader', 'control_net_name') },
   { subfolder: 'upscale_models', read: () => nodeOptionsOrNull('UpscaleModelLoader', 'model_name') },
+  // The x2 latent upscaler LTX 2.5's second pass needs (a different folder
+  // and a different loader from the image upscalers above).
+  { subfolder: 'latent_upscale_models', read: () => nodeOptionsOrNull('LatentUpscaleModelLoader', 'model_name') },
   { subfolder: 'style_models', read: () => nodeOptionsOrNull('StyleModelLoader', 'style_model_name') },
   { subfolder: ANIMATEDIFF_SUBFOLDER, read: () => nodeOptionsOrNull('ADE_LoadAnimateDiffModel', 'model_name') },
 ]
@@ -1459,13 +1533,16 @@ export async function getGgufUnetModels(): Promise<string[]> {
   }
 }
 
-/** Music lane: ACE-Step all-in-one checkpoints (model + text encoder + VAE). */
+/** The architectures the music lane runs. Both ship as all in one checkpoints. */
+export const isMusicModelType = (type: ModelType): boolean => type === 'ace' || type === 'yue2'
+
+/** Music lane: ACE-Step and YuE2 all-in-one checkpoints (model + text encoder + VAE). */
 export async function getAudioModels(): Promise<ClassifiedModel[]> {
   const checkpoints = await getCheckpoints()
   const complete = await filterPartialFiles(checkpoints)
   return checkpoints
-    .filter((name) => complete.has(name) && classifyModel(name) === 'ace')
-    .map((name) => ({ name, type: 'ace' as ModelType, source: 'checkpoint' as const }))
+    .filter((name) => complete.has(name) && isMusicModelType(classifyModel(name)))
+    .map((name) => ({ name, type: classifyModel(name), source: 'checkpoint' as const }))
 }
 
 /** Talking-character lane: Wan 2.2 S2V UNets (safetensors via UNETLoader,
@@ -1552,16 +1629,32 @@ function isQwenImage21Vae(name: string): boolean {
   return /qwen[._-]?image[._-]?2[._-]?1/.test(name.toLowerCase())
 }
 
-/** Qwen-Image 2.1's text encoder tier (Qwen3-VL 8B). Krea 2 uses the 4B
- *  sibling under a near-identical name, and the two have different embedding
- *  dimensions. */
+/** Qwen-Image 2.1's text encoder tier (Qwen3-VL 8B), official or with the
+ *  refusals removed. Krea 2 uses the 4B sibling under a near-identical name,
+ *  and the two have different embedding dimensions. */
 function isQwen3vl8b(name: string): boolean {
-  return /qwen3[._-]?vl[._-]?8b/.test(name.toLowerCase())
+  return qwenEncoderFile(name) !== null
+}
+
+/** MiniMax H3's own encoder (qwen3vl_32b_minimax_h3_*). It is a Qwen3-VL file
+ *  too, so every family that matches its encoder on a generic qwen / qwen3vl
+ *  stem has to step around it, or a box holding both loads a 32B encoder
+ *  into a 4B slot. */
+function isMinimaxEncoder(name: string): boolean {
+  return name.toLowerCase().includes('minimax')
+}
+
+/** An empty ComfyUI list still names the file this family needs, so Create
+ *  can offer it as a download instead of "a VAE for your model type". */
+function nothingInstalled(kind: 'VAE' | 'text encoder', specs: (ComponentSpec | undefined)[]): Error {
+  const files = specs.filter((x): x is ComponentSpec => !!x).map((x) => `"${x.downloadFilename}"`)
+  if (files.length === 0) return new Error(`No ${kind} models found. Download a ${kind} for your model type from the Model Manager.`)
+  return new Error(`No ${kind} models found. Download ${files.join(' and ')} from the Model Manager.`)
 }
 
 export async function findMatchingVAE(modelType: ModelType): Promise<string> {
   const vaes = await getVAEModels()
-  if (vaes.length === 0) throw new Error('No VAE models found. Download a VAE for your model type from the Model Manager.')
+  if (vaes.length === 0) throw nothingInstalled('VAE', [COMPONENT_REGISTRY[modelType]?.vae])
   const lower = (s: string) => s.toLowerCase()
 
   if (modelType === 'zimage') {
@@ -1642,11 +1735,25 @@ export async function findMatchingVAE(modelType: ModelType): Promise<string> {
     throw new Error(`No Wan 2.2 VAE found. Download "wan2.2_vae.safetensors" from the Model Manager.`)
   }
   if (modelType === 'ltx') {
-    // No first-VAE fallback: a foreign VAE decodes LTX latents to garbage. A
-    // checkpoint uses its own VAE when this throws (dynamic-workflow carriesVae).
-    const match = vaes.find(v => lower(v).includes('ltx'))
+    const match = vaes.find(v => lower(v).includes('ltx') && !isLtx25File(v))
+      || vaes.find(v => lower(v).includes('ltx'))
     if (match) return match
     throw new Error('No LTX-Video VAE found. Use the full LTX-Video checkpoint in models/checkpoints, which carries its VAE.')
+  }
+  if (modelType === 'ltx25') {
+    // The VIDEO autoencoder. The audio one is a second file (findLtx25AudioVAE)
+    // and the "-conv" video variant is an alternative the template does not use.
+    const match = vaes.find(v => /ltx[._-]?2[._-]?5[._-]video[._-]vae/.test(lower(v)) && !lower(v).includes('conv'))
+    if (match) return match
+    throw new Error(`No LTX 2.5 video VAE found. Download "ltx-2.5-video-vae-bf16.safetensors" from the Model Manager.`)
+  }
+  if (modelType === 'minimaxh3') {
+    // The VIDEO autoencoder; the audio one is a second file of its own
+    // (findMiniMaxAudioVAE), and the two are not interchangeable.
+    const match = vaes.find(v => lower(v).includes('minimax_h3_video_vae'))
+      || vaes.find(v => lower(v).includes('minimax') && lower(v).includes('video'))
+    if (match) return match
+    throw new Error(`No MiniMax H3 video VAE found. Download "minimax_h3_video_vae_int8_convrot.safetensors" from the Model Manager.`)
   }
   if (modelType === 'mochi') {
     const match = vaes.find(v => lower(v).includes('mochi'))
@@ -1692,7 +1799,7 @@ export async function findMatchingVAE(modelType: ModelType): Promise<string> {
  */
 export async function findFluxCLIPPair(): Promise<{ t5: string; clipL: string }> {
   const clips = await getCLIPModels()
-  if (clips.length === 0) throw new Error('No text encoder models found. Download a CLIP/T5 model for your model type from the Model Manager.')
+  if (clips.length === 0) throw nothingInstalled('text encoder', [COMPONENT_REGISTRY.flux?.clip, COMPONENT_REGISTRY.flux?.clipSecondary])
   const lower = (s: string) => s.toLowerCase()
   const t5 = clips.find(c => lower(c).includes('t5') && !lower(c).includes('umt5') && !lower(c).includes('oldt5'))
   const clipL = clips.find(c => lower(c).includes('clip_l'))
@@ -1712,13 +1819,37 @@ export async function findFluxCLIPPair(): Promise<{ t5: string; clipL: string }>
  */
 export async function findFramePackCLIPPair(): Promise<{ clipL: string; llavaLlama3: string }> {
   const clips = await getCLIPModels()
-  if (clips.length === 0) throw new Error('No text encoder models found. Download a CLIP/T5 model for your model type from the Model Manager.')
+  if (clips.length === 0) throw nothingInstalled('text encoder', [COMPONENT_REGISTRY.framepack?.clip, COMPONENT_REGISTRY.framepack?.clipSecondary])
   const lower = (s: string) => s.toLowerCase()
   const clipL = clips.find(c => lower(c).includes('clip_l'))
   const llavaLlama3 = clips.find(c => lower(c).includes('llava'))
   if (!clipL) throw new Error(`No FramePack CLIP-L text encoder found. Download "clip_l.safetensors" from the Model Manager.`)
   if (!llavaLlama3) throw new Error(`No FramePack llava_llama3 text encoder found. Download "llava_llama3_fp8_scaled.safetensors" from the Model Manager.`)
   return { clipL, llavaLlama3 }
+}
+
+/** A file that says it is an LTX 2.5 one (ltx-2.5-..., gemma4-...-ltx-2.5-...). */
+export function isLtx25File(name: string): boolean {
+  return /ltx[._\- ]?2[._\- ]?5/.test(name.toLowerCase())
+}
+
+/** The sound autoencoder LTX 2.5 decodes its audio with. A second file next to
+ *  the video VAE, and the two are not interchangeable. */
+export async function findLtx25AudioVAE(): Promise<string> {
+  const vaes = await getVAEModels()
+  const match = vaes.find(v => isLtx25File(v) && v.toLowerCase().includes('audio'))
+  if (match) return match
+  throw new Error(`No LTX 2.5 audio VAE found. Download "ltx-2.5-audio-vae-bf16.safetensors" from the Model Manager.`)
+}
+
+/** MiniMax H3's audio autoencoder. The model writes picture and sound into
+ *  one latent and decodes the sound half with this file. */
+export async function findMiniMaxAudioVAE(): Promise<string> {
+  const vaes = await getVAEModels()
+  const match = vaes.find(v => v.toLowerCase().includes('minimax_h3_audio_vae'))
+    || vaes.find(v => v.toLowerCase().includes('minimax') && v.toLowerCase().includes('audio'))
+  if (match) return match
+  throw new Error(`No MiniMax H3 audio VAE found. Download "minimax_h3_audio_vae_fp32.safetensors" from the Model Manager.`)
 }
 
 /**
@@ -1731,6 +1862,8 @@ export async function findFramePackCLIPPair(): Promise<{ clipL: string; llavaLla
  *   the full-precision Qwen encoder. When omitted (legacy callers), we
  *   fall back to the full-precision variant, which is what most users
  *   want.
+ * @param qwenTextEncoder Qwen-Image 2.1 only: the edition the user picked in
+ *   the advanced settings. Omitted, the official one goes first.
  */
 /**
  * HunyuanVideo 1.5, told apart from HunyuanVideo 1 by its file name. The two
@@ -1821,9 +1954,13 @@ export async function findHunyuan15Encoders(): Promise<{ qwen: string; byt5: str
   return { qwen, byt5 }
 }
 
-export async function findMatchingCLIP(modelType: ModelType, activeModelName?: string): Promise<string> {
-  const clips = await getCLIPModels()
-  if (clips.length === 0) throw new Error('No text encoder models found. Download a CLIP/T5 model for your model type from the Model Manager.')
+export async function findMatchingCLIP(modelType: ModelType, activeModelName?: string, qwenTextEncoder?: QwenEncoderChoice): Promise<string> {
+  // The Qwen-Image 2.1 prompt enhancers sit in the same folder and carry
+  // "qwen" in their names, but they are text models, not encoders. Without
+  // this they answer the loose "qwen" searches below (HunyuanVideo, FramePack,
+  // FLUX 2) before the real encoder does.
+  const clips = (await getCLIPModels()).filter((c) => !isQwenEnhancerFile(c))
+  if (clips.length === 0) throw nothingInstalled('text encoder', [COMPONENT_REGISTRY[modelType]?.clip])
   const lower = (s: string) => s.toLowerCase()
   const modelLc = activeModelName ? lower(activeModelName) : ''
   const modelIsFp4 = /fp4|nf4/.test(modelLc)
@@ -1846,9 +1983,9 @@ export async function findMatchingCLIP(modelType: ModelType, activeModelName?: s
     // filename of the active UNet (see `modelIsFp4` above). Fallback
     // order ensures we never hard-fail when the "ideal" encoder isn't
     // installed: we try the paired one first, then the other.
-    const qwenFp4  = clips.find(c => lower(c).includes('qwen') && (lower(c).includes('fp4') || lower(c).includes('nf4')) && !lower(c).includes('qwen_2.5_vl'))
+    const qwenFp4  = clips.find(c => lower(c).includes('qwen') && (lower(c).includes('fp4') || lower(c).includes('nf4')) && !lower(c).includes('qwen_2.5_vl') && !isMinimaxEncoder(c))
     const qwenFull = clips.find(c => lower(c).includes('qwen_3_4b') && !lower(c).includes('fp4') && !lower(c).includes('nf4') && !lower(c).includes('vl'))
-    const qwenAny  = clips.find(c => lower(c).includes('qwen') && !lower(c).includes('qwen_2.5_vl'))
+    const qwenAny  = clips.find(c => lower(c).includes('qwen') && !lower(c).includes('qwen_2.5_vl') && !isMinimaxEncoder(c))
     const mistral  = clips.find(c => lower(c).includes('mistral'))
     const match = modelIsFp4
       ? (qwenFp4 || qwenFull || qwenAny || mistral)
@@ -1868,8 +2005,10 @@ export async function findMatchingCLIP(modelType: ModelType, activeModelName?: s
     // to the 8B tier with no fallback: Krea 2's 4B sibling sits in the same
     // folder under a near-identical name and has different embedding
     // dimensions, so a fallback would load silently and encode nonsense.
-    const match = clips.find(c => isQwen3vl8b(c))
-    if (match) return match
+    // Two editions can sit side by side, the official one and the one
+    // without refusals; the advanced settings say which one reads the prompt.
+    const match = pickQwenEncoder(clips, qwenTextEncoder)
+    if (match) return match.file
     throw new Error(`No Qwen-Image 2.1 text encoder found. Download "qwen3vl_8b_int8_convrot.safetensors" from the Model Manager.`)
   }
   if (modelType === 'krea2') {
@@ -1879,8 +2018,8 @@ export async function findMatchingCLIP(modelType: ModelType, activeModelName?: s
     // The 8B file is excluded throughout: it belongs to Qwen-Image 2.1, and
     // since that bundle landed in the Model Manager a box can hold both.
     const match = clips.find(c => /qwen3[._-]?vl[._-]?4b/.test(lower(c)))
-      || clips.find(c => (lower(c).includes('qwen3vl') || lower(c).includes('qwen3_vl')) && !isQwen3vl8b(c))
-      || clips.find(c => lower(c).includes('qwen') && lower(c).includes('vl') && !isQwen3vl8b(c))
+      || clips.find(c => (lower(c).includes('qwen3vl') || lower(c).includes('qwen3_vl')) && !isQwen3vl8b(c) && !isMinimaxEncoder(c))
+      || clips.find(c => lower(c).includes('qwen') && lower(c).includes('vl') && !isQwen3vl8b(c) && !isMinimaxEncoder(c))
     if (match) return match
     throw new Error(`No Krea 2 text encoder found. Download "qwen3vl_4b_fp8_scaled.safetensors" from the Model Manager.`)
   }
@@ -1892,7 +2031,7 @@ export async function findMatchingCLIP(modelType: ModelType, activeModelName?: s
   }
   if (modelType === 'hunyuan') {
     // HunyuanVideo 1.5 uses Qwen 2.5 VL, older versions use llava_llama3
-    const match = clips.find(c => lower(c).includes('qwen'))
+    const match = clips.find(c => lower(c).includes('qwen') && !isMinimaxEncoder(c))
       || clips.find(c => lower(c).includes('llava'))
       || clips.find(c => lower(c).includes('umt5'))
     if (match) return match
@@ -1906,15 +2045,31 @@ export async function findMatchingCLIP(modelType: ModelType, activeModelName?: s
   }
   if (modelType === 'ltx') {
     // LTX-Video 0.9 reads T5-XXL (CLIPLoader type ltxv, ltxv_text_to_video
-    // template); LTX-2 reads Gemma 3 (its own builder).
+    // template); LTX-2 reads Gemma 3 (its own builder). The Gemma 4 encoders
+    // belong to LTX 2.5 and would be refused by a 2.3 graph.
     if (activeModelName && !isLtx2(activeModelName)) {
       const t5 = clips.find(c => lower(c).includes('t5xxl')) || clips.find(c => lower(c).includes('t5') && !lower(c).includes('umt5'))
       if (t5) return t5
       throw new Error('No LTX-Video text encoder found. Download "t5xxl_fp16.safetensors" from the Model Manager.')
     }
-    const match = clips.find(c => lower(c).includes('gemma'))
+    const match = clips.find(c => lower(c).includes('gemma') && !lower(c).includes('gemma4'))
     if (match) return match
     throw new Error(`No LTX Video text encoder found. Download "gemma_3_12B_it_fp8_scaled.safetensors" from the Model Manager.`)
+  }
+  if (modelType === 'ltx25') {
+    // Lightricks' own Gemma 4 12B with the projection LTX 2.5 needs. A plain
+    // Gemma 4 file (no "ltx") is a different encoder and is not accepted.
+    const match = clips.find(c => lower(c).includes('gemma4') && isLtx25File(c))
+    if (match) return match
+    throw new Error(`No LTX 2.5 text encoder found. Download "gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors" from the Model Manager.`)
+  }
+  if (modelType === 'minimaxh3') {
+    // Qwen3-VL 32B, tuned for H3 and shipped only under H3's own names. The
+    // nvfp4 tier is the one the official templates load (15.7 GB).
+    const match = clips.find(c => isMinimaxEncoder(c) && lower(c).includes('nvfp4'))
+      || clips.find(c => isMinimaxEncoder(c))
+    if (match) return match
+    throw new Error(`No MiniMax H3 text encoder found. Download "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors" from the Model Manager.`)
   }
   if (modelType === 'mochi') {
     const match = clips.find(c => lower(c).includes('t5') && !lower(c).includes('umt5') && !lower(c).includes('oldt5'))
@@ -1933,7 +2088,7 @@ export async function findMatchingCLIP(modelType: ModelType, activeModelName?: s
     throw new Error(`No CogVideoX text encoder found. Download "t5xxl_fp16.safetensors" from the Model Manager.`)
   }
   if (modelType === 'framepack') {
-    const match = clips.find(c => lower(c).includes('llava') || lower(c).includes('qwen'))
+    const match = clips.find(c => lower(c).includes('llava') || (lower(c).includes('qwen') && !isMinimaxEncoder(c)))
       || clips.find(c => lower(c).includes('umt5'))
     if (match) return match
     throw new Error(`No FramePack text encoder found. Download "llava_llama3_fp8_scaled.safetensors" from the Model Manager.`)
@@ -1987,7 +2142,8 @@ async function findAnimateDiffModel(): Promise<string> {
 // ─── Workflow Submission ───
 
 export async function submitWorkflow(workflow: ComfyApiGraph, clientId?: string): Promise<string> {
-  const payload: Record<string, unknown> = { prompt: workflow }
+  // Every run its own output names (comfyui-graph tagOutputPrefixes).
+  const payload: Record<string, unknown> = { prompt: tagOutputPrefixes(workflow, newRunTag()) }
   if (clientId) payload.client_id = clientId
   // Use localFetch (Rust proxy in Tauri, direct fetch in dev). The previous
   // direct-only fetch broke for any ComfyUI not started by LU itself —
@@ -2469,6 +2625,15 @@ export async function buildFluxImgWorkflow(params: GenerateParams): Promise<Comf
 }
 
 // ─── Auto-select Image Workflow ───
+
+/** The fixed graphs below know four image families and two video ones. Any
+ *  other family handed to them becomes a checkpoint or Wan 2.1 graph that
+ *  ComfyUI refuses with "Value not in list" (Discord 2026-10-01, Qwen-Image
+ *  2.1 and MiniMax H3), so the caller keeps the builder's own error instead. */
+export function legacyBuilderFits(modelType: ModelType, video: boolean): boolean {
+  if (video) return modelType === 'wan' || modelType === 'animatediff' || modelType === 'sd15'
+  return modelType === 'sd15' || modelType === 'sdxl' || modelType === 'flux' || modelType === 'flux2' || modelType === 'unknown'
+}
 
 export async function buildTxt2ImgWorkflow(params: GenerateParams, modelType: ModelType): Promise<ComfyApiGraph> {
   if (modelType === 'flux' || modelType === 'flux2') return buildFluxImgWorkflow(params)

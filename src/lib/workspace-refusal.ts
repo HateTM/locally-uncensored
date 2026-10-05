@@ -12,6 +12,8 @@
 // (`contain_within`, `check_workspace_root`), mirrored for the dev server in
 // lib/dev-fs-jail.ts. Its wording is pinned there; this only recognises it.
 
+import { isRecovered } from './recovered-failure'
+
 /** Both jail refusals: a path that leaves the working folder, and a working
  *  folder the jail does not accept at all. */
 export const OUTSIDE_WORKSPACE = /escapes the allowed workspace|Not an allowed workspace folder/i
@@ -24,6 +26,15 @@ export function isOutsideWorkspaceRefusal(toolName: string, error: string | null
   return FILE_TOOLS.has(toolName) && !!error && OUTSIDE_WORKSPACE.test(error)
 }
 
+/** A refused file the run did not get by itself (a later call of the same
+ *  tool on the same file name succeeded). Only then is the line worth
+ *  showing; see lib/recovered-failure.ts. */
+export function hasUnrecoveredOutsideRefusal(
+  steps: readonly { toolName: string; status: string; error?: string | null; args?: unknown }[],
+): boolean {
+  return steps.some((c, i) => c.status === 'failed' && isOutsideWorkspaceRefusal(c.toolName, c.error) && !isRecovered(steps, i))
+}
+
 /** The line above the chat, in the words of the buttons the user sees. */
 export const OUTSIDE_WORKSPACE_NOTICE =
-  'The agent can only open files in this chat\'s folder. To let it use yours, click the Sandbox or folder button next to Agent, choose "Pick a folder…" and select the folder that holds them, then ask again.'
+  'The agent can only work with files in this chat\'s folder. To let it use another place, click the Sandbox or folder button next to Agent, choose "Pick a folder…" and select that folder, then ask again.'

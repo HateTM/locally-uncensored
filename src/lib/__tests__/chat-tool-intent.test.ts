@@ -71,6 +71,9 @@ describe('detectChatToolCapability', () => {
       'schreib eine datei mit dem text hallo',
       'speicher das als output.json',
       'export the result to a csv file',
+      // Still a target when the name is the object of the write.
+      'write the list to `notes.md`',
+      'save it as notes.md in the workspace',
     ]) {
       it(`file: "${p}"`, () => expect(detectChatToolCapability(p)).toBe('file'))
     }
@@ -90,6 +93,10 @@ describe('detectChatToolCapability', () => {
       'make it shorter please',
       'what do you think about this idea',
       'summarize the conversation so far', // no page/url noun
+      // 3.0.4 box run: a file name mentioned as text is not a file to write.
+      'Write two short sentences. Put the file name `notes.md` in backticks and the word **important** in bold.',
+      'Put notes.md in backticks.',
+      'Schreib zwei Saetze und setz den Dateinamen notes.md fett.',
     ]) {
       it(`plain: "${p}"`, () => expect(detectChatToolCapability(p)).toBeNull())
     }

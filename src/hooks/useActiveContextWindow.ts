@@ -6,7 +6,7 @@ import { getModelContextCached } from '../api/ollama'
 import { getLmStudioModelContext } from '../api/lmstudio'
 import { getModelMaxTokens } from '../lib/context-compaction'
 import { effectiveContextWindow } from '../lib/context-window'
-import { effectiveSendWindow } from '../lib/send-window'
+import { effectiveSendWindow, isPaidProvider, sendWindowFor } from '../lib/send-window'
 import { isManagedBuiltinSlot } from '../api/builtin-ensure'
 import { ENGINE_DEFAULT_CTX } from '../lib/builtin-ctx'
 import { bundledEngineStatus, bundledCtxTrain } from '../api/engine'
@@ -107,11 +107,22 @@ export function remoteWindowSource(
   return providerId === 'lu-cloud' && max > 0 ? 'probe' : 'guess'
 }
 
+/**
+ * The last window each model resolved to, for the whole app session. The
+ * counter mounts with a conversation's first message, and a fresh mount used
+ * to start unresolved: for the length of the provider probe it divided by a
+ * stand-in and read "18/16K", then "30/32K" (Gegenprobe 01.10.2026). A mount
+ * now starts from what this model last resolved to and the probe refreshes
+ * it, so the number only changes when the window really did.
+ */
+const lastResolved = new Map<string, ActiveContext>()
+
 export function useActiveContextWindow(reloadTick = 0): ActiveContext {
   const activeModel = useModelStore((s) => s.activeModel)
   const override = useSettingsStore((s) => s.settings.contextWindowOverride)
   const builtinCtx = useSettingsStore((s) => s.settings.builtinEngine.ctx)
-  const sendWindowTokens = useSettingsStore((s) => s.settings.codexSendWindowTokens)
+  const globalSendWindow = useSettingsStore((s) => s.settings.codexSendWindowTokens)
+  const cloudPicks = useSettingsStore((s) => s.settings.cloudSendWindowByModel)
   const capEnabled = useSettingsStore((s) => s.settings.contextDecay)
   // The resolved window carries the model it was resolved FOR. That tag does
   // two jobs: the "no model" case becomes a derivation instead of a setState
@@ -121,7 +132,10 @@ export function useActiveContextWindow(reloadTick = 0): ActiveContext {
   // about the counter never lying, and "62k of 262k" under a model that has
   // 8k is exactly the lie. Unresolved reads as unknown, which is the state
   // every consumer already handles on mount.
-  const [resolved, setResolved] = useState<{ model: string; ctx: ActiveContext } | null>(null)
+  const [resolved, setResolved] = useState<{ model: string; ctx: ActiveContext } | null>(() => {
+    const known = activeModel ? lastResolved.get(activeModel) : undefined
+    return activeModel && known ? { model: activeModel, ctx: known } : null
+  })
 
   // Re-read whenever a model reload finishes anywhere (the Context dropdown
   // fires this), so every consumer — counter AND dropdown — reflects the new
@@ -137,7 +151,10 @@ export function useActiveContextWindow(reloadTick = 0): ActiveContext {
     if (!activeModel) return
     let cancelled = false
     const providerId = getProviderIdFromModel(activeModel)
-    const setState = (ctx: ActiveContext) => setResolved({ model: activeModel, ctx })
+    const setState = (ctx: ActiveContext) => {
+      lastResolved.set(activeModel, ctx)
+      setResolved({ model: activeModel, ctx })
+    }
 
     ;(async () => {
       // ── Ollama: num_ctx is per-request, so what we send == what runs. ──
@@ -286,7 +303,7 @@ export function useActiveContextWindow(reloadTick = 0): ActiveContext {
         sendWindow: effectiveSendWindow({
           providerId,
           modelWindow: max,
-          sendWindowTokens,
+          sendWindowTokens: sendWindowFor({ codexSendWindowTokens: globalSendWindow, cloudSendWindowByModel: cloudPicks }, activeModel),
           capEnabled,
           // Der Zweig oben kehrt nur um, wenn der eigene Server ein Fenster
           // GENANNT hat. Sagt er keins, faellt er bis hierher durch, und ohne
@@ -294,18 +311,20 @@ export function useActiveContextWindow(reloadTick = 0): ActiveContext {
           localBackend: sendsToALanBackend(providerId),
         }),
         isTrue: false,
-        // Aus der Ferne ist das Fenster keine Sache des Nutzers: es gehoert
-        // einer fremden Bereitstellung, und der Sendedeckel ist hier der
-        // Hebel, der den Nenner regelt.
-        adjustable: false,
+        // The model's own window belongs to the remote deployment, but on a
+        // paid provider the send window is the user's lever: how much of the
+        // conversation each step sends and pays for. The dropdown sets it per
+        // model (settings.cloudSendWindowByModel). A LAN server that fell
+        // through to here bills nobody, so there is nothing to choose.
+        adjustable: capEnabled !== false && isPaidProvider(providerId, sendsToALanBackend(providerId)),
         // Woher die Zahl kommt, auch wenn sie hier niemand verstellen kann.
         source: remoteWindowSource(providerId, cloudResolved?.source, max),
-        windowKey: '',
+        windowKey: activeModel,
       })
     })()
 
     return () => { cancelled = true }
-  }, [activeModel, override, builtinCtx, sendWindowTokens, capEnabled, reloadTick, reloadBump])
+  }, [activeModel, override, builtinCtx, globalSendWindow, cloudPicks, capEnabled, reloadTick, reloadBump])
 
   return activeModel && resolved?.model === activeModel ? resolved.ctx : NO_CONTEXT
 }

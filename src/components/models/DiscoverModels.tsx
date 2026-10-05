@@ -1,4 +1,4 @@
-import { useCallback, useState, useEffect, useRef } from 'react'
+import { Fragment, useCallback, useState, useEffect, useRef } from 'react'
 import { chatRecommendationGroups, isBelowChatMinimum, SMALL_CHAT_MODEL_WARNING } from '../../lib/chat-model-minimum'
 import { bundleIsComplete, bundleIsDownloading, bundleHasErrors } from '../../lib/bundle-state'
 import { motion } from 'framer-motion'
@@ -6,16 +6,18 @@ import { Search, XCircle, Sparkles, Unlock, ShieldCheck, ExternalLink, Info } fr
 import { X } from 'lucide-react'
 import {
   searchHuggingFaceModels,
-  getImageBundles, getVideoBundles,
+  getImageBundles, getVideoBundles, getAudioBundles, getLipsyncBundles, getMotionBundles,
   getUncensoredTextModels, getMainstreamTextModels,
   detectProviderModelPath, startModelDownloadToPath, luEngineDownloadDir,
   startModelDownload,
-  installBundleComplete, remoteBundleNotice, checkBundlesInstalled, resolveHfGgufFiles, planModelDownload,
+  installBundleComplete, remoteBundleNotice, checkBundlesOnDisk, resolveHfGgufFiles, planModelDownload,
   type DiscoverModel, type DownloadProgress, type ModelBundle, type HfGgufFile,
 } from '../../api/discover'
-import { getSystemVRAM } from '../../api/comfyui'
-import { getMaxVramGb, getTotalRamGb, bundleVramNeedGb } from '../../lib/hardware'
-import { openExternal } from '../../api/backend'
+import { sortByTier, tierGroup } from '../../lib/render/model-tier'
+import { getTotalRamGb } from '../../lib/hardware'
+import { vramFit } from '../../lib/vram-fit'
+import { useGraphicsMemoryGb } from '../../hooks/useGraphicsMemory'
+import { openExternal, isMacOS } from '../../api/backend'
 import { useModels } from '../../hooks/useModels'
 import { useDownloadStore } from '../../stores/downloadStore'
 import { ModelGridSkeleton } from '../layout/ViewSkeletons'
@@ -23,7 +25,6 @@ import { useProviderStore } from '../../stores/providerStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { engineCtx } from '../../lib/vram-fit'
 import { useModelStore } from '../../stores/modelStore'
-import { getProviderIdFromModel } from '../../api/providers'
 import { activateDownloadedBundledModel } from '../../lib/bundled-download-activation'
 import { diagnoseBuiltinEngine } from '../../api/builtin-ensure'
 import type { InstalledModelLike } from '../../lib/lmstudio-match'
@@ -31,7 +32,7 @@ import { findInstalledForDiscoverModel } from '../../lib/discover-installed'
 import { isBuiltinEngineEntry } from '../../lib/lmstudio-match'
 import { ensureLuEngineIsChatProvider, announceLuEngineSwitch } from '../../api/lu-engine-switch'
 import { LuEngineSwitchBar } from '../chat/LuEngineSwitchBar'
-import { resolveTextDownloadTarget } from '../../lib/text-download-target'
+import { ollamaOnlyDownloadBlock, resolveTextDownloadTarget } from '../../lib/text-download-target'
 import { hfUrlToOllamaRef, hfUrlToLmStudioSubdir, parseHfUrl, extractGgufQuant, isShardedOrIncompatibleGguf } from '../../lib/hf-to-provider'
 import { HINWEIS_TEXT } from '../../lib/hinweis'
 import { GlowButton } from '../ui/GlowButton'
@@ -221,7 +222,7 @@ export function awaitDownloadedFile(
 
 export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }: Props) {
   const [loading, setLoading] = useState(false)
-  const [systemVRAM, setSystemVRAM] = useState<number | null>(null)
+  const systemVRAM = useGraphicsMemoryGb()
   const [ramGb, setRamGb] = useState<number | null>(null)
   // Mainstream is the default + first tab (David 2026-07-17) — Unfiltered is
   // one click away but new users land on the neutral list.
@@ -264,29 +265,29 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
     detectProviderModelPath(providerName).then(path => setHfModelPath(path))
   }, [category, hfOverride, providers.openai?.name])
 
-  // Detect hardware for the "runs on your PC" hints. Two probes, best wins:
-  // detect_gpus (nvidia-smi/rocm-smi/wmic — works WITHOUT ComfyUI running)
-  // and ComfyUI's /system_stats (the pre-redesign source, kept as fallback).
+  // The graphics memory behind the "runs on your PC" hints comes from
+  // useGraphicsMemoryGb above (detect_gpus and ComfyUI's /system_stats, best
+  // wins), the same reading Create uses. RAM is asked here.
   useEffect(() => {
-    getMaxVramGb().then(v => {
-      if (v > 0) setSystemVRAM(prev => Math.max(prev ?? 0, Math.round(v)))
-    }).catch(() => {})
-    getSystemVRAM().then(v => {
-      if (v) setSystemVRAM(prev => Math.max(prev ?? 0, v))
-    })
     getTotalRamGb().then(r => { if (r > 0) setRamGb(r) }).catch(() => {})
   }, [])
 
   // Check which bundles are REALLY installed (file size validated, not just file existence)
   const [bundleStatuses, setBundleStatuses] = useState<Record<string, boolean>>({})
+  // Which bundle files are there already, so a card announces only what Get
+  // will really fetch (bundles share their text encoders and VAEs).
+  const [bundleFilesOnDisk, setBundleFilesOnDisk] = useState<ReadonlySet<string>>(() => new Set())
   // Memoised so the two effects below can name it as the dependency it is
   // instead of hiding it from the dep array. It only closes over `category`,
   // so its identity changes exactly when the effects had to re-run anyway —
   // no re-subscription loop.
   const refreshBundleStatuses = useCallback(() => {
     if (category !== 'image' && category !== 'video') return
-    const allBundles = [...getImageBundles(), ...getVideoBundles()]
-    checkBundlesInstalled(allBundles).then(statuses => setBundleStatuses(statuses))
+    const allBundles = [...getImageBundles(), ...getVideoBundles(), ...getAudioBundles(), ...getLipsyncBundles(), ...getMotionBundles()]
+    checkBundlesOnDisk(allBundles).then(({ installed, files }) => {
+      setBundleStatuses(installed)
+      setBundleFilesOnDisk(files)
+    })
   }, [category])
   useEffect(() => {
     refreshBundleStatuses()
@@ -307,17 +308,33 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
   const isText = category === 'text'
   const isImage = category === 'image'
   const isVideo = category === 'video'
-  const bundles = isImage ? getImageBundles() : isVideo ? getVideoBundles() : []
+  // The Video tab also carries the other Create lanes (music, lip sync, motion).
+  // They used to be installable only from the empty-lane starter card of Create,
+  // so a second music model (YuE2 next to ACE Step) or the Wan S2V FP8 variant
+  // could never be fetched once the first one was on disk. Each such tile says
+  // which lane it belongs to.
+  const laneOf = new Map<string, string>([
+    ...getAudioBundles().map((b) => [b.name, 'Music'] as const),
+    ...getLipsyncBundles().map((b) => [b.name, 'Lip sync'] as const),
+    ...getMotionBundles().map((b) => [b.name, 'Motion'] as const),
+  ])
+  const bundles = isImage
+    ? getImageBundles()
+    : isVideo ? [...getVideoBundles(), ...getAudioBundles(), ...getLipsyncBundles(), ...getMotionBundles()] : []
 
-  // How much VRAM a bundle wants, read by the ONE shared parser in
-  // lib/hardware. The local copy that used to live here answered 99 GB to the
-  // add-on bundles, whose requirement reads "any", so the sort buried them,
-  // the tier filter hid them and the tile called a 0.17 GB LoRA too big for a
-  // 12 GB card.
-  const parseVRAM = (b: ModelBundle): number => bundleVramNeedGb(b)
+  // How much graphics memory a bundle wants to run without offloading, from the
+  // ONE rule in lib/vram-fit. The companion files name no number, their
+  // download size stands in so they keep a place in the sort and the buckets.
+  const parseVRAM = (b: ModelBundle): number => b.vramComfortGB ?? b.totalSizeGB
+  const fitsCard = (b: ModelBundle): boolean => {
+    const fit = vramFit(b, systemVRAM)
+    return fit === 'fits' || fit === 'unknown'
+  }
 
   // Sort bundles: verified first, then HOT, then fits VRAM, then by size
-  const sortedBundles = [...bundles].sort((a, b) => {
+  // Then the tier, stable: Best on top, Older gathered at the bottom under its
+  // own line, nothing hidden (David 2026-10-02, same rule as the cloud pickers).
+  const sortedBundles = sortByTier([...bundles].sort((a, b) => {
     // Verified models always first
     if (a.verified && !b.verified) return -1
     if (!a.verified && b.verified) return 1
@@ -325,13 +342,13 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
     if (a.hot && !b.hot) return -1
     if (!a.hot && b.hot) return 1
     if (systemVRAM) {
-      const aFits = parseVRAM(a) <= systemVRAM
-      const bFits = parseVRAM(b) <= systemVRAM
+      const aFits = fitsCard(a)
+      const bFits = fitsCard(b)
       if (aFits && !bFits) return -1
       if (!aFits && bFits) return 1
     }
     return parseVRAM(a) - parseVRAM(b)
-  })
+  }))
 
   const tabFilteredBundles = sortedBundles.filter(b => subTab === 'uncensored' ? b.uncensored : !b.uncensored)
 
@@ -339,7 +356,7 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
   const vramFilteredBundles = tabFilteredBundles.filter(b => {
     if (vramTier === 'all') return true
     const vram = parseVRAM(b)
-    if (vramTier === 'fit') return systemVRAM ? vram <= systemVRAM + 2 : true
+    if (vramTier === 'fit') return vramFit(b, systemVRAM) !== 'big'
     if (vramTier === 'ultra') return vram <= 4
     if (vramTier === 'light') return vram > 4 && vram <= 10
     if (vramTier === 'middle') return vram > 10 && vram <= 20
@@ -458,7 +475,10 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
     const filenames: string[] = []
     for (const file of bundle.files) {
       if (file.downloadUrl && file.filename && file.subfolder) {
-        dlStore.getState().setMeta(file.filename, file.downloadUrl, file.subfolder)
+        dlStore.getState().setMeta(file.filename, file.downloadUrl, file.subfolder, undefined, {
+          expectedBytes: file.sizeGB ? Math.round(file.sizeGB * 1_073_741_824) : undefined,
+          sha256: file.sha256,
+        })
         filenames.push(file.filename)
       }
     }
@@ -474,20 +494,13 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
       log.error('[DiscoverModels] Bundle install failed', { err })
       setInstallError(`${bundle.name}: ${err instanceof Error ? err.message : String(err)}`)
     }
-    // Wait for polling to pick up at least one active download before clearing spinner
-    // This prevents the "disappearing" UI — spinner stays until downloads are visible
-    const waitForDownloads = () => {
-      const active = filenames.some(fn => {
-        const dl = dlStore.getState().downloads[fn]
-        return dl && (dl.status === 'downloading' || dl.status === 'connecting' || dl.status === 'complete')
-      })
-      if (active) {
-        setInstallingBundle(null)
-      } else {
-        setTimeout(waitForDownloads, 500)
-      }
-    }
-    setTimeout(waitForDownloads, 1000)
+    // One poll, so the rows of the downloads that did start are in the store
+    // before the card stops saying "Installing" on its own account. From here
+    // the card shows what the rows say: nothing started (no space, no network,
+    // cancelled) is "Get" again at once, a failed file is "Retry". The loop
+    // that stood here waited for a running row and never ended without one.
+    await dlStore.getState().refresh().catch(() => {})
+    setInstallingBundle(null)
   }
 
   // The three card states live in lib/bundle-state.ts, pure, because bundles
@@ -517,8 +530,9 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
         dlStore.getState().retry(f.filename)
       } else if (!dl || (dl.status !== 'complete' && dl.status !== 'downloading' && dl.status !== 'connecting')) {
         // File has no active download — start fresh
-        dlStore.getState().setMeta(f.filename, f.downloadUrl, f.subfolder)
-        startModelDownload(f.downloadUrl, f.subfolder, f.filename, f.sizeGB ? Math.round(f.sizeGB * 1_073_741_824) : undefined)
+        const expectedBytes = f.sizeGB ? Math.round(f.sizeGB * 1_073_741_824) : undefined
+        dlStore.getState().setMeta(f.filename, f.downloadUrl, f.subfolder, undefined, { expectedBytes, sha256: f.sha256 })
+        startModelDownload(f.downloadUrl, f.subfolder, f.filename, expectedBytes, f.sha256)
         dlStore.getState().startPolling()
       }
     }
@@ -621,12 +635,11 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
     // chat side. Fix: derive the target backend from the *active chat
     // model*. If no active model yet (first run, brand new install), fall
     // back to the previous enabled-wins logic so the download still works.
-    const activeProviderId = activeChatModel ? getProviderIdFromModel(activeChatModel) : null
     // Built-in engine lives in the managed `openai` slot. A second chat model
     // downloaded here goes flat into the app-owned models dir and boots
     // llama-server, mirroring onboarding — never nested like LM Studio.
     //
-    // GH #118: the three flags below used to be read off `activeProviderId`
+    // GH #118: the three flags below used to be read off the active provider
     // alone, so a fresh install (no chat model picked yet) matched none of
     // them and the file went down the LM Studio branch into a nested folder
     // the built-in engine never scans. resolveTextDownloadTarget keeps the
@@ -640,18 +653,11 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
     const isActiveLmStudio = downloadTarget === 'lmstudio'
     const isActiveOllama = downloadTarget === 'ollama'
 
-    // Ollama-native models: only meaningful with Ollama present. If the user
-    // is chatting on LM Studio and clicks one of these (e.g. Qwen3.6 35B
-    // listed only by Ollama tag), warn instead of silently pulling into a
-    // backend the user can't see from chat.
+    // Ollama-native models land in Ollama whatever the picker holds.
     if (model.ollamaModel) {
-      const ollamaOn = !!providers.ollama?.enabled
-      if (!ollamaOn) {
-        setInstallError(`${model.name} only runs on Ollama. Enable the Ollama provider (Settings → Providers) before downloading.`)
-        return
-      }
-      if (activeProviderId && !isActiveOllama) {
-        setInstallError(`${model.name} can only run on Ollama. Switch the chat picker to an Ollama model first, then download.`)
+      const blocked = ollamaOnlyDownloadBlock(model.name, !!providers.ollama?.enabled)
+      if (blocked) {
+        setInstallError(blocked)
         return
       }
       try {
@@ -979,11 +985,18 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
       {(isImage || isVideo) && filteredBundles.length > 0 && (
         <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-2.5">
           {filteredBundles.map((bundle, bi) => (
-            <motion.div key={bundle.name} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: Math.min(bi, 12) * 0.025 }}>
+            <Fragment key={bundle.name}>
+            {tierGroup(bundle) && tierGroup(bundle) !== tierGroup(filteredBundles[bi - 1] ?? {}) && (
+              <div className="col-span-full t-control pt-2 text-gray-500" data-tier-group={tierGroup(bundle)}>{tierGroup(bundle)}</div>
+            )}
+            <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: Math.min(bi, 12) * 0.025 }}>
               <BundleTile
                 bundle={bundle}
+                lane={laneOf.get(bundle.name)}
                 vramGb={systemVRAM}
+                sharedMemory={isMacOS()}
                 complete={isBundleComplete(bundle)}
+                filesOnDisk={bundleFilesOnDisk}
                 downloading={isBundleDownloading(bundle) || installingBundle === bundle.name}
                 hasErrors={hasBundleErrors(bundle)}
                 onInstall={() => handleBundleInstall(bundle)}
@@ -992,6 +1005,7 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
                 onOpenUrl={(u) => openExternal(u)}
               />
             </motion.div>
+            </Fragment>
           ))}
         </div>
       )}
