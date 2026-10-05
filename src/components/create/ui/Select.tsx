@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { motion, AnimatePresence } from 'framer-motion'
-import { ChevronDown, Check, Search } from 'lucide-react'
+import { ChevronDown, Search } from 'lucide-react'
 import { usePopoverPlatz } from '../../../hooks/usePopoverPlatz'
 import { cn } from './cn'
 
@@ -14,9 +14,16 @@ export interface SelectOption {
   title?: string
   /** Ueberschrift ueber diesem und den folgenden Eintraegen derselben Gruppe. */
   group?: string
-  badge?: { label: string; color: string }
+  badge?: SelectTag
   /** Kleine Marken hinter dem Namen, nur in der aufgeklappten Liste (etwa Stufe und Herkunft). */
-  tags?: { label: string; color: string }[]
+  tags?: SelectTag[]
+}
+
+/** Eine Marke im Etiketten-Stil der Modellwaehler (index.css, .lu-picker-tag):
+ *  Haarlinie und Grau. 'accent' ist der eine Akzent, 'quiet' tritt zurueck. */
+export interface SelectTag {
+  label: string
+  tone?: 'accent' | 'quiet'
 }
 
 interface Props {
@@ -145,12 +152,7 @@ export function Select({
           )}
         >
           <span className="flex min-w-0 items-center gap-1.5">
-            {current?.badge && (
-              <Badge
-                color={current.badge.color}
-                label={current.badge.label}
-              />
-            )}
+            {current?.badge && <Badge tag={current.badge} />}
 
             <span className="truncate" title={current?.title}>
               {current?.label ?? placeholder}
@@ -167,6 +169,10 @@ export function Select({
         </button>
       </div>
 
+      {/* Dieselbe Flaeche und dieselbe Zeilengrammatik wie die Modellauswahl im
+          Chat (index.css, .lu-picker): Haarlinie, einzeilige klebende
+          Gruppenkoepfe, 24 px Zeile, Akzentstrich an der gewaehlten. Aufbau,
+          Inhalte und Verhalten sind die alten. */}
       {typeof document !== 'undefined' &&
         createPortal(
           <AnimatePresence>
@@ -190,18 +196,11 @@ export function Select({
                 }}
                 transition={{ duration: 0.12 }}
                 style={menu.style}
-                className={cn(
-                  'lu-elevated fixed z-[100] min-w-0',
-                  'rounded-[var(--radius-panel)]',
-                  'flex flex-col p-1 overflow-hidden',
-                )}
+                className="lu-elevated lu-picker fixed z-[100] flex min-w-0 flex-col overflow-hidden"
               >
                 {searchable && (
-                  <div className="mb-1 flex shrink-0 items-center gap-1.5 border-b border-white/[0.06] px-2 py-1.5">
-                    <Search
-                      size={13}
-                      className="text-gray-500"
-                    />
+                  <div className="lu-picker-search">
+                    <Search size={13} aria-hidden="true" />
 
                     <input
                       autoFocus
@@ -210,7 +209,6 @@ export function Select({
                         setQuery(event.target.value)
                       }
                       placeholder="Search..."
-                      className="t-control w-full bg-transparent text-gray-200 outline-none placeholder-gray-600"
                     />
                   </div>
                 )}
@@ -218,12 +216,12 @@ export function Select({
                 <div
                   ref={listRef}
                   role="listbox"
-                  className="min-h-0 overflow-y-auto overscroll-contain scrollbar-thin"
+                  className="lu-picker-list min-h-0 overflow-y-auto scrollbar-thin pt-1"
                   style={{ maxHeight }}
                   onWheel={(event) => event.stopPropagation()}
                 >
                   {filtered.length === 0 && (
-                    <div className="t-control px-2.5 py-2 text-gray-600">
+                    <div className="lu-picker-empty">
                       No matches
                     </div>
                   )}
@@ -240,8 +238,9 @@ export function Select({
                     return (
                       <div key={option.value}>
                       {head && (
-                        <div className="t-control px-2.5 pt-2 pb-1 text-gray-600">
-                          {head}
+                        <div className="lu-picker-head" data-group={head}>
+                          <b>{head}</b>
+                          <span className="n">{filtered.filter((x) => x.group === head).length}</span>
                         </div>
                       )}
                       <button
@@ -253,42 +252,24 @@ export function Select({
                           onChange(option.value)
                           closeMenu()
                         }}
-                        className={cn(
-                          't-control flex w-full items-center justify-between gap-2',
-                          'rounded-[6px] px-2.5 py-1.5 text-left transition-colors',
-                          selected
-                            ? 'bg-white/10 text-white'
-                            : 'text-gray-300 hover:bg-white/[0.06]',
-                        )}
+                        className="lu-picker-row w-[calc(100%-8px)] text-left"
                       >
-                        <span className="flex min-w-0 items-center gap-1.5">
-                          {option.badge && (
-                            <Badge
-                              color={option.badge.color}
-                              label={option.badge.label}
-                            />
-                          )}
+                        {option.badge && <Badge tag={option.badge} />}
 
-                          <span className="truncate">
-                            {option.label}
-                          </span>
-
-                          {option.tags?.map((t) => (
-                            <Badge key={t.label} color={t.color} label={t.label} />
-                          ))}
-
-                          {option.sublabel && (
-                            <span className="t-mono truncate text-gray-600">
-                              {option.sublabel}
-                            </span>
-                          )}
+                        <span className="lu-picker-name truncate">
+                          {option.label}
                         </span>
 
-                        {selected && (
-                          <Check
-                            size={13}
-                            className="shrink-0 text-gray-300"
-                          />
+                        {option.tags?.map((t) => (
+                          <Badge key={t.label} tag={t} />
+                        ))}
+
+                        <span className="lu-picker-fill" />
+
+                        {option.sublabel && (
+                          <span className="lu-picker-sub t-mono">
+                            {option.sublabel}
+                          </span>
                         )}
                       </button>
                       </div>
@@ -304,22 +285,16 @@ export function Select({
   )
 }
 
-function Badge({
-  color,
-  label,
-}: {
-  color: string
-  label: string
-}) {
+function Badge({ tag }: { tag: SelectTag }) {
   return (
     <span
       className={cn(
-        'shrink-0 rounded px-1.5 py-0.5',
-        'text-[0.55rem] font-semibold',
-        color,
+        't-micro lu-picker-tag',
+        tag.tone === 'accent' && 'is-accent',
+        tag.tone === 'quiet' && 'is-quiet',
       )}
     >
-      {label}
+      {tag.label}
     </span>
   )
 }

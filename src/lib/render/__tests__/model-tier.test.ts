@@ -7,7 +7,7 @@
 // Zwischenzeile.
 
 import { describe, expect, it } from 'vitest'
-import { OLDER_GROUP, sortByTier, tierGroup, tierMarks, tierOf, weightsOf } from '../model-tier'
+import { OLDER_GROUP, OTHER_GROUP, groupForPicker, mediaFamily, sortByTier, tierGroup, tierMarks, tierOf, weightsOf } from '../model-tier'
 
 describe('Stufe und Herkunft', () => {
   it('sortByTier stellt best nach oben und older nach unten, sonst bleibt die Reihenfolge', () => {
@@ -64,5 +64,83 @@ describe('ein Modell ohne Stufe und Herkunft ist neutral (alter Server, lokales 
     expect(tierOf(fremd)).toBe('standard')
     expect(weightsOf(fremd)).toBe('closed')
     expect(tierMarks(fremd)).toEqual([])
+  })
+})
+
+// 05.10.2026, David: die Cloud-Waehler in Create gruppieren nach Familie, mit
+// denselben einzeiligen Koepfen wie die Modellauswahl im Chat. Der Entscheid
+// vom 02.10. (Beste oben, Aeltere gesammelt unten) gilt daneben weiter.
+describe('mediaFamily', () => {
+  it('liest die Familie aus dem ersten Wort, ohne Versionsanhang', () => {
+    expect(mediaFamily('FLUX 3')).toBe('FLUX')
+    expect(mediaFamily('FLUX.2 Klein')).toBe('FLUX')
+    expect(mediaFamily('Flux Schnell (fast)')).toBe('Flux')
+    expect(mediaFamily('Qwen3 TTS')).toBe('Qwen')
+    expect(mediaFamily('Qwen Image 3.0 Pro')).toBe('Qwen')
+    expect(mediaFamily('LTX-2')).toBe('LTX')
+    expect(mediaFamily('LTX 2.5')).toBe('LTX')
+    expect(mediaFamily('Z-Image Turbo (fast)')).toBe('Z-Image')
+    expect(mediaFamily('HunyuanImage 2.1')).toBe('Hunyuan')
+    expect(mediaFamily('HunyuanVideo')).toBe('Hunyuan')
+  })
+})
+
+describe('groupForPicker', () => {
+  const m = (label: string, tier?: 'best' | 'standard' | 'older') => ({ label, ...(tier ? { tier } : {}) })
+  const zeilen = (liste: { label: string }[]) => groupForPicker(liste).map((e) => `${e.group ?? '-'}: ${e.model.label}`)
+
+  it('stellt Familien mit einem Besten nach vorn, in jeder Gruppe die Besten zuerst', () => {
+    expect(zeilen([
+      m('Wan 2.6'), m('FLUX 2'), m('Qwen Image 3.0 Pro', 'best'), m('Wan 3.0', 'best'), m('Qwen Image 2.1'), m('FLUX 3', 'best'),
+    ])).toEqual([
+      'Qwen: Qwen Image 3.0 Pro', 'Qwen: Qwen Image 2.1',
+      'Wan: Wan 3.0', 'Wan: Wan 2.6',
+      'FLUX: FLUX 3', 'FLUX: FLUX 2',
+    ])
+  })
+
+  it('fasst Gross- und Kleinschreibung zu einer Familie, der Kopf traegt die Schreibweise des ersten', () => {
+    expect(zeilen([m('FLUX 3', 'best'), m('Flux Krea'), m('Seedream 5'), m('Seedream 4')]))
+      .toEqual(['FLUX: FLUX 3', 'FLUX: Flux Krea', 'Seedream: Seedream 5', 'Seedream: Seedream 4'])
+  })
+
+  it('gibt einer Familie mit einem einzigen Modell keinen Kopf: sie steht unter Other, zuletzt vor den Aelteren', () => {
+    expect(zeilen([m('Cosmos 3 Super'), m('Wan 3.0', 'best'), m('Wan 2.6'), m('HiDream', 'older'), m('Ideogram 4')])).toEqual([
+      'Wan: Wan 3.0', 'Wan: Wan 2.6',
+      `${OTHER_GROUP}: Cosmos 3 Super`, `${OTHER_GROUP}: Ideogram 4`,
+      `${OLDER_GROUP}: HiDream`,
+    ])
+  })
+
+  it('sammelt die Aelteren am Ende, auch wenn ihre Familie oben einen Kopf hat', () => {
+    const liste = groupForPicker([m('Wan 2.2', 'older'), m('Wan 3.0', 'best'), m('Wan 2.6'), m('LTX 2.3', 'older')])
+    expect(liste.map((e) => e.group)).toEqual(['Wan', 'Wan', OLDER_GROUP, OLDER_GROUP])
+    expect(liste.slice(-2).map((e) => e.model.label)).toEqual(['Wan 2.2', 'LTX 2.3'])
+  })
+
+  it('laesst den Kopf ganz weg, wenn es nur eine einzige Gruppe gibt', () => {
+    expect(zeilen([m('Standard'), m('SeedVR2')])).toEqual(['-: Standard', '-: SeedVR2'])
+    expect(zeilen([m('Wan 3.0', 'best'), m('Wan 2.6')])).toEqual(['-: Wan 3.0', '-: Wan 2.6'])
+  })
+
+  it('verliert kein Modell, verdoppelt keines und laesst die Eingabe unberuehrt', () => {
+    const eingabe = [m('Wan 2.6'), m('FLUX 3', 'best'), m('HiDream', 'older'), m('Wan 3.0', 'best'), m('Cosmos 3')]
+    const kopie = eingabe.map((x) => x.label)
+    const aus = groupForPicker(eingabe).map((e) => e.model.label)
+    expect([...aus].sort()).toEqual([...kopie].sort())
+    expect(eingabe.map((x) => x.label)).toEqual(kopie)
+  })
+
+  it('gruppiert auch gegen einen Server ohne Stufen, in der Reihenfolge des Katalogs', () => {
+    expect(zeilen([m('Wan 2.6'), m('FLUX 2'), m('Wan 2.2'), m('FLUX 1')]))
+      .toEqual(['Wan: Wan 2.6', 'Wan: Wan 2.2', 'FLUX: FLUX 2', 'FLUX: FLUX 1'])
+  })
+})
+
+describe('die Marken im Etiketten-Stil der Waehler', () => {
+  it('"Best" traegt den einen Akzent, die Herkunft steht ohne Ton', () => {
+    expect(tierMarks({ tier: 'best', weights: 'open' })).toEqual([{ label: 'Best', tone: 'accent' }, { label: 'Open weights' }])
+    expect(tierMarks({ tier: 'standard', weights: 'open-family' })).toEqual([{ label: 'Open family' }])
+    expect(tierMarks({})).toEqual([])
   })
 })

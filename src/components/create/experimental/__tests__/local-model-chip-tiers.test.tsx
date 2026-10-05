@@ -41,7 +41,8 @@ function lies(n: number) {
   const zeilen = Array.from(liste.querySelectorAll('button')).map((b) => ({
     name: (b.querySelector('.truncate')?.textContent ?? '').trim(),
     best: Array.from(b.querySelectorAll('span')).some((s) => s.textContent === 'Best'),
-    davor: b.previousElementSibling?.textContent ?? '',
+    // Der Kopf ueber der Zeile: sein Name, ohne die Anzahl daneben.
+    davor: b.previousElementSibling?.querySelector('b')?.textContent ?? '',
   }))
   return zeilen.slice(0, n)
 }
@@ -113,7 +114,8 @@ describe('the hosted models at the end of the local picker', () => {
     const headingOf = (b: Element) => {
       for (let row: Element | null = b.parentElement; row; row = row.previousElementSibling) {
         const head = row.querySelector(':scope > div')
-        if (head) return head.textContent ?? ''
+        // The head reads its name and, beside it, how many rows stand under it.
+        if (head) return head.querySelector('b')?.textContent ?? ''
       }
       return ''
     }

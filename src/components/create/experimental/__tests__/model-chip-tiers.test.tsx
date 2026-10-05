@@ -7,6 +7,12 @@
  * wird versteckt. Die Herkunft steht dezent daneben ("Open weights"), sobald
  * die Familie offene Gewichte hat.
  *
+ * 05.10.2026, David: die Cloud-Waehler gruppieren nach Familie, mit denselben
+ * einzeiligen Gruppenkoepfen wie die Modellauswahl im Chat. Beides gilt
+ * zusammen (lib/render/model-tier, groupForPicker): Familien zuerst, die mit
+ * einem "Best" vorn, in jeder Gruppe die Besten zuerst, einzelne Modelle
+ * unter "Other", die Aelteren weiter gesammelt am Ende.
+ *
  * Desktop: der Katalog kommt vom Server. Die Faelle laufen gegen den Katalog
  * des neuen Servers (mit Stufe, Herkunft und den neuen Modellen) und gegen den
  * des alten (ohne beides): dort steht jede Zeile neutral da, ohne Marke und
@@ -31,7 +37,7 @@ import { useCreateStore, type CreateIntent } from '../../../../stores/createStor
 import {
   animatePickerModels, cloudModelsFor, editCapableModels, studioOnlyImageModels, useCloudCatalogStore, videoPickerModels,
 } from '../../../../stores/cloudCatalogStore'
-import { sortByTier, OLDER_GROUP } from '../../../../lib/render/model-tier'
+import { groupForPicker, tierOf, OLDER_GROUP, OTHER_GROUP } from '../../../../lib/render/model-tier'
 import { alterServer, neuerServer } from '../../../../lib/render/__tests__/fixtures/test-catalogs'
 
 beforeEach(() => {
@@ -56,30 +62,81 @@ function lies(intent: CreateIntent) {
     offen: Array.from(b.querySelectorAll('span')).some((s) => s.textContent === 'Open weights'),
     familie: Array.from(b.querySelectorAll('span')).some((s) => s.textContent === 'Open family'),
   }))
-  const kopf = Array.from(liste.querySelectorAll('div')).find((d) => d.textContent === OLDER_GROUP)
-  return { liste, zeilen, kopf }
+  // Die Gruppenkoepfe in ihrer Reihenfolge, je mit Name und Anzahl.
+  const koepfe = Array.from(liste.querySelectorAll('.lu-picker-head')).map((k) => ({
+    name: k.querySelector('b')?.textContent ?? '',
+    anzahl: Number(k.querySelector('.n')?.textContent),
+  }))
+  const kopf = koepfe.find((k) => k.name === OLDER_GROUP)
+  return { liste, zeilen, kopf, koepfe }
 }
 
+/** Die Namen in der Reihenfolge, in der der Waehler sie zeigen soll. */
+const reihenfolge = <T extends { label: string }>(liste: readonly T[]) =>
+  groupForPicker(liste).map((e) => e.model.label)
+
 describe('der Bildwaehler (neuer Server)', () => {
-  it('fuehrt die Besten oben, markiert sie und sammelt die Aelteren unter einer Zwischenzeile', () => {
-    const erwartet = sortByTier([...cloudModelsFor('image'), ...studioOnlyImageModels()])
-    const { zeilen, kopf } = lies('image')
-    expect(zeilen.map((z) => z.name)).toEqual(erwartet.map((m) => m.label))
-    const nBest = erwartet.filter((m) => m.tier === 'best').length
-    expect(nBest).toBeGreaterThan(3)
-    for (const z of zeilen.slice(0, nBest)) expect(z.best, z.name).toBe(true)
-    for (const z of zeilen.slice(nBest)) expect(z.best, z.name).toBe(false)
-    const vorn = zeilen.slice(0, nBest).map((z) => z.name)
-    expect(vorn).toEqual(expect.arrayContaining(['Z-Image Turbo (fast)', 'Qwen Image 3.0 Pro', 'FLUX 3']))
-    const aelter = erwartet.filter((m) => m.tier === 'older').map((m) => m.label)
+  it('gruppiert nach Familie, fuehrt in jeder Gruppe die Besten und sammelt die Aelteren unter einer Zwischenzeile', () => {
+    const katalog = [...cloudModelsFor('image'), ...studioOnlyImageModels()]
+    const erwartet = groupForPicker(katalog)
+    const { zeilen, kopf, koepfe } = lies('image')
+    expect(zeilen.map((z) => z.name)).toEqual(erwartet.map((e) => e.model.label))
+    // Kein Modell fehlt und keines steht doppelt.
+    expect(zeilen).toHaveLength(katalog.length)
+
+    // Jedes Beste traegt die Marke, und nur die Besten tragen sie.
+    const beste = katalog.filter((m) => m.tier === 'best').map((m) => m.label)
+    expect(beste.length).toBeGreaterThan(3)
+    expect(zeilen.filter((z) => z.best).map((z) => z.name).sort()).toEqual([...beste].sort())
+    expect(beste).toEqual(expect.arrayContaining(['Z-Image Turbo (fast)', 'Qwen Image 3.0 Pro', 'FLUX 3']))
+
+    // Die Koepfe: Familien mit mehr als einem Modell, dann Other, zuletzt die
+    // Aelteren. Jeder Kopf nennt, wie viele Zeilen unter ihm stehen.
+    const namen = koepfe.map((k) => k.name)
+    expect(namen).toEqual([...new Set(erwartet.map((e) => e.group))])
+    expect(namen).toEqual(expect.arrayContaining(['Z-Image', 'Qwen', 'FLUX']))
+    expect(namen.at(-1)).toBe(OLDER_GROUP)
+    expect(namen.at(-2)).toBe(OTHER_GROUP)
+    for (const k of koepfe) {
+      expect(k.anzahl, k.name).toBe(erwartet.filter((e) => e.group === k.name).length)
+      if (k.name !== OTHER_GROUP && k.name !== OLDER_GROUP) expect(k.anzahl, k.name).toBeGreaterThan(1)
+    }
+    expect(koepfe.reduce((n, k) => n + k.anzahl, 0)).toBe(zeilen.length)
+
+    // Die erste Familie ist die des ersten Besten, und sie beginnt mit ihm.
+    expect(zeilen[0].best).toBe(true)
+    // In keiner Gruppe steht ein Bestes hinter einem, das es nicht ist.
+    for (const k of koepfe) {
+      const gruppe = erwartet.filter((e) => e.group === k.name).map((e) => zeilen.find((z) => z.name === e.model.label)!.best)
+      expect(gruppe.join(), k.name).toBe([...gruppe].sort((a, b) => Number(b) - Number(a)).join())
+    }
+
+    const aelter = erwartet.filter((e) => tierOf(e.model) === 'older').map((e) => e.model.label)
     expect(aelter).toEqual(expect.arrayContaining(['Flux Schnell (fast)', 'Flux Dev (quality)', 'Qwen Image', 'HiDream', 'HunyuanImage 2.1']))
     expect(zeilen.slice(-aelter.length).map((z) => z.name)).toEqual(aelter)
     expect(kopf).toBeTruthy()
     const ersteAlte = zeilen[zeilen.length - aelter.length].name
     const knoepfe = Array.from(document.querySelectorAll('.lu-elevated button'))
-    const mitKopf = knoepfe.filter((b) => b.previousElementSibling?.textContent === OLDER_GROUP)
+    const mitKopf = knoepfe.filter((b) => b.previousElementSibling?.querySelector('b')?.textContent === OLDER_GROUP)
     expect(mitKopf).toHaveLength(1)
     expect(mitKopf[0].querySelector('.truncate')?.textContent).toBe(ersteAlte)
+  })
+
+  it('der Kopf ist die eine Zeile der Modellauswahl im Chat, die Zeile ihre Zeile', () => {
+    const { liste } = lies('image')
+    expect(liste.className).toContain('lu-picker')
+    expect(liste.querySelectorAll('.lu-picker-head').length).toBeGreaterThan(2)
+    const knoepfe = Array.from(liste.querySelectorAll('button'))
+    for (const b of knoepfe) expect(b.className).toContain('lu-picker-row')
+    // Die gewaehlte Zeile sagt es einer Bedienhilfe, genau eine.
+    expect(knoepfe.filter((b) => b.getAttribute('aria-selected') === 'true')).toHaveLength(1)
+    // Marken im Etiketten-Stil, "Best" im einen Akzent.
+    const best = Array.from(liste.querySelectorAll('span')).find((x) => x.textContent === 'Best')!
+    expect(best.className).toContain('lu-picker-tag')
+    expect(best.className).toContain('is-accent')
+    const offen = Array.from(liste.querySelectorAll('span')).find((x) => x.textContent === 'Open weights')!
+    expect(offen.className).toContain('lu-picker-tag')
+    expect(offen.className).not.toContain('is-accent')
   })
 
   it('nennt die Herkunft nur dort, wo die Familie offene Gewichte hat', () => {
@@ -107,9 +164,8 @@ describe('der Bildwaehler (neuer Server)', () => {
 
 describe('die anderen Waehler (neuer Server)', () => {
   it('Bearbeiten: Beste oben, geschlossene tragen nur "Best" und keine Herkunft', () => {
-    const erwartet = sortByTier(editCapableModels())
     const { zeilen } = lies('edit')
-    expect(zeilen.map((z) => z.name)).toEqual(erwartet.map((m) => m.label))
+    expect(zeilen.map((z) => z.name)).toEqual(reihenfolge(editCapableModels()))
     const seedream = zeilen.find((z) => z.name === 'Seedream 5 Pro')!
     expect(seedream.best).toBe(true)
     expect(seedream.offen).toBe(false)
@@ -117,25 +173,25 @@ describe('die anderen Waehler (neuer Server)', () => {
   })
 
   it('Video: die neuen Modelle stehen im Waehler, die alten Wan, LTX und Hunyuan unten', () => {
-    const erwartet = sortByTier(videoPickerModels())
     const { zeilen } = lies('video')
-    expect(zeilen.map((z) => z.name)).toEqual(erwartet.map((m) => m.label))
-    expect(zeilen.slice(0, 3).every((z) => z.best)).toBe(true)
+    expect(zeilen.map((z) => z.name)).toEqual(reihenfolge(videoPickerModels()))
+    expect(zeilen[0].best).toBe(true)
+    expect(zeilen.filter((z) => z.best).length).toBeGreaterThanOrEqual(3)
     const unten = zeilen.slice(-5).map((z) => z.name)
     expect(unten).toEqual(expect.arrayContaining(['Wan 2.2 720p', 'Wan 2.2 Fast', 'LTX 2.3']))
   })
 
   it('Animate: Referenzmodelle und die neuen Bild-zu-Video-Modelle sind waehlbar', () => {
-    const erwartet = sortByTier(animatePickerModels())
     const { zeilen } = lies('animate')
-    expect(zeilen.map((z) => z.name)).toEqual(erwartet.map((m) => m.label))
+    expect(zeilen.map((z) => z.name)).toEqual(reihenfolge(animatePickerModels()))
     for (const name of ['LTX 2.5', 'FLUX 3 Video', 'MiniMax H3 • Reference', 'Wan 3.0 • Reference', 'daVinci MagiHuman']) {
       expect(zeilen.map((z) => z.name), name).toContain(name)
     }
   })
 
-  it('Enhance Image bekommt einen Waehler: Standard und SeedVR2', () => {
-    const { zeilen } = lies('upscale')
+  it('Enhance Image bekommt einen Waehler: Standard und SeedVR2, ohne Kopf ueber zwei Zeilen', () => {
+    const { zeilen, koepfe } = lies('upscale')
+    expect(koepfe).toEqual([])
     expect(zeilen.map((z) => z.name)).toEqual(['Standard', 'SeedVR2'])
     expect(zeilen[1].offen).toBe(true)
   })
@@ -149,10 +205,14 @@ describe('die anderen Waehler (neuer Server)', () => {
 describe('gegen den Server von heute (ohne Stufe, ohne die neuen Modelle)', () => {
   beforeEach(() => { useCloudCatalogStore.setState({ models: alterServer() }) })
 
-  it('der Bildwaehler steht neutral da: keine Marke, keine Zwischenzeile, Reihenfolge wie bisher', () => {
-    const erwartet = [...cloudModelsFor('image'), ...studioOnlyImageModels()].map((m) => m.label)
+  it('der Bildwaehler traegt keine Marke und keine "Older models", nur die Familien', () => {
+    // Die Familie steht im Namen, also gruppiert der Waehler auch gegen einen
+    // Server, der noch keine Stufe schickt. Ohne Stufe bleibt in jeder Familie
+    // die Reihenfolge des Katalogs.
+    const katalog = [...cloudModelsFor('image'), ...studioOnlyImageModels()]
     const { zeilen, kopf } = lies('image')
-    expect(zeilen.map((z) => z.name)).toEqual(erwartet)
+    expect(zeilen.map((z) => z.name)).toEqual(reihenfolge(katalog))
+    expect(zeilen.map((z) => z.name).sort()).toEqual(katalog.map((m) => m.label).sort())
     expect(zeilen.length).toBeGreaterThan(5)
     for (const z of zeilen) {
       expect(z.best, z.name).toBe(false)

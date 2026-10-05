@@ -607,7 +607,7 @@ export function BundleTile({ bundle, lane, vramGb, sharedMemory = false, complet
               <span data-bundle-lane={lane} className="shrink-0 rounded px-1.5 py-0.5 t-micro font-semibold bg-gray-200 text-gray-600 dark:bg-white/10 dark:text-gray-300">{lane}</span>
             )}
             {tierMarks(bundle).map((t) => (
-              <span key={t.label} className={`shrink-0 rounded px-1.5 py-0.5 t-micro font-semibold ${t.color}`}>{t.label}</span>
+              <span key={t.label} className={`shrink-0 rounded px-1.5 py-0.5 t-micro font-semibold ${t.tone === 'accent' ? 'bg-lu-accent/15 text-lu-accent' : 'text-gray-500 dark:text-gray-600'}`}>{t.label}</span>
             ))}
           </div>
           {bundle.description && (

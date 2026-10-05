@@ -4,7 +4,7 @@ import { CREATE_PRESETS, type CreatePreset } from '../../../lib/render/create-pr
 import { STUDIO_MODELS, studioFields, studioSchema, studioOptions, studioPreviewCredits, supportsProviderField } from '../../../lib/render/studio-contract'
 import { classicCredits, modelHint, presetModel, presetModels, requiredRoleInputs, roleInputs, rolePrompts, roleHasChoice } from '../../../lib/render/preset-models'
 import { promptIdeas } from '../../../lib/render/prompt-ideas'
-import { sortByTier, tierGroup, tierMarks } from '../../../lib/render/model-tier'
+import { groupForPicker, tierMarks } from '../../../lib/render/model-tier'
 import { humanRuntime, type ModelRuntime } from '../../../lib/render/runtime-format'
 import { selectedVideoSeconds, videoDurations } from '../../../lib/render/video-duration'
 import { studioQuote, modelRuntimes, StudioQuoteChangedError } from '../../../api/cloud/studio'
@@ -355,7 +355,7 @@ export function PresetWorkshop({preset,onClose,onGenerate}:{preset:CreatePreset;
         {model&&studioSchema(step.model).properties?.prompt?.enum?<select className={fieldClass} aria-label="Visual style" disabled={busy} value={prompt} onChange={e=>setPrompt(e.target.value)} ><option value="">Choose a visual style…</option>{studioSchema(step.model).properties!.prompt.enum!.map(v=><option key={String(v)}>{String(v)}</option>)}</select>:<textarea aria-label="Preset prompt" disabled={busy||!!result} maxLength={4000} rows={2} value={prompt} onChange={e=>setPrompt(e.target.value)} placeholder={raw.role==='speech'?'What should your character say?':raw.role==='soundtrack'?'Describe the sounds you want…':raw.role==='animate'||raw.role==='extend'?'Describe the movement…':raw.role==='edit'?'Describe the new setting…':'Describe your scene…'} className="w-full resize-none bg-transparent t-control text-gray-200 outline-none placeholder:text-gray-400"/>}
         <div className="mt-2 flex flex-wrap items-center justify-between gap-2 md:flex-nowrap md:gap-3">
           <div className="flex min-w-0 items-center gap-2">{roleHasChoice(raw.role,preset.adult)&&!result
-            ?<Select size="sm" ariaLabel="Model" className="max-w-[220px]" value={step.model} onChange={choose} options={sortByTier(alternatives).map(m=>({value:m.id,label:m.label,group:tierGroup(m),tags:tierMarks(m)}))}/>
+            ?<Select size="sm" ariaLabel="Model" className="max-w-[220px]" value={step.model} onChange={choose} options={groupForPicker(alternatives).map(({model:m,group})=>({value:m.id,label:m.label,group,tags:tierMarks(m)}))}/>
             :<span className="truncate rounded-md border border-white/[0.08] px-2 py-1 t-micro text-gray-300">{choice.label} <span className="ml-2 text-gray-400">Cloud</span></span>}
           {ideas.length>0&&!result&&<Select size="sm" ariaLabel="Prompt ideas" className="max-w-[160px]" placeholder="+ Prompt idea" value="" onChange={v=>{const idea=ideas.find(i=>i.label===v);if(idea)setPrompt(t=>t.trim()?`${t.trim()}, ${idea.text}`:idea.text)}} options={ideas.map(i=>({value:i.label,label:i.label}))}/>}
           </div>

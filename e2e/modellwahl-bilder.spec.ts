@@ -128,3 +128,38 @@ for (const theme of ['dark', 'light'] as const) {
     await shoot(page, `lokal-lmstudio-zeile-${theme}`)
   })
 }
+
+// The model select in Create: not a new picker, the same app. Same sheet,
+// hairline, one-line group heads, row height, tags and accent bar.
+async function openCreate(page: Page, kind: 'Image' | 'Video') {
+  // Inside Create a second button reads "Create": the one that starts a run.
+  const radio = page.getByRole('radio', { name: kind, exact: true })
+  if (!(await radio.isVisible())) await page.getByRole('button', { name: /^Create$/ }).first().click()
+  await radio.click()
+  await page.locator('button[aria-haspopup="listbox"]').first().click()
+  const list = page.getByRole('listbox')
+  await expect(list).toBeVisible()
+  await expect.poll(() => list.evaluate((el) => getComputedStyle(el.parentElement as HTMLElement).opacity)).toBe('1')
+  return list.locator('xpath=..')
+}
+
+for (const theme of ['dark', 'light'] as const) {
+  test(`Create select, cloud, ${theme}`, async ({ page }) => {
+    await bootIntoCloud(page, theme, { tierCatalog: true })
+    const imageMenu = await openCreate(page, 'Image')
+    await expect(imageMenu.locator('.lu-picker-head').first()).toBeVisible()
+    await shoot(page, `create-cloud-bild-${theme}`, imageMenu)
+    await page.keyboard.press('Escape')
+    const videoMenu = await openCreate(page, 'Video')
+    await shoot(page, `create-cloud-video-${theme}`, videoMenu)
+  })
+}
+
+test('Create select, local models', async ({ page }) => {
+  await page.addInitScript(tauriMockInit, OPTS)
+  await seedOnboardingDone(page)
+  await routeCloud(page, { license: 'none', access: false, mediaLive: true })
+  await page.goto('/')
+  const menu = await openCreate(page, 'Image')
+  await shoot(page, 'create-lokal-bild-dark', menu)
+})

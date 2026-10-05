@@ -4,7 +4,7 @@ import {
   editCapableModels, animatePickerModels, videoPickerModels, studioOnlyImageModels,
 } from '../../../stores/cloudCatalogStore'
 import { DEFAULT_MODEL_IDS } from '../../../lib/render/cloud-models'
-import { sortByTier, tierGroup, tierMarks } from '../../../lib/render/model-tier'
+import { groupForPicker, sortByTier, tierGroup, tierMarks } from '../../../lib/render/model-tier'
 import { localTier } from '../../../lib/render/local-model-tier'
 import { intentPickerModels, intentRoles, createStudioCost, isStudioModel } from '../../../lib/render/create-studio'
 import { resolveCharacterModel, characterGenerationModels } from '../../../hooks/useCloudCreate'
@@ -13,8 +13,8 @@ import type { PresetModel } from '../../../lib/render/preset-models'
 import { useSettingsStore } from '../../../stores/settingsStore'
 import { useUIStore } from '../../../stores/uiStore'
 import { useContentPolicy } from '../../../hooks/useContentPolicy'
-import { Select, type SelectOption } from '../ui/Select'
-import { TYPE_BADGE } from './badges'
+import { Select, type SelectOption, type SelectTag } from '../ui/Select'
+import { TYPE_LABEL } from './badges'
 import { useLocalPick } from './localPick'
 import { useLocalModelFits } from '../../../hooks/useLocalModelFit'
 import { vramFitLabel } from '../../../lib/vram-fit'
@@ -38,7 +38,7 @@ function studioCostHint(id: string): string | undefined {
   return isStudioModel(id) ? `${shortCount(createStudioCost(id, {}, 100))} cr` : undefined
 }
 
-const CLOUD_BADGE = { label: 'Cloud', color: 'bg-violet-500/15 text-violet-500 dark:text-violet-200' }
+const CLOUD_BADGE: SelectTag = { label: 'Cloud' }
 // C2: the "No refusals" mark on models the provider ships with its own
 // filter off (CloudModel.adult, web parity: apps/web/components/create/
 // experimental/ModelChip.tsx). The mark says what the MODEL can do and
@@ -46,16 +46,12 @@ const CLOUD_BADGE = { label: 'Cloud', color: 'bg-violet-500/15 text-violet-500 d
 // (anything but 'off'), it stays pale, since the account setting is the
 // boundary, not the model. No adult vocabulary here, this surface sits on
 // the payment domain.
-const NO_REFUSALS_COLOR = {
-  filtering: 'text-gray-500 dark:text-gray-600',
-  open: 'text-purple-600 dark:text-purple-300',
-}
+const noRefusalsBadge = (policyOff: boolean): SelectTag =>
+  ({ label: 'No refusals', tone: policyOff ? 'accent' : 'quiet' })
 
 // Local-mode discovery (2.5.8): hosted models ride at the bottom of the local
 // picker as teaser rows — picking one opens the Cloud sheet instead of
 // changing the selection. Value prefix keeps them apart from real checkpoints.
-// The card mark on a local row wears the same quiet tone as "Open weights".
-const FIT_MARK_COLOR = 'text-gray-500 dark:text-gray-600'
 
 const TEASER_PREFIX = 'lu-cloud-teaser:'
 const TEASER_ROWS = 4
@@ -155,39 +151,40 @@ function CloudModelChip() {
     : intent === 'animate' ? 'animate'
     : 'generate'
   const options: SelectOption[] = roleIntent
-    ? sortByTier(roleModels).map((m) => ({
+    ? groupForPicker(roleModels).map(({ model: m, group }) => ({
         value: m.id,
         label: m.label,
         sublabel: pickerCostHint(m, musicDuration),
-        group: tierGroup(m),
+        group,
         tags: tierMarks(m),
         badge: m.adult
-          ? { label: 'No refusals', color: contentPolicy === 'off' ? NO_REFUSALS_COLOR.open : NO_REFUSALS_COLOR.filtering }
+          ? noRefusalsBadge(contentPolicy === 'off')
           : CLOUD_BADGE,
       }))
     : characterUse
-      ? sortByTier(characterModels).map((m) => ({
+      ? groupForPicker(characterModels).map(({ model: m, group }) => ({
           value: m.id,
           label: m.label,
           sublabel: modelCostHint(m, 'generate', undefined),
-          group: tierGroup(m),
+          group,
           tags: tierMarks(m),
           badge: m.adult
-            ? { label: 'No refusals', color: contentPolicy === 'off' ? NO_REFUSALS_COLOR.open : NO_REFUSALS_COLOR.filtering }
+            ? noRefusalsBadge(contentPolicy === 'off')
             : CLOUD_BADGE,
         }))
-      : sortByTier(list).map((m) => ({
+      : groupForPicker(list).map(({ model: m, group }) => ({
           value: m.id,
           label: m.label,
           sublabel: isStudioModel(m.id) ? studioCostHint(m.id) : modelCostHint(m, op, op === 'music' ? musicDuration : undefined),
-          // Beste oben, Aeltere gesammelt unten unter einer Zwischenzeile, nichts
-          // verschwindet. Die Marken stehen nur in der aufgeklappten Liste.
-          group: tierGroup(m),
+          // Nach Familie gruppiert, Beste zuerst, Aeltere gesammelt unten unter
+          // einer Zwischenzeile, nichts verschwindet (lib/render/model-tier).
+          // Die Marken stehen nur in der aufgeklappten Liste.
+          group,
           tags: tierMarks(m),
           // adult models keep the standard Cloud badge everywhere EXCEPT the row
           // itself, where "No refusals" is strictly more informative, matching web.
           badge: m.adult
-            ? { label: 'No refusals', color: contentPolicy === 'off' ? NO_REFUSALS_COLOR.open : NO_REFUSALS_COLOR.filtering }
+            ? noRefusalsBadge(contentPolicy === 'off')
             : CLOUD_BADGE,
         }))
 
@@ -222,19 +219,20 @@ function LocalModelChip() {
   const { cardGb, fitOf } = useLocalModelFits(list)
   const fitMarks = (name: string) => {
     const fit = fitOf(name)
-    return fit === 'tight' || fit === 'big' ? [{ label: vramFitLabel(fit, cardGb), color: FIT_MARK_COLOR }] : []
+    return fit === 'tight' || fit === 'big' ? [{ label: vramFitLabel(fit, cardGb) }] : []
   }
 
   // Beste oben mit der Marke "Best", Aeltere gesammelt unten unter "Older
-  // models", der Rest in gewohnter Reihenfolge. Wie im Cloud-Waehler; nichts
-  // verschwindet. `value` oben haelt sich an die ungeordnete Liste, denn die
+  // models", der Rest in gewohnter Reihenfolge; nichts verschwindet. Die
+  // lokalen Modelle bleiben in dieser Ordnung, nach Familie gruppiert werden
+  // nur die Cloud-Listen oben. `value` oben haelt sich an die ungeordnete Liste, denn die
   // zeigt, welches Modell ein Lauf wirklich nimmt.
   const options: SelectOption[] = sortByTier(list.map((m) => ({ m, tier: localTier(m) }))).map(({ m, tier }) => ({
     value: m.name,
     // The catalogue's name for a file it knows, the file name as the tooltip
     // (lib/local-model-name); any other file as before.
     ...localModelLabel(m.name),
-    badge: TYPE_BADGE[m.type],
+    badge: { label: TYPE_LABEL[m.type] },
     group: tierGroup({ tier }),
     tags: [...tierMarks({ tier }), ...fitMarks(m.name)],
   }))
