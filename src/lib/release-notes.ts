@@ -230,6 +230,26 @@ export const RELEASE_NOTES: ReleaseNote[] = [
             title: 'Each model in a group chat can have its own persona.',
             detail: 'In the Plugins menu under Group chat, every model row has a persona picker. Each model then speaks as its persona, knows the names of the others, and a line it writes in another one\'s name is cut. A group without a pick works as before.',
           },
+          {
+            title: 'LU Cloud picks no chat model for you.',
+            detail: 'In Cloud mode a new account chatted on the first model of the list without ever having picked it. The picker button now reads "Choose a model" until you pick one. Sending without a model keeps your message and its attachments and opens the picker. A model you picked yourself stays picked. If your Cloud chat stood on that first model, Llama 3.1 8B Turbo, the pick is cleared once. Local mode still picks a model on its own.',
+          },
+          {
+            title: 'An answer that declines says what to do next.',
+            detail: 'When a model declines, a line under the answer says so: a refusal stays in the chat history, and other models tend to copy it. "New chat" in that line opens a fresh chat with the same model, and the line points you to the models marked No refusals.',
+          },
+          {
+            title: 'The model picker in Cloud mode has a search and tags.',
+            detail: 'In Chat, Agent and Code, the Cloud model list is grouped by model family and has a search field. Four tags narrow it: No refusals, Vision, Thinking and No credits. A row shows the name, the No refusals mark, image input, thinking and the context size where the server states it. The "?" on a row opens the credit rates per 1M input and output tokens. Arrow keys move, Enter picks and Escape closes. On LU Cloud, the model select in Create has the same family heads. The local model list is unchanged.',
+          },
+          {
+            title: 'LM Studio is one line in the local model list.',
+            detail: 'When LM Studio is installed and its server is off, the local model list showed a box with a paragraph of text. It is now a single line with a status dot, the number of models on disk and a small Start button. What Start does to your local chat backend is in the tooltip of the button.',
+          },
+          {
+            title: 'Five cloud models no longer carry the No refusals mark.',
+            detail: 'Qwen3 30B A3B, Qwen3 Coder 480B, Llama 4 Scout, DeepSeek V4 Flash 0731 and Qwen 3.5 397B A17B declined in the second or third round of a longer test on 2026-10-05. The mark is a promise about every request, so they lose it. No other model changed.',
+          },
         ],
       },
       {
