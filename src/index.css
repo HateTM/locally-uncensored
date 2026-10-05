@@ -1017,10 +1017,11 @@ input:is(
    plus the one accent, state dots in green, grey and red, no yellow. Both
    themes are set here through variables, so neither component names a colour
    of its own. Same classes and values as the web app (globals.css). */
-/* The rate popover is lifted out to the body, so it brings the palette
-   along. So does a tag. */
+/* The service line stands in the local list and the rate popover is lifted
+   out to the body, so each brings the palette along. So does a tag. */
 .lu-picker,
 .lu-picker-tag,
+.lu-picker-service,
 .lu-picker-rate {
   --pk-sheet: var(--color-lu-overlay);
   --pk-edge: rgba(255, 255, 255, 0.08);
@@ -1040,6 +1041,7 @@ input:is(
 }
 .light .lu-picker,
 .light .lu-picker-tag,
+.light .lu-picker-service,
 .light .lu-picker-rate {
   --pk-sheet: #ffffff;
   --pk-edge: rgba(0, 0, 0, 0.1);
@@ -1187,6 +1189,23 @@ input:is(
 .lu-picker-head b { font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; white-space: nowrap; }
 .lu-picker-head .n { margin-left: auto; font-variant-numeric: tabular-nums; opacity: 0.8; }
 div + div > .lu-picker-head { margin-top: 2px; }
+
+/* A local service in one line: state dot, a short sentence, a text button.
+   Stands above the local model list, which keeps its own look. */
+.lu-picker-service {
+  flex: none;
+  min-height: 24px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 8px 0 12px;
+  border-bottom: 1px solid var(--pk-hair);
+  font-size: var(--text-label);
+  color: var(--pk-t2);
+}
+.lu-picker-service .st { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lu-picker-service.is-err .st { color: var(--pk-err); }
+.lu-picker-service .lu-picker-text-btn { border: 1px solid var(--pk-edge); color: var(--pk-t1); }
 
 .lu-picker-row {
   position: relative;

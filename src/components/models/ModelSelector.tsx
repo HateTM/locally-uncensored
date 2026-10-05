@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { usePopoverPlatz } from '../../hooks/usePopoverPlatz'
 import { useDismissOnEscape } from '../../hooks/useDismissOnEscape'
 import { motion, AnimatePresence } from 'framer-motion'
-import { AlertTriangle, Ban, ChevronDown, Loader2, Power, PlayCircle, Settings as SettingsIcon, Wrench, X, Cloud } from 'lucide-react'
+import { AlertTriangle, Ban, ChevronDown, Loader2, Power, Settings as SettingsIcon, Wrench, X, Cloud } from 'lucide-react'
 import { useModels } from '../../hooks/useModels'
 import { useModelStore } from '../../stores/modelStore'
 import { useProviderStore } from '../../stores/providerStore'
@@ -175,23 +175,17 @@ export interface LmStudioServerStatus {
   model_count: number
 }
 
-// Session-scope dismiss flag. Lives at module-level on purpose: the
-// LmStudioServerHint component unmounts when the dropdown closes, so a
-// useState reset would resurface the hint on every reopen. Module
-// state survives unmount/remount within the same LU run, and resets to
-// false when the user relaunches LU (the module reloads from scratch).
-// Not persisted to localStorage so a forgotten-to-start server gets
-// flagged again next launch.
-let LM_HINT_DISMISSED_THIS_SESSION = false
-
-function LmStudioServerHint({ onStarted }: { onStarted: () => void }) {
+// One line with a state dot, a short sentence and a text button (David,
+// 05.10.2026). It used to be a box of three text blocks and a full-width
+// button, about as tall as five model rows. What the click does is unchanged.
+function LmStudioStatusLine({ onStarted }: { onStarted: () => void }) {
   const [status, setStatus] = useState<LmStudioServerStatus | null>(null)
   const [starting, setStarting] = useState(false)
   const [startError, setStartError] = useState('')
-  const [dismissed, setDismissed] = useState(LM_HINT_DISMISSED_THIS_SESSION)
   // Starting the server also hands LM Studio the local backend slot (see
   // lib/lmstudio-backend-adopt). When the built-in engine holds that slot the
-  // user learns it here, before the click, together with the way back.
+  // user learns it before the click, together with the way back: in the
+  // tooltip of the button, the line itself stays one line.
   const replacesBuiltinEngine = useProviderStore((s) => adoptionReplacesBuiltinEngine(s.providers.openai))
 
   useEffect(() => {
@@ -206,7 +200,7 @@ function LmStudioServerHint({ onStarted }: { onStarted: () => void }) {
   // running, models are already in the list; if neither lms.exe nor any
   // models are present, the user just doesn't have LM Studio.
   const detected = !!status && (status.lms_present || status.models_detected)
-  if (!status || status.running || !detected || dismissed) return null
+  if (!status || status.running || !detected) return null
 
   const handleStart = async (e: React.MouseEvent) => {
     e.stopPropagation()
@@ -216,7 +210,7 @@ function LmStudioServerHint({ onStarted }: { onStarted: () => void }) {
     try {
       await backendCall('start_lmstudio_server')
       // The CLI takes a second or two to bind 1234, poll status
-      // briefly so the banner replaces itself with the models list
+      // briefly so the line replaces itself with the models list
       // instead of leaving the spinner spinning forever.
       for (let i = 0; i < 8; i++) {
         await new Promise(r => setTimeout(r, 750))
@@ -224,11 +218,11 @@ function LmStudioServerHint({ onStarted }: { onStarted: () => void }) {
         if (fresh) {
           setStatus(fresh)
           if (fresh.running) {
-            // A running server is only half of what the sentence above
-            // promises. The picker lists ENABLED provider slots, so without
-            // this the models stay invisible and the button leads into a dead
-            // end (Nebenbefund 4, R8 re-measure). Same call the
-            // BackendSelector makes, no LM-Studio-only path.
+            // A running server is only half of what the line promises. The
+            // picker lists ENABLED provider slots, so without this the models
+            // stay invisible and the button leads into a dead end
+            // (Nebenbefund 4, R8 re-measure). Same call the BackendSelector
+            // makes, no LM-Studio-only path.
             const update = lmStudioSlotUpdate(useProviderStore.getState().providers.openai)
             if (update) {
               useProviderStore.getState().setProviderConfig('openai', update)
@@ -244,13 +238,11 @@ function LmStudioServerHint({ onStarted }: { onStarted: () => void }) {
         }
       }
     } catch (e) {
-      // Hier stand `catch (e: any)` mit `e?.message`. Das las genau EINE Sorte
-      // Fehler: ein `Error`-Objekt. Tauris `invoke` lehnt aber mit einem STRING
-      // ab (die Rust-Seite gibt `Result<_, String>` zurueck), im ausgelieferten
-      // Programm hatte `e.message` deshalb nie einen Wert, und der Grund des
-      // Fehlschlags wurde jedes Mal durch das pauschale „Start failed" ersetzt.
-      // `detailOf` ist die Stelle, an der dieses Projekt genau diese Frage schon
-      // beantwortet (lib/error-text.ts): String, Error oder sonst etwas.
+      // Tauris `invoke` lehnt mit einem STRING ab (die Rust-Seite gibt
+      // `Result<_, String>` zurueck), ein `e.message` haette im ausgelieferten
+      // Programm nie einen Wert. `detailOf` ist die Stelle, an der dieses
+      // Projekt genau diese Frage beantwortet (lib/error-text.ts): String,
+      // Error oder sonst etwas.
       const detail = detailOf(e)
       setStartError(detail ? detail.slice(0, 80) : 'Start failed')
     } finally {
@@ -258,37 +250,46 @@ function LmStudioServerHint({ onStarted }: { onStarted: () => void }) {
     }
   }
 
+  const sentence = lmStudioLineText(status.model_count, starting, startError !== '')
   return (
-    <div className="relative px-2.5 py-2 border-b border-black/[0.06] dark:border-white/[0.04] bg-black/[0.03] dark:bg-white/[0.03]">
-      <button
-        onClick={(e) => { e.stopPropagation(); LM_HINT_DISMISSED_THIS_SESSION = true; setDismissed(true) }}
-        aria-label="Dismiss (returns on next launch)"
-        title="Dismiss (returns on next launch)"
-        className="absolute top-1 right-1 p-1 rounded text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-black/[0.06] dark:hover:bg-white/[0.08] transition-colors"
-      >
-        <X size={10} />
-      </button>
-      <p className="t-micro text-gray-600 dark:text-gray-300 leading-snug mb-1.5 pr-5">
-        LM Studio is installed ({status.model_count} model{status.model_count === 1 ? '' : 's'} on disk) but its server isn't running. Start it to pick LM Studio models here.
-      </p>
-      <button
-        onClick={handleStart}
-        disabled={starting}
-        className="w-full flex items-center justify-center gap-1.5 px-2 py-1 rounded t-micro bg-black/[0.06] dark:bg-white/[0.06] hover:bg-black/[0.1] dark:hover:bg-white/[0.12] text-gray-700 dark:text-gray-200 transition-colors disabled:opacity-50"
-      >
-        {starting ? <Loader2 size={10} className="animate-spin" /> : <PlayCircle size={10} />}
-        <span>{starting ? 'Starting LM Studio server…' : 'Start LM Studio Server'}</span>
-      </button>
-      {replacesBuiltinEngine && (
-        <p className="text-[0.55rem] text-gray-500 dark:text-gray-400 mt-1 leading-snug">
-          This also makes LM Studio your local chat backend in place of the LU Engine. You can switch back under Settings, AI Backends, Providers.
-        </p>
-      )}
-      {startError && (
-        <p className="text-[0.55rem] text-red-600/80 dark:text-red-300/70 mt-1 leading-snug">{startError}</p>
+    <div
+      data-testid="lmstudio-status-line"
+      data-state={starting ? 'starting' : startError ? 'failed' : 'off'}
+      className={`lu-picker-service${startError ? ' is-err' : ''}`}
+    >
+      {starting
+        ? <Loader2 size={8} className="shrink-0 animate-spin" />
+        : <span className={`lu-picker-dot${startError ? ' is-err' : ''}`} />}
+      {/* Why the start failed, in the server's own words, behind the line. */}
+      <span className="st" title={startError || sentence}>{sentence}</span>
+      {!starting && (
+        <button
+          type="button"
+          className="lu-picker-text-btn"
+          onClick={handleStart}
+          title={lmStudioStartTitle(replacesBuiltinEngine)}
+        >
+          {startError ? 'Retry' : 'Start'}
+        </button>
       )}
     </div>
   )
+}
+
+/** What the LM Studio line reads in each of its three states. */
+export function lmStudioLineText(modelCount: number, starting: boolean, failed: boolean): string {
+  if (starting) return 'LM Studio server starting'
+  if (failed) return 'LM Studio server did not start'
+  return `LM Studio server off, ${modelCount} ${modelCount === 1 ? 'model' : 'models'} on disk`
+}
+
+/** The tooltip of "Start". The consequence of the click stands here and
+ *  nowhere in the line: with the LU Engine in the local slot, starting LM
+ *  Studio takes that slot over. */
+export function lmStudioStartTitle(replacesBuiltinEngine: boolean): string {
+  return replacesBuiltinEngine
+    ? 'Start the LM Studio server to pick its models here. This also makes LM Studio your local chat backend in place of the LU Engine. You can switch back under Settings, AI Backends, Providers.'
+    : 'Start the LM Studio server to pick its models here.'
 }
 
 // ── Badge configs ─────────────────────────────────────────────
@@ -1548,10 +1549,12 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
               </div>
             )}
 
-            {/* Bug Q v2.4.7, surface "Start LM Studio Server" inline when
-                LM Studio is on disk but its server is off. wakeywakeynow's
-                "can't choose any models i have installed" symptom. */}
-            <LmStudioServerHint onStarted={fetchModels} />
+            {/* Bug Q v2.4.7: LM Studio is on disk but its server is off.
+                wakeywakeynow's "can't choose any models i have installed"
+                symptom. One line with a "Start" button. Local mode only: in
+                Cloud the list shows hosted models, and what the line promises
+                (pick LM Studio models here) would not come true there. */}
+            <LmStudioStatusLine onStarted={fetchModels} />
 
             {/* K6: grouping threw and was caught above instead of crashing the
                 whole chat view. Says so, in the dropdown itself, with a way
