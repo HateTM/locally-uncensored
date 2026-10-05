@@ -23,7 +23,8 @@ import { startModelDownload, getDownloadProgress, catalogDigestFor } from '../..
 import { useDownloadStore } from '../../../stores/downloadStore'
 import { getLoraModels } from '../../../api/comfyui'
 import { isWindows, isMacOS } from '../../../api/backend'
-import { musicTakesLyrics, musicHowtoLines } from '../../../lib/render/music-ui'
+import { LOCAL_MUSIC_TEXT, SECONDS_LENGTH, musicHowtoLines, musicLength, musicText } from '../../../lib/render/music-ui'
+import { createRunModel, studioShownValue } from '../../../lib/render/create-studio'
 import { galleryLabelShort } from '../../../lib/render/gallery-label'
 import { TRAIN_PRESETS, trainStepsNote } from '../../../lib/trainer-presets'
 import { trainerPathPlaceholder } from '../../../lib/trainer-path-placeholder'
@@ -896,53 +897,79 @@ function MusicControls() {
   const setMusicLyrics = useCreateStore((s) => s.setMusicLyrics)
   const cloudOpModel = useCreateStore((s) => s.cloudOpModel)
   const isCloud = useCreateStore((s) => s.backend) === 'cloud'
-  // Cloud: only ace-step-1.5 has a lyrics input on the wire (catalog `lyrics`
-  // flag); the other music endpoints write their own lyrics from the prompt,
-  // so offering the box there would be a lie.
-  // Local: every music checkpoint runs through buildMusicWorkflow, which feeds
-  // `lyrics` straight into the ACE-Step encoder. Asking the CLOUD catalog about
-  // a local checkpoint returns undefined, which is how the local tab ended up
-  // hiding the lyrics box and claiming the model writes its own, while sitting
-  // on the one model that sings yours (#108, ElBiggus).
-  const canLyrics = musicTakesLyrics(
-    isCloud ? 'cloud' : 'local',
-    cloudModelById(modelForOp('audio', 'music', cloudOpModel))?.lyrics === true,
-  )
-  const howtoLines = musicHowtoLines(isCloud ? 'cloud' : 'local')
   const musicHowtoSeen = useCreateStore((s) => s.musicHowtoSeen)
   const setMusicHowtoSeen = useCreateStore((s) => s.setMusicHowtoSeen)
-  const [lyricsOpen, setLyricsOpen] = useState(musicLyrics.length > 0)
   const [howtoOpen, setHowtoOpen] = useState(false)
+  // The catalog decides which models the picker holds, so this surface redraws
+  // when it arrives.
+  useCloudCatalogStore((s) => s.models)
+  const model = createRunModel('music', { image: '', video: '', op: cloudOpModel })
+  const studioOptions = useCreateStore((s) => s.cloudStudioOptions)
+  const setStudioOptions = useCreateStore((s) => s.setCloudStudioOptions)
+  // Cloud: which text goes where is the model's own business. For most the
+  // prompt is the style and a few take lyrics next to it, for Mureka Song and
+  // YuE2 the prompt IS the lyrics and the style sits next to it. The second
+  // text is offered wherever the model reads one, under its real name.
+  // Local: every music checkpoint runs through buildMusicWorkflow, which feeds
+  // the lyrics box straight into the encoder. Asking the CLOUD catalog about a
+  // local checkpoint is how the local tab once hid the box while sitting on
+  // the one model that sings yours (#108, ElBiggus).
+  const text = isCloud ? musicText(model) : LOCAL_MUSIC_TEXT
+  const second = text.second
+  const secondValue = !second ? '' : second.option
+    ? String(studioShownValue(model, studioOptions, second.option) ?? '')
+    : musicLyrics
+  const setSecondValue = (v: string) => {
+    if (!second) return
+    if (second.option) setStudioOptions({ ...studioOptions, [second.option]: v === '' ? undefined : v })
+    else setMusicLyrics(v)
+  }
+  const [secondOpen, setSecondOpen] = useState(musicLyrics.length > 0)
+  // The length slider stands only where the run reads a length, and sets the
+  // field the run sends: the store's seconds for a local or a classic cloud
+  // model, the model's own option for a Studio one (the same option the price
+  // is computed from).
+  const length = isCloud ? musicLength(model) : SECONDS_LENGTH
+  const lengthOption = length?.option
+  const seconds = length && lengthOption
+    ? Math.round(Number(studioShownValue(model, studioOptions, lengthOption)) / length.perSecond)
+    : musicDuration
+  const howtoLines = musicHowtoLines(isCloud ? 'cloud' : 'local', { text, length })
 
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-center gap-3">
-        <div className="w-56">
-          <Slider
-            label="Length"
-            min={5}
-            max={240}
-            step={5}
-            value={musicDuration}
-            onChange={setMusicDuration}
-            format={(v) => `${Math.floor(v / 60)}:${String(v % 60).padStart(2, '0')}`}
-          />
-        </div>
-        {canLyrics ? (
+        {length && (
+          <div className="w-56">
+            <Slider
+              label="Length"
+              min={length.min}
+              max={length.max}
+              step={length.step}
+              value={Math.max(length.min, Math.min(length.max, seconds))}
+              onChange={(v) => (lengthOption
+                ? setStudioOptions({ ...studioOptions, [lengthOption]: v * length.perSecond })
+                : setMusicDuration(v))}
+              format={(v) => `${Math.floor(v / 60)}:${String(v % 60).padStart(2, '0')}`}
+            />
+          </div>
+        )}
+        {second ? (
           <button
-            onClick={() => setLyricsOpen((o) => !o)}
+            onClick={() => setSecondOpen((o) => !o)}
+            aria-expanded={secondOpen}
             className={cn(
               't-control flex items-center gap-1.5 px-2.5 h-[var(--control-h-sm)] rounded-md border transition-colors',
-              lyricsOpen
+              secondOpen
                 ? 'bg-white/[0.06] border-white/10 text-gray-200'
                 : 'bg-white/[0.03] border-white/[0.06] text-gray-400 hover:text-gray-200',
             )}
           >
-            <Music2 size={12} /> Lyrics
+            <Music2 size={12} /> {second.is === 'lyrics' ? 'Lyrics' : 'Style'}
           </button>
         ) : (
           <span className="t-control text-gray-500">
-            This model writes its own lyrics from the prompt. Pick ACE-Step 1.5 to sing yours.
+            {text.main === 'lyrics' ? 'This model sings the lyrics you write.' : 'This model writes its own lyrics from the prompt.'}
           </span>
         )}
         <div className="relative">
@@ -976,7 +1003,8 @@ function MusicControls() {
             <div className="t-control px-3 py-2 rounded-md bg-white/[0.03] border border-white/[0.06] text-gray-400 space-y-1 text-left">
               {/* Copy lives in music-ui.ts so the claims are asserted, not
                   eyeballed. The local panel used to promise other downloadable
-                  models and per-second billing (#108). */}
+                  models and per-second billing (#108), the cloud panel follows
+                  the model on screen. */}
               {howtoLines.map((line, i) => (
                 <p key={i} className={i === 0 ? 'text-gray-200' : undefined}>{line}</p>
               ))}
@@ -985,7 +1013,7 @@ function MusicControls() {
         )}
       </AnimatePresence>
       <AnimatePresence>
-        {canLyrics && lyricsOpen && (
+        {second && secondOpen && (
           <motion.div
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: 'auto', opacity: 1 }}
@@ -993,10 +1021,13 @@ function MusicControls() {
             className="overflow-hidden"
           >
             <textarea
-              value={musicLyrics}
-              onChange={(e) => setMusicLyrics(e.target.value)}
-              placeholder="Your lyrics. [Verse] and [Chorus] markers make them sing best…"
-              rows={3}
+              value={secondValue}
+              onChange={(e) => setSecondValue(e.target.value)}
+              aria-label={second.is === 'lyrics' ? 'Lyrics' : 'Style'}
+              placeholder={second.is === 'lyrics'
+                ? 'Your lyrics. [Verse] and [Chorus] markers make them sing best…'
+                : 'Genre, mood, tempo, voice…'}
+              rows={second.is === 'lyrics' ? 3 : 1}
               className="w-full t-control px-2.5 py-1.5 rounded-md bg-white/[0.03] border border-white/[0.06] text-gray-200 placeholder-gray-600 focus:outline-none focus:border-white/15 resize-none"
             />
           </motion.div>

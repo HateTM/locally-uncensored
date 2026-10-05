@@ -21,6 +21,7 @@ import { effectiveVideoDurations, snapToVideoDuration } from '../../../lib/rende
 import { mediaSeconds, useStudioPrice } from './useStudioPrice'
 import { getJob } from '../../../api/cloud/jobs'
 import { INTENT_MAP, intentTakesPrompt } from './intents'
+import { MUSIC_PLACEHOLDER, musicText } from '../../../lib/render/music-ui'
 import { subscribeInstallRuns, getInstallRun } from '../../../lib/model-install-runs'
 import { useWorkflowStore, shouldShowManagerNotice } from '../../../stores/workflowStore'
 import { noPromptHint, shouldShowLaneHint } from './laneHint'
@@ -303,7 +304,11 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
                     // cloud model requires a mask.
                     : (intent === 'edit' && needsMask
                       ? 'Describe the new look. Paint an area first to tell it what to change…'
-                      : meta.placeholder)
+                      // Cloud music: the field asks for what the model does
+                      // with it, a description or the lyrics it sings.
+                      : intent === 'music' && backend === 'cloud'
+                        ? MUSIC_PLACEHOLDER[musicText(runModel).main]
+                        : meta.placeholder)
                 }
                 onSubmit={() => canGenerate && !isGenerating && guardedGenerate()}
               />

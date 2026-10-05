@@ -10,6 +10,8 @@ import { useCreateStore } from '../../../stores/createStore'
 import { SchemaControl, isCompactField, studioFieldsInOrder } from './SchemaControl'
 import { modelHint, modelLabel } from '../../../lib/render/preset-models'
 import { studioShownValue } from '../../../lib/render/create-studio'
+import { STUDIO_MODELS } from '../../../lib/render/studio-contract'
+import { musicText } from '../../../lib/render/music-ui'
 
 export function StudioParams({ model }: { model: string }) {
   const options = useCreateStore((s) => s.cloudStudioOptions)
@@ -17,6 +19,9 @@ export function StudioParams({ model }: { model: string }) {
   const isGenerating = useCreateStore((s) => s.isGenerating)
   const fields = studioFieldsInOrder(model)
   const hint = modelHint(model)
+  // Mureka Song calls its style field "prompt" while the prompt field carries
+  // the lyrics. The control is named for what it does.
+  const styleOption = STUDIO_MODELS[model]?.kind === 'audio' ? musicText(model).second : null
   return (
     <div className="px-1 py-3">
       {/* Eine Ueberschrift, damit die Klappe sagt, wessen Einstellungen das
@@ -33,6 +38,7 @@ export function StudioParams({ model }: { model: string }) {
           <div key={key} className={isCompactField(schema) ? undefined : 'col-span-2'}>
             <SchemaControl
               name={key}
+              title={styleOption?.option === key ? (styleOption.is === 'style' ? 'Style' : 'Lyrics') : undefined}
               schema={schema}
               value={studioShownValue(model, options, key)}
               disabled={isGenerating}

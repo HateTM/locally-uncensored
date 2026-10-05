@@ -42,7 +42,8 @@ import { STANDARD_UPSCALE, intentRoles, intentRequiredInputs, isStudioModel, res
 import { bumpSeed, runImageCount } from '../lib/render/image-count'
 import { STUDIO_MODELS, studioFields } from '../lib/render/studio-contract'
 import { modelLabel } from '../lib/render/preset-models'
-import { improveKindForIntent, IMPROVING_PROMPT } from '../lib/render/improve-prompt'
+import { IMPROVING_PROMPT } from '../lib/render/improve-prompt'
+import { improveKindForRun } from '../lib/render/music-ui'
 import { intentTakesPrompt } from '../components/create/experimental/intents'
 import { rewrittenByName } from '../lib/render/qwen-enhancer'
 import { elapsedLine } from '../lib/elapsed-line'
@@ -553,7 +554,7 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
       let promptOriginal: string | undefined
       let rewrittenBy: string | undefined
       let improveFailed = false
-      const improveKind = s.improvePrompt && !characterUse ? improveKindForIntent(intent) : null
+      const improveKind = s.improvePrompt && !characterUse ? improveKindForRun(intent, model) : null
       if (improveKind && prompt.trim() && !ac.signal.aborted) {
         const improving = elapsedLine((text) => s.setProgress(8, text), IMPROVING_PROMPT)
         const out = await improvePrompt(prompt, { kind: improveKind, modelLabel: modelLabel(model) }, ac.signal).finally(improving.stop)

@@ -1,6 +1,8 @@
 import { Wand2 } from 'lucide-react'
 import { useCreateStore } from '../../../stores/createStore'
 import { improveKindForIntent } from '../../../lib/render/improve-prompt'
+import { improveKindForRun } from '../../../lib/render/music-ui'
+import { createRunModel } from '../../../lib/render/create-studio'
 import { useImproveAvailability } from '../../../lib/render/improve-prompt-run'
 import { QWEN_ENHANCER_HINT, activeWriter, improveWriters } from '../../../lib/render/qwen-enhancer'
 import { isMlxImageHost } from '../../../api/mlx-image'
@@ -10,19 +12,23 @@ import { cn } from '../ui/cn'
 
 // "Improve my prompt": a switch in the advanced settings. It never sits in or
 // above the prompt field. Off by default and remembered. Shown only on the
-// tools that write a prompt for an image, a clip or a track.
+// tools that write a prompt for an image, a clip or a track, and never where
+// the prompt is the lyrics of a song.
 //
 // On a local Qwen-Image 2.1 with a prompt enhancer installed the enhancer
 // writes instead of the chat model, for a new picture and for an edit, and a
 // row under the switch lets the user pick who writes. Same switch, same place.
 export function ImproveToggle() {
   const intent = useCreateStore((s) => s.intent())
-  const kind = improveKindForIntent(intent)
+  const backend = useCreateStore((s) => s.backend)
+  // Cloud music asks the model: a text field that carries lyrics is never
+  // rewritten. Local music keeps the prompt as the style for every checkpoint.
+  const musicModel = useCreateStore((s) => createRunModel('music', { image: '', video: '', op: s.cloudOpModel }))
+  const kind = backend === 'cloud' ? improveKindForRun(intent, musicModel) : improveKindForIntent(intent)
   const on = useCreateStore((s) => s.improvePrompt)
   const setOn = useCreateStore((s) => s.setImprovePrompt)
   const choice = useCreateStore((s) => s.improveWith)
   const setChoice = useCreateStore((s) => s.setImproveWith)
-  const backend = useCreateStore((s) => s.backend)
   const imageModel = useCreateStore((s) => s.imageModel)
   const imageModelList = useCreateStore((s) => s.imageModelList)
   const textEncoders = useCreateStore((s) => s.textEncoderList)

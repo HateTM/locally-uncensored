@@ -4,6 +4,7 @@ import {
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import type { CreateBackend, CreateIntent } from '../../../stores/createStore'
+import { MUSIC_PLACEHOLDER } from '../../../lib/render/music-ui'
 
 export interface IntentMeta {
   id: CreateIntent
@@ -135,7 +136,7 @@ export const INTENTS: IntentMeta[] = [
   },
   {
     id: 'music', label: 'Music', short: 'Music', icon: Music,
-    placeholder: 'Describe the track. Genre, mood, tempo, instruments…',
+    placeholder: MUSIC_PLACEHOLDER.style,
     needsSource: false, needsPrompt: true, allowsMask: false, isVideo: false,
     cloudOnly: true, hasLocalLane: true, requiresModels: 'audio',
     examples: [

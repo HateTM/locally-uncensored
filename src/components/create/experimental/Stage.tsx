@@ -2,6 +2,8 @@ import { useRef, useState, useSyncExternalStore } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { UploadCloud, ImagePlus, Scissors, Wand2, Sparkles, X, Loader2, Download, AlertTriangle, Image as ImageIcon, Film } from 'lucide-react'
 import { useCreateStore, type GalleryItem } from '../../../stores/createStore'
+import { createRunModel } from '../../../lib/render/create-studio'
+import { musicText } from '../../../lib/render/music-ui'
 import { useCreateExp } from './CreateContext'
 import { INTENT_MAP } from './intents'
 import { editNeedsMask, defaultCloudModel, modelForOp } from '../../../stores/cloudCatalogStore'
@@ -108,6 +110,12 @@ export function Stage({ displayed, onOpenMaskEditor, onEditResult, onAnimateResu
 
   const characterTab = useCreateStore((s) => s.characterTab)
   const characterTrain = intent === 'character' && characterTab === 'train'
+  // The example chips of Music are style descriptions. Where the prompt of a
+  // cloud model is the lyrics, a chip would be sung word for word, so that
+  // model shows none. Local music keeps them: its prompt is always the style.
+  const musicIsLyrics = useCreateStore((s) =>
+    s.backend === 'cloud' && musicText(createRunModel('music', { image: '', video: '', op: s.cloudOpModel })).main === 'lyrics')
+  const examples = intent === 'music' && musicIsLyrics ? [] : meta.examples
 
   // A bundle is not usable until ALL of its files are down, and the lane list
   // refills the moment the diffusion model alone lands. Measured on the box
@@ -161,9 +169,9 @@ export function Stage({ displayed, onOpenMaskEditor, onEditResult, onAnimateResu
     // Weiss — den Text daneben faengt `index.css:863-868` ab, das Bild nicht.
     body = (
       <EmptyState icon={Sparkles} logoSrc={MONOGRAM} logoClassName={MONOGRAM_INVERT} title={teachTitle(intent)}>
-        {meta.examples.length > 0 && (
+        {examples.length > 0 && (
           <div className="flex flex-wrap justify-center gap-1.5 pt-1">
-            {meta.examples.map((ex) => (
+            {examples.map((ex) => (
               <button
                 key={ex}
                 onClick={() => setPrompt(ex)}

@@ -221,3 +221,36 @@ describe('Improve my prompt: Cloud (Desktop)', () => {
     expect(useCreateStore.getState().improvePrompt).toBe(false)
   })
 })
+
+// Fund M1 (05.10.2026): bei Mureka Song und YuE2 ist das Textfeld der Liedtext.
+// Die Umschreibung machte daraus eine Stilbeschreibung, und die wurde gesungen.
+describe('Improve my prompt: Musik', () => {
+  const LIED = '[Verse]\nmorning light on the kitchen floor'
+
+  it('ein Liedtext wird nie umgeschrieben, auch wenn der Schalter an ist', async () => {
+    const { generate } = useCloudCreate()
+    for (const model of ['mureka-song', 'yue2']) {
+      submitted.length = 0
+      improve.calls.length = 0
+      const s = useCreateStore.getState()
+      s.setIntent('music'); s.setCloudOpModel(model); s.setPrompt(LIED)
+      useCreateStore.setState({ improvePrompt: true })
+      await generate()
+      expect(useCreateStore.getState().error, model).toBeNull()
+      expect(improve.calls, model).toHaveLength(0)
+      expect(submitted[0].model, model).toBe(model)
+      expect(submitted[0].prompt, model).toBe(LIED)
+      expect(submitted[0].params.prompt_original, model).toBeUndefined()
+    }
+  })
+
+  it('eine Stilbeschreibung wird weiter umgeschrieben', async () => {
+    const s = useCreateStore.getState()
+    s.setIntent('music'); s.setCloudOpModel('eleven-music'); s.setPrompt('slow jazz, upright bass')
+    useCreateStore.setState({ improvePrompt: true })
+    await useCloudCreate().generate()
+    expect(improve.calls).toHaveLength(1)
+    expect(improve.calls[0].kind).toBe('music')
+    expect(submitted[0].prompt).toBe('A rewritten prompt.')
+  })
+})
