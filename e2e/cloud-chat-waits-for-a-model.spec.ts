@@ -23,7 +23,7 @@ import { routeCloud, seedOnboardingDone, signInViaGate, cloudSwitch } from './su
 
 const TEXT = 'a message that waits for its model'
 const NOTE = { name: 'notes.txt', mimeType: 'text/plain', buffer: Buffer.from('the attachment stays too') }
-const HINT = 'Pick a model to send your message. Your text and attachments are kept.'
+const HINT = 'Choose a model to send your message. Your text and attachments are kept.'
 const REPLY = 'Cloud answer on the named model.'
 const CORS = { 'access-control-allow-origin': '*', 'access-control-allow-headers': 'authorization, content-type' }
 

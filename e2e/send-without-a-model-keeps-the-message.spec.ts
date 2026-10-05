@@ -21,7 +21,7 @@ import { seedOnboardingDone } from './support/cloud-mock'
 const SMALL_MODEL = 'Hermes-3-Llama-3.2-3B.Q4_K_M'
 const TEXT = 'a message that must not get lost'
 const NOTE = { name: 'notes.txt', mimeType: 'text/plain', buffer: Buffer.from('the attachment stays too') }
-const HINT = 'Pick a model to send your message. Your text and attachments are kept.'
+const HINT = 'Choose a model to send your message. Your text and attachments are kept.'
 
 async function boot(page: Page) {
   await page.addInitScript(tauriMockInit, { assistantReply: DEFAULT_ASSISTANT_REPLY, modelName: SMALL_MODEL })

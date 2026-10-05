@@ -46,6 +46,13 @@ export interface CloudModel {
    *  fixed behaviour. See lib/effort.ts. */
   effortLevels?: string[]
   effortDefault?: string
+  /** The context window the server stated in its listing. Absent when it
+   *  stated none; `contextLength` may then hold a table value or a guess,
+   *  which is fine for a budget and wrong for a printed figure. */
+  declaredContext?: number
+  /** Credits per one million tokens, input and output apart, as LU Cloud
+   *  states them. Shown in the picker's rate popover and nowhere else. */
+  creditRates?: import('../api/providers/types').CreditRates
   /** Friendly picker label when the server provides one (LU Cloud /models
    *  `name`) — pickers fall back to the raw id otherwise. */
   displayName?: string

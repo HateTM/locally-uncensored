@@ -16,7 +16,7 @@ import type {
   ProviderClient, ProviderModel, ProviderConfig, ChatMessage, ChatOptions,
   ChatStreamChunk, ToolCall, ToolDefinition,
 } from './types'
-import { ProviderError } from './types'
+import { ProviderError, type CreditRates } from './types'
 import { RepetitionStop } from '../../lib/repetition-stop'
 import { parseSSEStream } from '../sse'
 import { idleAbortGuard, isStreamIdleTimeout } from '../stream-idle'
@@ -162,6 +162,18 @@ interface OpenAIModelEntry {
   // missing ladder as "keep doing exactly what you did before".
   reasoning_effort_levels?: string[]
   reasoning_effort_default?: string
+  // What the model draws per one million tokens, in credits. LU Cloud sends it
+  // since 3.0.5; absent everywhere else and on an older deployment.
+  credit_rates?: CreditRates
+}
+
+/** The models route's `credit_rates`, or nothing. Both sides must be real
+ *  numbers: half a rate would print as a price list with a hole in it. */
+function parseCreditRates(raw: unknown): CreditRates | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const { input_per_million: i, output_per_million: o } = raw as Record<string, unknown>
+  const ok = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n) && n >= 0
+  return ok(i) && ok(o) ? { inputPerMillion: i, outputPerMillion: o } : undefined
 }
 
 /**
@@ -218,7 +230,13 @@ function toModelEntry(m: Record<string, unknown>): OpenAIModelEntry {
     // becomes, and it already answers this case; a second answer here would be
     // a second place to keep right.
     reasoning_effort_default: asString(m.reasoning_effort_default),
+    credit_rates: parseCreditRates(m.credit_rates),
   }
+}
+
+/** The window a listing stated itself, for the picker's context column. */
+function declaredContextOf(m: OpenAIModelEntry): number | undefined {
+  return m.context_length && m.context_length > 0 ? m.context_length : undefined
 }
 
 /**
@@ -1170,6 +1188,8 @@ export class OpenAIProvider implements ProviderClient {
           unfiltered: asUnfiltered(m.unfiltered),
           effortLevels: m.reasoning_effort_levels,
           effortDefault: m.reasoning_effort_default,
+          declaredContext: declaredContextOf(m),
+          creditRates: m.credit_rates,
         }
       }))
     }
@@ -1199,6 +1219,8 @@ export class OpenAIProvider implements ProviderClient {
         // whole effort feature off for this model.
         effortLevels: m.reasoning_effort_levels,
         effortDefault: m.reasoning_effort_default,
+        declaredContext: declaredContextOf(m),
+        creditRates: m.credit_rates,
       }
     })
   }

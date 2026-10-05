@@ -140,7 +140,7 @@ describe('what Chat counts as a model to send with', () => {
 })
 
 describe('the model picker after a send without a model', () => {
-  const HINT = 'Pick a model to send your message. Your text and attachments are kept.'
+  const HINT = 'Choose a model to send your message. Your text and attachments are kept.'
   const picker = () => screen.getByRole('button', { name: 'Select chat model' })
   const withModels = () => useModelStore.setState({
     activeModel: null,

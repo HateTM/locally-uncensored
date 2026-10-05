@@ -44,6 +44,8 @@ import { ModelPickerSkeleton } from '../layout/ViewSkeletons'
 import type { AIModel } from '../../types/models'
 import { MOTION_S } from '../ui/motion'
 import { ModelRowMarks } from './ModelRowMarks'
+import { CloudModelPicker, CLOUD_PICKER_MAX_HEIGHT, CLOUD_PICKER_WIDTH, type PickerNote } from './CloudModelPicker'
+import { modelFamily, OTHER_FAMILY } from '../../lib/model-family'
 import type { CloudModel as CloudModelMarks } from '../../types/models'
 
 // ── Local-mode cloud discovery (2.5.8): an "LU Cloud" section at the list's
@@ -328,68 +330,33 @@ function getProviderBadge(model: AIModel) {
 //
 // Pure visual grouping, model name + provider still resolve chat
 // routing exactly as before.
-
-// Normalize a model name into a comparable base form:
-//   openai::qwen3.6-27b        → qwen3.6-27b
-//   richardyoung/qwen3-14b:…   → qwen3-14b
-//   Qwen3.6-27B-Q4_K_M.gguf    → qwen3.6-27b-q4_k_m.gguf
-function normalizeModelName(name: string): string {
-  return (name || '')
-    .toLowerCase()
-    .replace(/^[^:]+::/, '')    // strip openai:: / anthropic::
-    .replace(/^[^/]+\//, '')    // strip repo-author/ prefix
-    .replace(/:.+$/, '')        // strip :tag suffix
-}
-
-// Ordered, first match wins. Prefixes/infixes on the normalized name.
-const FAMILY_MATCHERS: Array<{ family: string; test: RegExp }> = [
-  { family: 'Qwen',       test: /^qwen|^qwq/ },
-  { family: 'Gemma',      test: /^gemma/ },
-  { family: 'Llama',      test: /^llama|^meta[-_]?llama/ },
-  { family: 'Mistral',    test: /^mistral|^mixtral|^mistral-nemo|^mistral-small|^mistral-large/ },
-  { family: 'DeepSeek',   test: /^deepseek/ },
-  { family: 'Phi',        test: /^phi-?\d|^phi_?\d/ },
-  { family: 'Hermes',     test: /^hermes|^nous-/ },
-  { family: 'Dolphin',    test: /^dolphin/ },
-  { family: 'Claude',     test: /^claude/ },
-  { family: 'GPT-OSS',    test: /^gpt-oss/ },
-  { family: 'GPT / o-series', test: /^gpt-|^o1-|^o3-/ },
-  { family: 'Command',    test: /^command/ },
-  { family: 'GLM',        test: /^glm|^chatglm|^zai/ },
-  { family: 'Yi',         test: /^yi-/ },
-  { family: 'Gemini',     test: /^gemini/ },
-  { family: 'Grok',       test: /^grok/ },
-]
-
-function getModelFamily(modelName: string): string {
-  const n = normalizeModelName(modelName)
-  for (const { family, test } of FAMILY_MATCHERS) {
-    if (test.test(n)) return family
-  }
-  return 'Other'
-}
+//
+// This is the LOCAL list. It keeps its own order and its own head per family,
+// also over a single row (David, 05.10.2026: the local list stays as it is).
+// Which family a name belongs to is asked in lib/model-family, the same table
+// the Cloud picker groups by.
 
 // Family display order, Qwen/Gemma/Llama surface first since they're
 // the most common local-chat picks; cloud-only families (Claude/GPT)
 // come after the local ones; 'Other' always last.
 const FAMILY_ORDER: string[] = [
   'Qwen', 'Gemma', 'Llama', 'Mistral', 'DeepSeek', 'Phi', 'Hermes',
-  'Dolphin', 'GLM', 'GPT-OSS', 'Yi', 'Command',
+  'Dolphin', 'GLM', 'gpt-oss', 'Yi', 'Command',
   'Claude', 'GPT / o-series', 'Gemini', 'Grok',
 ]
 
 function groupByFamily(models: AIModel[]): { family: string; models: AIModel[] }[] {
   const groups: Record<string, AIModel[]> = {}
   for (const m of models) {
-    const fam = getModelFamily(m.name)
+    const fam = modelFamily(m.name)
     if (!groups[fam]) groups[fam] = []
     groups[fam].push(m)
   }
 
   return Object.entries(groups)
     .sort(([a], [b]) => {
-      if (a === 'Other') return 1
-      if (b === 'Other') return -1
+      if (a === OTHER_FAMILY) return 1
+      if (b === OTHER_FAMILY) return -1
       const ai = FAMILY_ORDER.indexOf(a)
       const bi = FAMILY_ORDER.indexOf(b)
       if (ai >= 0 && bi >= 0) return ai - bi
@@ -658,8 +625,13 @@ export interface ModelSelectorProps {
  *  that is the normal state of a new account: the app never picks a hosted
  *  model by itself (lib/active-model-mode). */
 const NO_MODEL_LABEL = 'Choose a model'
-/** The first line of the menu in Cloud mode while nothing is picked. */
-const CHOOSE_TO_SEND = 'Choose a model to send your message.'
+/** The first line of the menu while nothing is picked, in the words of the
+ *  web app. One wording for both reasons the line can stand there. */
+export const CHOOSE_TO_SEND = 'Choose a model to send your message.'
+/** Added to it, in the same line, after a send was tried without a model. */
+export const MESSAGE_IS_KEPT = 'Your text and attachments are kept.'
+/** The line when a send is waiting and the list holds no model at all. */
+export const NO_MODEL_LISTED = `Your message needs a chat model, and none is listed yet. ${MESSAGE_IS_KEPT}`
 
 // `openUpward` flips the dropdown to open above the trigger, right-aligned, // used when the picker lives in the composer action bar (bottom of the screen)
 // instead of the header. Header usage keeps the default downward/centered menu.
@@ -834,7 +806,29 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
    * die Seite, die reicht, die Hoehe, die bleibt, keine Mindesthoehe mehr.
    */
   const menueRef = useRef<HTMLDivElement>(null)
-  const menue = usePopoverPlatz(menueRef, open, { bevorzugt: openUpward ? 'oben' : 'unten', abstand: 6, luft: 12 })
+  // In Cloud mode the menu is the new picker: a fixed head and foot around a
+  // list that scrolls by itself, capped in height, and never wider than the
+  // area that would cut it.
+  const cloudListRef = useRef<HTMLDivElement>(null)
+  const cloudPicker = appMode === 'cloud'
+  const menue = usePopoverPlatz(menueRef, open, cloudPicker
+    ? { bevorzugt: openUpward ? 'oben' : 'unten', abstand: 6, luft: 12, deckel: CLOUD_PICKER_MAX_HEIGHT, rolle: cloudListRef, breiteDeckeln: true }
+    : { bevorzugt: openUpward ? 'oben' : 'unten', abstand: 6, luft: 12 })
+
+  // The Cloud picker's search field takes the keyboard when the menu opens.
+  // When the menu closes while the keyboard is still in it (a pick, Escape),
+  // the keyboard goes back to where it came from: the composer, so Enter
+  // sends the kept message, or the trigger.
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const focusCameFrom = useRef<HTMLElement | null>(null)
+  useEffect(() => {
+    if (open || !cloudPicker) return
+    const menu = menueRef.current
+    if (!menu || !menu.contains(document.activeElement)) return
+    const back = focusCameFrom.current
+    focusCameFrom.current = null
+    ;(back && back.isConnected && back !== document.body ? back : triggerRef.current)?.focus({ preventScroll: true })
+  }, [open, cloudPicker])
 
   // Keep the per-row On/Off LOAD state LIVE while the dropdown is open
   // (David 2026-06-12: "on und offload button sehr delayed und nicht immer
@@ -1227,6 +1221,9 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
+      // The rate popover of the Cloud picker is lifted out to the body. It
+      // belongs to the menu, so a press on it is not a press outside.
+      if (e.target instanceof Element && e.target.closest('[data-model-rate]')) return
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
     }
     document.addEventListener('mousedown', handler)
@@ -1298,10 +1295,70 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
   const hasOllamaModels = textModels.some(m => ('provider' in m && m.provider === 'ollama') || !('provider' in m))
   textModelsEmptyRef.current = textModels.length === 0
 
+  // The one reason this picker switches rows off: a pick is already running.
+  // Kept as its own name because a refused click hands exactly this to
+  // `blockedPickWait`, which is what keeps any future second reason silent
+  // (A17).
+  const pickInFlight = selectingLms !== null || togglingLms !== null
+
+  // What an empty list says, in both modes. An empty picker after the user
+  // switched the last backend off in Settings used to say only "No models
+  // available", which reads like a machine with nothing installed
+  // (Nebenbefund 1, R9 re-measure). The reason and the way back belong here.
+  // Ruhiger Ton aus `lib/hinweis.ts`: der Nutzer hat das Backend selbst
+  // ausgeschaltet, das ist kein Zwischenfall, sondern die Antwort auf „warum
+  // ist die Liste leer". Der Knopf darunter traegt den Weg zurueck.
+  const emptyList = (
+    <div className="px-2.5 py-3 text-center">
+      <p className="t-micro text-gray-600">No models available</p>
+      {noBackendEnabled ? (
+        <>
+          <p className={`mt-1 t-micro leading-snug text-left ${HINWEIS_TEXT.ruhig}`}>
+            No AI backend is enabled, so there is nothing to list. Open Settings, go to AI Backends, and press Enable on the backend you switched off, or Add Provider.
+          </p>
+          <button
+            onClick={() => { setOpen(false); openSettingsAt({ tab: 'backends' }) }}
+            className="mt-2 inline-flex items-center gap-1 px-2 py-1 rounded bg-white/5 border border-white/10 t-micro text-gray-300 hover:bg-white/10 transition-colors"
+          >
+            <SettingsIcon size={10} /> Open Settings
+          </button>
+        </>
+      ) : emptyReason && (
+        <p className={`mt-1 t-micro leading-snug text-left ${HINWEIS_TEXT.ruhig}`}>{emptyReason}</p>
+      )}
+    </div>
+  )
+
+  // The lines under the search of the Cloud picker: what needs attention now.
+  // Same sentences and the same test ids as the lines of the local menu.
+  const cloudNotes: PickerNote[] = [
+    ...(selectError ? [{ testId: 'model-picker-error', text: selectError, tone: 'error' as const }] : []),
+    ...(engineSwitchNote ? [{
+      testId: 'picker-engine-note',
+      text: engineSwitchNote,
+      tone: engineSwitchTone === 'error' ? 'error' as const : 'info' as const,
+      onDismiss: () => useLuEngineSwitchStore.getState().dismiss(),
+    }] : []),
+    // In Cloud the app picks no model by itself, so a menu without a pick is
+    // the normal state of a new account there. The line says what the pick is
+    // for; after a send was tried it adds, in the same line, that the message
+    // is still in the composer.
+    ...(sendNeedsModel
+      ? [{
+          testId: 'picker-send-needs-model',
+          text: textModels.length > 0 ? `${CHOOSE_TO_SEND} ${MESSAGE_IS_KEPT}` : NO_MODEL_LISTED,
+          tone: 'info' as const,
+        }]
+      : !activeModel && textModels.length > 0
+        ? [{ testId: 'picker-choose-a-model', text: CHOOSE_TO_SEND, tone: 'info' as const }]
+        : []),
+  ]
+
   return (
     <div ref={ref} className="relative">
       {/* ── Trigger Button ── */}
       <button
+        ref={triggerRef}
         onClick={() => setOpen(!open)}
         title={
           answeredBy
@@ -1391,9 +1448,16 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
         {open && (
           <motion.div
             data-testid="model-picker-menu"
+            data-picker={cloudPicker ? 'cloud' : 'local'}
             ref={menueRef}
-            style={menue.style}
-            className={`absolute w-72 rounded-lg overflow-x-hidden overflow-y-auto scrollbar-thin z-50 lu-elevated ${
+            style={cloudPicker ? { width: CLOUD_PICKER_WIDTH, ...menue.style } : menue.style}
+            className={`absolute z-50 lu-elevated ${
+              // Cloud: the new picker, a column whose list scrolls by itself.
+              // Local: the list as it always was, the menu scrolls as a whole.
+              cloudPicker
+                ? 'lu-picker flex flex-col overflow-hidden'
+                : 'w-72 rounded-lg overflow-x-hidden overflow-y-auto scrollbar-thin'
+            } ${
               menue.nachOben ? 'bottom-full mb-1.5' : 'top-full mt-1.5'
             } ${openUpward ? 'right-0' : 'left-1/2 -translate-x-1/2'}`}
             initial={{ opacity: 0, y: menue.nachOben ? 6 : -6, scale: 0.98 }}
@@ -1401,26 +1465,32 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
             exit={{ opacity: 0, y: menue.nachOben ? 6 : -6, scale: 0.98 }}
             transition={{ duration: MOTION_S.fast, ease: 'easeOut' }}
           >
+            {cloudPicker ? (
+              <CloudModelPicker
+                models={textModels}
+                activeModel={activeModel}
+                loading={!inventoryLoaded}
+                notes={cloudNotes}
+                hiddenForCode={hiddenForCode}
+                empty={emptyList}
+                listRef={cloudListRef}
+                onPick={(model) => {
+                  // A17: a pick while another one is running is refused, and
+                  // says which wait it ran into.
+                  if (pickInFlight) { announceBlockedPick(pickInFlight); return }
+                  void handleSelectModel(model)
+                }}
+                onTookFocus={(from) => { focusCameFrom.current = from }}
+              />
+            ) : (<>
             {/* First of all: why the menu opened by itself. The message the
                 user tried to send is still in the composer. */}
-            {sendNeedsModel ? (
+            {sendNeedsModel && (
               <div
                 data-testid="picker-send-needs-model"
                 className={`px-2.5 py-1.5 border-b border-black/5 dark:border-white/[0.06] t-micro leading-snug ${HINWEIS_TEXT.ruhig}`}
               >
-                {textModels.length > 0
-                  ? 'Pick a model to send your message. Your text and attachments are kept.'
-                  : 'Your message needs a chat model, and none is listed yet. Your text and attachments are kept.'}
-              </div>
-            ) : appMode === 'cloud' && !activeModel && textModels.length > 0 && (
-              // In Cloud the app picks no model by itself, so a menu without
-              // a pick is the normal state of a new account there. The line
-              // says what the pick is for, in the words of the web app.
-              <div
-                data-testid="picker-choose-a-model"
-                className={`px-2.5 py-1.5 border-b border-black/5 dark:border-white/[0.06] t-micro leading-snug ${HINWEIS_TEXT.ruhig}`}
-              >
-                {CHOOSE_TO_SEND}
+                {textModels.length > 0 ? `${CHOOSE_TO_SEND} ${MESSAGE_IS_KEPT}` : NO_MODEL_LISTED}
               </div>
             )}
             {/* Noch vor der Engine-Zeile: was sich am Modell selbst geaendert
@@ -1483,15 +1553,6 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
                 "can't choose any models i have installed" symptom. */}
             <LmStudioServerHint onStarted={fetchModels} />
 
-            {/* Same honesty as the hiddenForCode note below: in Cloud mode the
-                local models are hidden on purpose, so say so instead of
-                letting an empty local section read as a bug (G20). */}
-            {appMode === 'cloud' && (
-              <div className="px-2.5 py-1.5 border-b border-black/5 dark:border-white/[0.06] text-[0.55rem] text-gray-500">
-                Cloud mode shows hosted models only. Switch the app to Local mode to use Ollama, LM Studio or the LU Engine.
-              </div>
-            )}
-
             {/* K6: grouping threw and was caught above instead of crashing the
                 whole chat view. Says so, in the dropdown itself, with a way
                 to try again, the fallback list below still works, this is
@@ -1547,35 +1608,7 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
             {/* Scrollable model list */}
             <div className="py-1 max-h-[280px] overflow-y-auto scrollbar-thin">
               {!inventoryLoaded && textModels.length === 0 && <ModelPickerSkeleton />}
-              {inventoryLoaded && textModels.length === 0 && (
-                <div className="px-2.5 py-3 text-center">
-                  <p className="t-micro text-gray-600">No models available</p>
-                  {/* An empty picker after the user switched the last backend
-                      off in Settings used to say only that, which reads like a
-                      machine with nothing installed (Nebenbefund 1, R9
-                      re-measure). The reason and the way back belong here.
-                      Beide Saetze standen in Gelb. Der Nutzer hat das Backend
-                      selbst ausgeschaltet; das ist kein Zwischenfall, sondern
-                      die Antwort auf „warum ist die Liste leer". Ruhiger Ton
-                      aus `lib/hinweis.ts`, der Knopf darunter traegt den
-                      Weg zurueck. */}
-                  {noBackendEnabled ? (
-                    <>
-                      <p className={`mt-1 t-micro leading-snug text-left ${HINWEIS_TEXT.ruhig}`}>
-                        No AI backend is enabled, so there is nothing to list. Open Settings, go to AI Backends, and press Enable on the backend you switched off, or Add Provider.
-                      </p>
-                      <button
-                        onClick={() => { setOpen(false); openSettingsAt({ tab: 'backends' }) }}
-                        className="mt-2 inline-flex items-center gap-1 px-2 py-1 rounded bg-white/5 border border-white/10 t-micro text-gray-300 hover:bg-white/10 transition-colors"
-                      >
-                        <SettingsIcon size={10} /> Open Settings
-                      </button>
-                    </>
-                  ) : emptyReason && (
-                    <p className={`mt-1 t-micro leading-snug text-left ${HINWEIS_TEXT.ruhig}`}>{emptyReason}</p>
-                  )}
-                </div>
-              )}
+              {inventoryLoaded && textModels.length === 0 && emptyList}
 
               {groups.map(({ family, models: groupModels }) => (
                 <div key={family}>
@@ -1612,11 +1645,6 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
                     // a <button>. A <button> can't nest a <button> (invalid HTML →
                     // React hydration error + flaky clicks), so the row is a
                     // role="button" <div> with explicit keyboard activation.
-                    // The one reason this picker switches rows off: a pick is
-                    // already running. Kept as its own name because the click
-                    // below hands exactly this to `blockedPickWait`, which is
-                    // what keeps any future second reason silent (A17).
-                    const pickInFlight = selectingLms !== null || togglingLms !== null
                     const rowDisabled = pickInFlight
 
                     return (
@@ -1826,6 +1854,7 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
                 </button>
               </div>
             )}
+            </>)}
           </motion.div>
         )}
       </AnimatePresence>

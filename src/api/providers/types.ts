@@ -144,6 +144,21 @@ export interface ProviderModel {
   /** The rung the model itself defaults to (`reasoning_effort_default`). Used
    *  only where no wish was made; the user's own choice always wins. */
   effortDefault?: string
+  /** The context window the server itself stated in its listing, and nothing
+   *  else: no table, no guess from the name. `contextLength` above always
+   *  holds a number to budget with; this one is absent when nobody stated
+   *  one, so the model picker can leave the figure empty. */
+  declaredContext?: number
+  /** What the model draws per one million tokens, in credits, input and output
+   *  apart (LU Cloud /models `credit_rates`, from the meter's own price
+   *  source). Credits per token count only, never a money amount. Absent on a
+   *  server that does not send the field. */
+  creditRates?: CreditRates
+}
+
+export interface CreditRates {
+  inputPerMillion: number
+  outputPerMillion: number
 }
 
 // ── Chat Messages (unified format) ────────────────────────────

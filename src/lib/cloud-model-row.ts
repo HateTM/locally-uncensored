@@ -29,6 +29,8 @@ export function cloudModelRow(pm: ProviderModel): CloudModel {
     thinkMode: pm.thinkMode,
     effortLevels: pm.effortLevels,
     effortDefault: pm.effortDefault,
+    declaredContext: pm.declaredContext,
+    creditRates: pm.creditRates,
     // Friendly server label (LU Cloud). Pickers prefer it over the raw id.
     displayName: pm.name !== pm.id ? pm.name : undefined,
   }

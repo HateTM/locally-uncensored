@@ -1009,6 +1009,340 @@ input:is(
   box-shadow: var(--shadow-lg);
 }
 
+/* Model pickers: one row grammar.
+   The chat model picker in Cloud mode (components/models/CloudModelPicker)
+   and the Create select (components/create/ui/Select) are two components and
+   one look: the elevated sheet, a hairline, one-line sticky group heads, a
+   24 px row with the accent bar on the selected one, hairline tags. Greys
+   plus the one accent, state dots in green, grey and red, no yellow. Both
+   themes are set here through variables, so neither component names a colour
+   of its own. Same classes and values as the web app (globals.css). */
+/* The rate popover is lifted out to the body, so it brings the palette
+   along. So does a tag. */
+.lu-picker,
+.lu-picker-tag,
+.lu-picker-rate {
+  --pk-sheet: var(--color-lu-overlay);
+  --pk-edge: rgba(255, 255, 255, 0.08);
+  --pk-hair: rgba(255, 255, 255, 0.07);
+  --pk-hover: rgba(255, 255, 255, 0.07);
+  --pk-t1: #f3f4f6;
+  --pk-t2: #d1d5db;
+  --pk-t3: #9ca3af;
+  --pk-accent: var(--color-lu-accent);
+  --pk-ok: #34d399;
+  --pk-err: #f87171;
+  --pk-off: #6b7280;
+}
+.lu-picker {
+  border-radius: 10px;
+  color: var(--pk-t2);
+}
+.light .lu-picker,
+.light .lu-picker-tag,
+.light .lu-picker-rate {
+  --pk-sheet: #ffffff;
+  --pk-edge: rgba(0, 0, 0, 0.1);
+  --pk-hair: rgba(0, 0, 0, 0.08);
+  --pk-hover: rgba(0, 0, 0, 0.05);
+  --pk-t1: #111827;
+  --pk-t2: #374151;
+  --pk-t3: #6b7280;
+  --pk-accent: var(--color-lu-cloud);
+  --pk-ok: #059669;
+  --pk-err: #dc2626;
+  --pk-off: #9ca3af;
+}
+
+.lu-picker-search {
+  flex: none;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px 0 12px;
+  border-bottom: 1px solid var(--pk-hair);
+  color: var(--pk-t3);
+}
+.lu-picker-search input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  background: none;
+  border: 0;
+  box-shadow: none;
+  color: var(--pk-t1);
+  font-size: var(--text-control);
+  /* The field has the keyboard for as long as the menu is open, so a ring
+     around it says nothing. The house focus rule reads its width here; the
+     lens lights up instead, and the cursor row shows where Enter goes. */
+  --lu-focus-w: 0px;
+}
+.lu-picker-search:focus-within { color: var(--pk-t2); }
+.lu-picker-search input::placeholder { color: var(--pk-t3); }
+.lu-picker-text-btn {
+  flex: none;
+  padding: 2px 5px;
+  border-radius: 4px;
+  font-size: var(--text-label);
+  font-weight: 600;
+  color: var(--pk-t2);
+}
+.lu-picker-text-btn:hover:not(:disabled) { color: var(--pk-t1); background: var(--pk-hover); }
+.lu-picker-text-btn:disabled { opacity: 0.6; }
+
+/* The one line for what needs attention now. No box: a dot and a sentence. */
+.lu-picker-note {
+  flex: none;
+  min-height: 24px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 3px 10px 3px 12px;
+  border-bottom: 1px solid var(--pk-hair);
+  font-size: var(--text-mono);
+  line-height: 1.35;
+  color: var(--pk-t2);
+}
+.lu-picker-note.is-err { color: var(--pk-err); }
+.lu-picker-note > span:not(.lu-picker-dot) { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+
+.lu-picker-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--pk-off); }
+.lu-picker-dot.is-accent { background: var(--pk-accent); }
+.lu-picker-dot.is-ok { background: var(--pk-ok); }
+.lu-picker-dot.is-err { background: var(--pk-err); }
+
+.lu-picker-chips {
+  flex: none;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.lu-picker-chips::-webkit-scrollbar { display: none; }
+.lu-picker-chip {
+  flex: none;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--pk-hair);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--text-label);
+  font-weight: 500;
+  color: var(--pk-t3);
+  white-space: nowrap;
+  transition: background-color 120ms, color 120ms, border-color 120ms;
+}
+.lu-picker-chip:hover { color: var(--pk-t1); }
+.lu-picker-chip[aria-pressed='true'] { background: var(--pk-hover); color: var(--pk-t1); border-color: var(--pk-edge); }
+.lu-picker-chip i { font-style: normal; font-variant-numeric: tabular-nums; opacity: 0.7; }
+
+.lu-picker-cap {
+  flex: none;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 40px 0 16px;
+  border-bottom: 1px solid var(--pk-hair);
+  font-size: var(--text-label);
+  font-weight: 500;
+  color: var(--pk-t3);
+  opacity: 0.8;
+}
+
+.lu-picker-list {
+  /* Rows measure their place against the list (CloudModelPicker keeps the
+     keyboard cursor in view by hand). */
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-bottom: 4px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--pk-edge) transparent;
+}
+.lu-picker-empty { padding: 18px 16px; font-size: var(--text-mono); color: var(--pk-t3); text-align: center; }
+
+/* Group head: one line of 22 px that sticks to the top while its rows scroll. */
+.lu-picker-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 14px 0 16px;
+  background: var(--pk-sheet);
+  font-size: var(--text-label);
+  color: var(--pk-t3);
+}
+.lu-picker-head b { font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; white-space: nowrap; }
+.lu-picker-head .n { margin-left: auto; font-variant-numeric: tabular-nums; opacity: 0.8; }
+div + div > .lu-picker-head { margin-top: 2px; }
+
+.lu-picker-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+  margin: 0 4px;
+  padding: 0 6px 0 12px;
+  border-radius: 6px;
+  font-size: var(--text-control);
+  line-height: 1.2;
+  color: var(--pk-t2);
+  /* The sticky head above must not cover a row the keyboard scrolls to. */
+  scroll-margin-top: 24px;
+}
+.lu-picker-row:hover,
+.lu-picker-row[data-cursor='true'] { background: var(--pk-hover); color: var(--pk-t1); }
+/* Selected: an option of either picker. */
+.lu-picker-row[aria-selected='true'] { color: var(--pk-t1); }
+.lu-picker-row[aria-selected='true'] .lu-picker-name { font-weight: 500; }
+.lu-picker-row[aria-selected='true']::before {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--pk-accent);
+}
+/* The part of a row that picks the model. A button of its own, because the
+   row also carries the rate control, and a button cannot hold another one. */
+.lu-picker-pick {
+  flex: 1;
+  min-width: 0;
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  text-align: left;
+  color: inherit;
+  font-weight: inherit;
+}
+.lu-picker-row .lu-picker-pick:focus-visible { outline: 0; }
+.lu-picker-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lu-picker-name mark {
+  background: none;
+  color: var(--pk-t1);
+  font-weight: 600;
+  text-decoration: underline;
+  text-decoration-color: var(--pk-accent);
+  text-underline-offset: 2px;
+}
+.lu-picker-sub { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--pk-t3); }
+.lu-picker-fill { flex: 1; min-width: 0; }
+
+.lu-picker-tag {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  height: 14px;
+  padding: 0 5px;
+  border-radius: 4px;
+  border: 1px solid var(--pk-hair);
+  font-weight: 500;
+  line-height: 1;
+  color: var(--pk-t3);
+  white-space: nowrap;
+}
+.lu-picker-tag.is-accent { color: var(--pk-accent); }
+.lu-picker-tag.is-bright { color: var(--pk-t1); }
+.lu-picker-tag.is-quiet { opacity: 0.7; }
+
+.lu-picker-icons { flex: none; display: grid; grid-template-columns: 14px 14px; column-gap: 4px; color: var(--pk-t3); }
+.lu-picker-icons svg { display: block; opacity: 0.85; }
+.lu-picker-num {
+  flex: none;
+  min-width: 38px;
+  text-align: right;
+  font-size: var(--text-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--pk-t3);
+  white-space: nowrap;
+}
+.lu-picker-row:hover .lu-picker-num,
+.lu-picker-row[data-cursor='true'] .lu-picker-num,
+.lu-picker-row[aria-selected='true'] .lu-picker-num { color: var(--pk-t2); }
+
+/* The tiny question mark at the end of a row: what the model draws. */
+/* The slot keeps its width on a row without one, so the context column
+   stays in line. */
+.lu-picker-rate-anchor { flex: none; width: 14px; height: 14px; display: inline-flex; }
+.lu-picker-rate-btn {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1px solid var(--pk-edge);
+  display: inline-grid;
+  place-items: center;
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--pk-t3);
+}
+.lu-picker-rate-btn:hover,
+.lu-picker-rate-btn[aria-expanded='true'] { color: var(--pk-t1); border-color: var(--pk-t3); }
+/* Lifted out to the body and placed by hooks/usePopoverPlatz, which sets the
+   coordinates, the width and the height it may take. */
+.lu-picker-rate {
+  position: fixed;
+  z-index: 100;
+  overflow-y: auto;
+  padding: 7px 10px 8px;
+  border-radius: 8px;
+  background: var(--pk-sheet);
+  border: 1px solid var(--pk-edge);
+  box-shadow: 0 8px 24px -6px rgba(0, 0, 0, 0.45);
+  font-size: var(--text-mono);
+  font-weight: 400;
+  line-height: 1.4;
+  color: var(--pk-t2);
+  white-space: normal;
+  text-align: left;
+}
+.lu-picker-rate h4 { margin: 0 0 3px; font-size: var(--text-label); font-weight: 500; color: var(--pk-t3); }
+.lu-picker-rate dl { margin: 0; min-width: 146px; display: grid; grid-template-columns: 1fr auto; column-gap: 16px; }
+.lu-picker-rate > span { display: block; max-width: 220px; }
+.lu-picker-rate dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; color: var(--pk-t1); }
+
+.lu-picker-foot {
+  flex: none;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 10px 0 16px;
+  border-top: 1px solid var(--pk-hair);
+  font-size: var(--text-label);
+  color: var(--pk-t3);
+  white-space: nowrap;
+}
+.lu-picker-foot > span:not(.lu-picker-keys) { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.lu-picker-keys { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; }
+.lu-picker-keys kbd {
+  font: inherit;
+  font-size: 9px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 3px;
+  border: 1px solid var(--pk-hair);
+  display: inline-grid;
+  place-items: center;
+}
+
 /* ─────────────────────────────────────────────────────────────────────
    `shadow-sm` ist ein Hellmodus-Rezept — eine Regel statt zwoelf
    Call-Sites (D-T09).

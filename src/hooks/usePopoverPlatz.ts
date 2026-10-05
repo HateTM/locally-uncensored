@@ -45,6 +45,13 @@ export interface PopoverOptionen {
   rolle?: RefObject<HTMLElement | null>
   /** Herausgehoben mit `position: fixed`, an dieser Kante des Ausloesers ausgerichtet. */
   fest?: 'links' | 'rechts'
+  /**
+   * Im Baum: breiter als die abschneidende Flaeche wird es nie. Fuer ein
+   * Popover mit fester Breite, das breiter sein kann als ein schmales Fenster
+   * (die Modellauswahl im Cloud-Modus, 400 px). Der Schub allein rettet dann
+   * nur die linke Kante, die rechte bliebe geschnitten.
+   */
+  breiteDeckeln?: boolean
 }
 
 export interface PopoverLage {
@@ -100,7 +107,7 @@ export function usePopoverPlatz(
   open: boolean,
   optionen: PopoverOptionen = {},
 ): PopoverLage {
-  const { bevorzugt = 'unten', abstand = 4, luft = 8, deckel, anker: ankerRef, rolle: rolleRef, fest } = optionen
+  const { bevorzugt = 'unten', abstand = 4, luft = 8, deckel, anker: ankerRef, rolle: rolleRef, fest, breiteDeckeln = false } = optionen
   const [lage, setLage] = useState<PopoverLage | null>(null)
 
   /* `useLayoutEffect` und nicht `useEffect`: die Messung braucht das
@@ -159,9 +166,11 @@ export function usePopoverPlatz(
           nachOben: platz.nachOben,
           // Beide Raender, weil das Popover links ODER rechts verankert sein
           // kann: der Rand an der freien Seite bleibt ohne Wirkung.
-          style: schub === 0
-            ? { maxHeight: platz.maxHoehe }
-            : { maxHeight: platz.maxHoehe, marginLeft: schub, marginRight: -schub },
+          style: {
+            maxHeight: platz.maxHoehe,
+            ...(breiteDeckeln ? { maxWidth: Math.max(0, Math.floor(grenze.right - grenze.left - 2 * luft)) } : {}),
+            ...(schub === 0 ? {} : { marginLeft: schub, marginRight: -schub }),
+          },
         }
       }
       setLage((vorher) => (gleich(vorher, neu) ? vorher : neu))
@@ -203,7 +212,7 @@ export function usePopoverPlatz(
       window.removeEventListener('scroll', beimScrollen, true)
       beobachter?.disconnect()
     }
-  }, [open, popRef, ankerRef, rolleRef, bevorzugt, abstand, luft, deckel, fest])
+  }, [open, popRef, ankerRef, rolleRef, bevorzugt, abstand, luft, deckel, fest, breiteDeckeln])
 
   return lage ?? { nachOben: bevorzugt === 'oben', style: KEIN_STIL }
 }
