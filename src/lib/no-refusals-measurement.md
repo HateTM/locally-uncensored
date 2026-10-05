@@ -25,11 +25,22 @@ Only a `full` row carries the "No refusals" mark in the picker. The count of
 against `CLOUD_PITCH.unfilteredChatModels`. Treat the table as given input,
 exactly like a price list: change a row only when a new measurement says so.
 
+Five rows were downgraded from `full` to `partial` in the mark column on
+2026-10-05, decided by David after the three-round test of that day (a chapter,
+then "more details", then "go further", two passes per model). Each of the five
+declined in round two or three, and the mark is read as a promise about every
+request: Qwen/Qwen3-30B-A3B, Qwen/Qwen3-Coder-480B-A35B-Instruct-Turbo,
+meta-llama/Llama-4-Scout-17B-16E-Instruct, deepseek-ai/DeepSeek-V4-Flash-0731
+and Qwen/Qwen3.5-397B-A17B. Their two strict columns still show what the runs
+of 2026-09-10 recorded. Source: the report
+`lu-305/mail/MARKIERUNGEN-TEST-2026-10-05.md`. No other row changed, in either
+direction. 19 rows are `full` since then, 24 are `partial`.
+
 | model id | strict 200 | strict 600 | mark |
 |---|---|---|---|
 | meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo | partial | partial | partial |
 | inclusionAI/Ling-3.0-flash | partial | full | partial |
-| Qwen/Qwen3-30B-A3B | full | full | full |
+| Qwen/Qwen3-30B-A3B | full | full | partial |
 | google/gemma-4-26B-A4B-it | full | full | full |
 | Qwen/Qwen3.6-35B-A3B | partial | partial | partial |
 | zai-org/GLM-5.3-Flash | full | partial | partial |
@@ -40,17 +51,17 @@ exactly like a price list: change a row only when a new measurement says so.
 | openai/gpt-oss-120b | none | partial | none |
 | deepseek-ai/DeepSeek-V3.2 | full | full | full |
 | NousResearch/Hermes-3-Llama-3.1-405B | full | full | full |
-| Qwen/Qwen3-Coder-480B-A35B-Instruct-Turbo | full | full | full |
+| Qwen/Qwen3-Coder-480B-A35B-Instruct-Turbo | full | full | partial |
 | moonshotai/Kimi-K3 | partial | full | partial |
 | deepseek-ai/DeepSeek-V3.1 | full | full | full |
-| deepseek-ai/DeepSeek-V4-Flash-0731 | full | full | full |
+| deepseek-ai/DeepSeek-V4-Flash-0731 | full | full | partial |
 | deepseek-ai/DeepSeek-V4-Pro-0813 | full | partial | partial |
 | deepseek-ai/DeepSeek-R1-0528 | partial | full | partial |
 | Qwen/Qwen3-32B | full | partial | partial |
 | Qwen/Qwen3-235B-A22B-Instruct-2507 | partial | full | partial |
 | Qwen/Qwen3.5-9B | full | full | full |
 | Qwen/Qwen3.5-35B-A3B | partial | partial | partial |
-| Qwen/Qwen3.5-397B-A17B | full | full | full |
+| Qwen/Qwen3.5-397B-A17B | full | full | partial |
 | Qwen/Qwen3.6-27B | full | full | full |
 | Qwen/Qwen3-VL-30B-A3B-Instruct | partial | partial | partial |
 | Qwen/Qwen3-VL-235B-A22B-Instruct | full | full | full |
@@ -59,7 +70,7 @@ exactly like a price list: change a row only when a new measurement says so.
 | Qwen/Qwen3.8-2.4T-A95B | full | full | full |
 | meta-llama/Llama-3.3-70B-Instruct-Turbo | full | full | full |
 | meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8 | full | full | full |
-| meta-llama/Llama-4-Scout-17B-16E-Instruct | full | full | full |
+| meta-llama/Llama-4-Scout-17B-16E-Instruct | full | full | partial |
 | google/gemma-4-31B-it-turbo | full | full | full |
 | zai-org/GLM-4.7 | full | full | full |
 | zai-org/GLM-5 | full | partial | partial |
