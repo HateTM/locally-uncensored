@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { usePopoverPlatz } from '../../hooks/usePopoverPlatz'
 import { Menu, Loader2, Sun, Moon, RefreshCw, X, MoreVertical } from 'lucide-react'
 import { useUIStore } from '../../stores/uiStore'
 import { useSettingsStore } from '../../stores/settingsStore'
@@ -259,6 +260,8 @@ export function Header() {
      ──────────────────────────────────────────────────────────────────────── */
   const menuId = useId()
   const menuTriggerRef = useRef<HTMLButtonElement>(null)
+  const moreMenuRef = useRef<HTMLDivElement>(null)
+  const moreMenu = usePopoverPlatz(moreMenuRef, showMoreMenu, { abstand: 8 })
   const menuItemRefs = useRef<(HTMLButtonElement | null)[]>([])
   const [menuActive, setMenuActive] = useState(0)
 
@@ -460,7 +463,9 @@ export function Header() {
               aria-label="Main navigation"
               onPointerDown={(e) => e.stopPropagation()}
               onKeyDown={onMenuKeyDown}
-              className="absolute left-1/2 -translate-x-1/2 top-full mt-2 w-40 rounded-lg border border-gray-200 dark:border-white/10 bg-white dark:bg-[#1a1a1a] shadow-xl z-50 flex flex-col gap-0.5 p-1.5"
+              ref={moreMenuRef}
+              style={moreMenu.style}
+              className={`absolute left-1/2 -translate-x-1/2 w-40 rounded-lg border border-gray-200 dark:border-white/10 bg-white dark:bg-[#1a1a1a] shadow-xl z-50 flex flex-col gap-0.5 p-1.5 overflow-y-auto scrollbar-thin ${moreMenu.nachOben ? 'bottom-full mb-2' : 'top-full mt-2'}`}
             >
               {navTargets.map((t, i) => (
                 <button

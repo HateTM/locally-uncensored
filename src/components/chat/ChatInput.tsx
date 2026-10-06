@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useLayoutEffect, useCallback, type ReactNode } from 'react'
+import { usePopoverPlatz } from '../../hooks/usePopoverPlatz'
 import { SamplingControls } from './SamplingControls'
 import { Send, Square, Paperclip, X, Brain, Gauge, Terminal } from 'lucide-react'
 import { matchAgentCommands, type AgentCommand, type CommandScope } from '../../lib/agent-commands'
@@ -6,6 +7,7 @@ import { VoiceButton } from './VoiceButton'
 import { ApprovalDialog } from './ApprovalDialog'
 import { useVoiceStore } from '../../stores/voiceStore'
 import { useSettingsStore } from '../../stores/settingsStore'
+import { useUIStore } from '../../stores/uiStore'
 import { useModelStore } from '../../stores/modelStore'
 import { useChatStore } from '../../stores/chatStore'
 import { isThinkingCompatible, isVisionCompatible, declaredVision } from '../../lib/model-compatibility'
@@ -13,6 +15,9 @@ import { clampEffort, effortChoices, effortLabel, nextEffort, DEFAULT_EFFORT } f
 import type { AgentToolCall } from '../../types/agent-mode'
 import type { ImageAttachment } from '../../types/chat'
 import { MAX_CHAT_IMAGES, prepareChatImages } from '../../lib/chat-image-input'
+import { FILE_ONLY_TEXT, MAX_CHAT_FILES, TOO_MANY_FILES_MESSAGE, prepareChatFile, type ChatFileInput } from '../../lib/chat-files'
+import { fileExtension } from '../../lib/file-magic'
+import { ChatFileChip } from './ChatFileChip'
 import { COMPOSER_MAX_W } from './composer-width'
 import { consumeComposerFocusPending } from '../../hooks/useKeyboardShortcuts'
 import { useChatNoticeStore, CHAT_NOTICE_MS } from '../../stores/chatNoticeStore'
@@ -20,7 +25,7 @@ import { MONOGRAM, MONOGRAM_INVERT } from '../layout/brand'
 import { fitTextarea } from '../../lib/fit-textarea'
 
 interface Props {
-  onSend: (content: string, images?: ImageAttachment[]) => void
+  onSend: (content: string, images?: ImageAttachment[], files?: ChatFileInput[]) => void
   onStop: () => void
   /** THIS conversation is answering: the slot shows Stop. */
   isGenerating: boolean
@@ -42,6 +47,13 @@ interface Props {
   onReject?: () => void
   disabled?: boolean
   /**
+   * Does a send have a chat model to run on right now? Asked at the moment of
+   * sending. Without one the send does not happen and nothing of the draft is
+   * touched: the model picker opens and says what is missing. Left out, the
+   * rule is simply "a model is picked".
+   */
+  modelReady?: () => boolean
+  /**
    * Which commands this composer offers. Was a boolean meaning
    * "Coding-Agent-only"; since 2.6.8 it is the SCOPE, because the answer
    * stopped being all-or-nothing: plain chat offers /compact and nothing else,
@@ -62,6 +74,13 @@ interface Props {
    */
   composerActions?: ReactNode
 }
+
+/**
+ * Files a model cannot read from a summary, but can from the Documents panel
+ * (it extracts their text). They still attach; the line above the transcript
+ * names the better way.
+ */
+const DOCUMENT_EXTENSIONS = new Set(['pdf', 'doc', 'docx', 'odt', 'rtf', 'epub', 'pptx', 'xlsx'])
 
 /** How long the synchronous double-fire guard below stays shut. */
 const SEND_LOCK_MS = 700
@@ -87,16 +106,23 @@ function passSendLock(lock: { current: number }): boolean {
   return true
 }
 
-export function ChatInput({ onSend, onStop, isGenerating, waitingForLocalLane, pendingApproval, onApprove, onReject, disabled, slashCommands, composerModel, composerActions, composerAbove }: Props) {
+export function ChatInput({ onSend, onStop, isGenerating, waitingForLocalLane, pendingApproval, onApprove, onReject, disabled, modelReady, slashCommands, composerModel, composerActions, composerAbove }: Props) {
   const [input, setInput] = useState('')
   const [images, setImages] = useState<ImageAttachment[]>([])
+  // Files of any other kind (3.0.5). Each entry is a description plus the
+  // handle to the bytes; nothing of the file itself is held here.
+  const [files, setFiles] = useState<ChatFileInput[]>([])
   const [isDragOver, setIsDragOver] = useState(false)
   const [preparingImages, setPreparingImages] = useState(false)
+  const [preparingFiles, setPreparingFiles] = useState(false)
   const imageJob = useRef({ busy: false, epoch: 0 })
+  const fileJob = useRef({ busy: false })
   const [isVoiceRecording, setIsVoiceRecording] = useState(false)
   // Slash-command autocomplete (v2.5.3). When the input is a lone "/token", show
   // the matching agent commands; ↑/↓ to move, Enter/Tab to pick, Esc to dismiss.
   const [cmdMenu, setCmdMenu] = useState<AgentCommand[]>([])
+  const cmdMenuRef = useRef<HTMLDivElement>(null)
+  const cmdMenuPlatz = usePopoverPlatz(cmdMenuRef, cmdMenu.length > 0, { bevorzugt: 'oben', abstand: 6, deckel: 256 })
   const [cmdIndex, setCmdIndex] = useState(0)
   /**
    * Ein Entwurf gehoert dem Gespraech, in dem er getippt wurde.
@@ -106,8 +132,8 @@ export function ChatInput({ onSend, onStop, isGenerating, waitingForLocalLane, p
    * 03.09.2026, mit dem naheliegenden Ausgang: der Satz geht an den falschen
    * Empfaenger. Ihn beim Wechsel einfach zu leeren waere die andere Haelfte
    * desselben Fehlers, nur teurer (Arbeit weg), darum wird er beiseitegelegt
-   * und beim Zurueckkommen wieder hingelegt. Bilder reisen mit dem Text, sonst
-   * hinge die Anlage am falschen Satz.
+   * und beim Zurueckkommen wieder hingelegt. Bilder und Dateien reisen mit dem
+   * Text, sonst hinge die Anlage am falschen Satz.
    *
    * WIE der Wechsel bemerkt wird, ist nicht Geschmack, sondern die Stelle, an
    * der dieser Block zweimal mit React aneinandergeriet. Er stand bis zum
@@ -151,7 +177,7 @@ export function ChatInput({ onSend, onStop, isGenerating, waitingForLocalLane, p
     const stop = () => { job.epoch++; unsubscribe() }
     return stop
   }, [])
-  const [entwuerfe, setEntwuerfe] = useState<Record<string, { text: string; bilder: ImageAttachment[] }>>({})
+  const [entwuerfe, setEntwuerfe] = useState<Record<string, { text: string; bilder: ImageAttachment[]; dateien: ChatFileInput[] }>>({})
   const [letztesGespraech, setLetztesGespraech] = useState(conversationId)
   if (letztesGespraech !== conversationId) {
     const vorher = letztesGespraech
@@ -159,12 +185,13 @@ export function ChatInput({ onSend, onStop, isGenerating, waitingForLocalLane, p
     if (vorher) {
       const text = input
       const bilder = images
+      const dateien = files
       // Der Aktualisierer laeuft unter StrictMode zweimal und muss deshalb
       // beim zweiten Mal dasselbe Ergebnis liefern wie beim ersten. Er
       // rechnet nur aus `bisher`, haengt also an nichts, was er selbst
       // veraendert.
       setEntwuerfe((bisher) => {
-        if (text || bilder.length) return { ...bisher, [vorher]: { text, bilder } }
+        if (text || bilder.length || dateien.length) return { ...bisher, [vorher]: { text, bilder, dateien } }
         if (!(vorher in bisher)) return bisher
         const ohne = { ...bisher }
         delete ohne[vorher]
@@ -177,6 +204,7 @@ export function ChatInput({ onSend, onStop, isGenerating, waitingForLocalLane, p
     const zurueck = conversationId ? entwuerfe[conversationId] : undefined
     setInput(zurueck?.text ?? '')
     setImages(zurueck?.bilder ?? [])
+    setFiles(zurueck?.dateien ?? [])
     setCmdMenu([])
   }
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -251,23 +279,62 @@ export function ChatInput({ onSend, onStop, isGenerating, waitingForLocalLane, p
     // bliebe auf einer Zeile stehen statt den Entwurf zu zeigen.
   }, [input, conversationId])
 
-  const addFiles = useCallback(async (files: FileList | File[]) => {
-    const all = Array.from(files)
-    const imageFiles = all.filter(f => f.type.startsWith('image/'))
-    // A non-image file (PDF, Word, text, …) can't ride along as a chat image,
-    // it belongs in the Documents panel (RAG) so the model can actually read it.
-    // Silently dropping it made a user think their PDF attached when it didn't,
-    // and the model then hallucinated that it "couldn't receive attachments"
-    // (GH #69). Der Satz ist derselbe geblieben, nur sein Platz nicht mehr der
-    // Composer-Kasten, sondern der Kopf des Verlaufs (`ChatNotices`).
-    if (imageFiles.length < all.length) {
-      useChatNoticeStore.getState().show(
-        'attachment-is-not-an-image',
-        'The clip attaches images. To ask about a PDF, Word, or text file, add it in the Documents panel.',
-        'ruhig',
-        CHAT_NOTICE_MS,
-      )
+  /**
+   * Any file that is not an image (3.0.5). The model cannot read bytes, so
+   * the file is read once here and turned into a description (lib/chat-files);
+   * the chip below shows it, and nothing of the file is kept in the chat.
+   */
+  const addOtherFiles = useCallback(async (picked: File[]) => {
+    const notices = useChatNoticeStore.getState()
+    const job = fileJob.current
+    if (job.busy) {
+      notices.show('file-attach', 'Still reading the previous files. Add these again in a moment.', 'ruhig', CHAT_NOTICE_MS)
+      return
     }
+    const slots = MAX_CHAT_FILES - files.length
+    if (slots <= 0) {
+      notices.show('file-attach', TOO_MANY_FILES_MESSAGE, 'ruhig', CHAT_NOTICE_MS)
+      return
+    }
+    job.busy = true
+    const startedIn = conversationId
+    setPreparingFiles(true)
+    const problems: string[] = picked.length > slots ? [TOO_MANY_FILES_MESSAGE] : []
+    const ready: ChatFileInput[] = []
+    try {
+      for (const file of picked.slice(0, slots)) {
+        try {
+          ready.push(await prepareChatFile(file))
+        } catch (err) {
+          problems.push(err instanceof Error ? err.message : 'This file could not be read.')
+        }
+      }
+      // The draft belongs to the conversation it was started in.
+      if (useChatStore.getState().activeConversationId !== startedIn) return
+      if (ready.length) setFiles((prev) => [...prev, ...ready].slice(0, MAX_CHAT_FILES))
+      if (problems.length) notices.show('file-attach', problems[0], 'ruhig', CHAT_NOTICE_MS)
+      else notices.dismiss('file-attach')
+      // A PDF or Word file attaches like any other, but the model gets far
+      // more out of it through the Documents panel (GH #69).
+      if (ready.some(({ attachment }) => DOCUMENT_EXTENSIONS.has(fileExtension(attachment.name)))) {
+        notices.show(
+          'document-belongs-in-docs',
+          'The model only gets a summary of this document. To ask about its text, add it in the Documents panel.',
+          'ruhig',
+          CHAT_NOTICE_MS,
+        )
+      }
+    } finally {
+      job.busy = false
+      setPreparingFiles(false)
+    }
+  }, [files.length, conversationId])
+
+  const addFiles = useCallback(async (picked: FileList | File[]) => {
+    const all = Array.from(picked)
+    const imageFiles = all.filter(f => f.type.startsWith('image/'))
+    const otherFiles = all.filter(f => !f.type.startsWith('image/'))
+    if (otherFiles.length > 0) void addOtherFiles(otherFiles)
     if (imageFiles.length === 0) return
     // Die Zeilen zum Bildanhang stehen oben im Verlauf (`ChatNotices`), nie
     // im Eingabekasten: „NICHTS im Prompt-Fenster", David 21.09.2026.
@@ -303,7 +370,7 @@ export function ChatInput({ onSend, onStop, isGenerating, waitingForLocalLane, p
         useChatNoticeStore.getState().dismiss('image-attach')
       }
     }
-  }, [images.length, conversationId])
+  }, [images.length, conversationId, addOtherFiles])
 
   /**
    * Ein Bild an einem Modell, das keine sieht.
@@ -331,6 +398,10 @@ export function ChatInput({ onSend, onStop, isGenerating, waitingForLocalLane, p
     setImages(prev => prev.filter((_, i) => i !== index))
   }
 
+  const removeFile = (index: number) => {
+    setFiles(prev => prev.filter((_, i) => i !== index))
+  }
+
   // Write a dictation transcript (interim or final) into the input as
   // base + transcript; the layout effect above sizes the field. NEVER sends,
   // because the user reviews and presses Send (David 2026-06-06).
@@ -348,11 +419,26 @@ export function ChatInput({ onSend, onStop, isGenerating, waitingForLocalLane, p
   const sendLockRef = useRef(0)
   const handleSend = () => {
     const trimmed = input.trim()
-    if (imageJob.current.busy || (!trimmed && images.length === 0) || isGenerating || waitingForLocalLane || disabled) return
+    if (imageJob.current.busy || fileJob.current.busy || (!trimmed && images.length === 0 && files.length === 0) || isGenerating || waitingForLocalLane || disabled) return
+    // No chat model to answer: the send handlers return without a word in that
+    // case, and the lines below would then empty the field and the chips for a
+    // message that went nowhere (found in the Windows build of 3.0.5). The
+    // draft stays as it is, and the model picker opens with the reason. The
+    // Send button and Enter both come through here.
+    if (!(modelReady ? modelReady() : !!useModelStore.getState().activeModel)) {
+      useUIStore.getState().askForModel()
+      return
+    }
     if (!passSendLock(sendLockRef)) return
-    onSend(trimmed || '(image)', images.length > 0 ? images : undefined)
+    const text = trimmed || (images.length > 0 ? '(image)' : FILE_ONLY_TEXT)
+    const pictures = images.length > 0 ? images : undefined
+    // The third argument only exists for a message that carries files, so a
+    // send without them reaches its handler exactly as it always did.
+    if (files.length > 0) onSend(text, pictures, files)
+    else onSend(text, pictures)
     setInput('')
     setImages([])
+    setFiles([])
     setCmdMenu([])
   }
 
@@ -408,15 +494,18 @@ export function ChatInput({ onSend, onStop, isGenerating, waitingForLocalLane, p
     }
   }
 
-  // Paste handler for clipboard images (Ctrl+V screenshots)
+  // Paste handler for clipboard images (Ctrl+V screenshots) and copied files.
+  // Pasted TEXT stays a normal paste: only items of kind "file" are taken.
   const handlePaste = useCallback((e: React.ClipboardEvent) => {
     const items = e.clipboardData?.items
     if (!items) return
-    const imageItems = Array.from(items).filter(item => item.type.startsWith('image/'))
-    if (imageItems.length === 0) return
+    const pasted = Array.from(items)
+      .filter(item => item.kind === 'file')
+      .map(item => item.getAsFile())
+      .filter((file): file is File => file !== null)
+    if (pasted.length === 0) return
     e.preventDefault()
-    const files = imageItems.map(item => item.getAsFile()).filter(Boolean) as File[]
-    addFiles(files)
+    addFiles(pasted)
   }, [addFiles])
 
   // Drag & Drop handlers
@@ -477,7 +566,7 @@ export function ChatInput({ onSend, onStop, isGenerating, waitingForLocalLane, p
       >
         {/* Slash-command autocomplete, floats above the composer */}
         {cmdMenu.length > 0 && (
-          <div className="absolute bottom-full left-0 right-0 mb-1.5 z-50 max-h-64 overflow-y-auto scrollbar-thin rounded-lg lu-elevated py-1">
+          <div ref={cmdMenuRef} style={cmdMenuPlatz.style} className={`absolute left-0 right-0 z-50 overflow-y-auto scrollbar-thin rounded-lg lu-elevated py-1 ${cmdMenuPlatz.nachOben ? 'bottom-full mb-1.5' : 'top-full mt-1.5'}`}>
             <div className="px-2.5 py-1 flex items-center gap-1 text-[0.5rem] uppercase tracking-widest text-gray-400 dark:text-gray-600">
               <Terminal size={9} /> Agent commands
             </div>
@@ -523,15 +612,18 @@ export function ChatInput({ onSend, onStop, isGenerating, waitingForLocalLane, p
 
                 Wartezeile der lokalen Spur  -> LocalLaneWaitLine, gezeichnet
                   von ChatView/CodexView als Geschwister UEBER diesem Kasten
-                Anhang ist kein Bild (GH #69) -> ChatNotices, oben im Verlauf
+                Dokument gehoert in die Ablage (GH #69) -> ChatNotices, oben im Verlauf
                 Modell sieht keine Bilder      -> ChatNotices, oben im Verlauf
 
               Was hier bleibt, ist kein Hinweis: die Bildvorschauen sind der
               Anhang selbst, und die Freigabe ist eine Entscheidung mit zwei
               Knoepfen. */}
 
-          {/* Image previews */}
-          {images.length > 0 && (
+          {/* The attachments of this draft, in one row that may wrap: image
+              previews, then a chip per file of any other kind (3.0.5). A chip
+              IS the attachment (name, detected type, size), not a hint
+              about it. */}
+          {(images.length > 0 || files.length > 0) && (
             <div className="flex gap-1.5 mb-1.5 flex-wrap">
               {images.map((img, i) => (
                 <div key={i} className="relative group">
@@ -550,6 +642,14 @@ export function ChatInput({ onSend, onStop, isGenerating, waitingForLocalLane, p
                     {img.name}
                   </span>
                 </div>
+              ))}
+              {files.map(({ attachment }, i) => (
+                <ChatFileChip
+                  key={`${attachment.sha256}-${i}`}
+                  file={attachment}
+                  testId="composer-file-chip"
+                  onRemove={() => removeFile(i)}
+                />
               ))}
             </div>
           )}
@@ -588,7 +688,7 @@ export function ChatInput({ onSend, onStop, isGenerating, waitingForLocalLane, p
             onKeyDown={handleKeyDown}
             onBlur={() => setTimeout(() => setCmdMenu([]), 120)}
             onPaste={handlePaste}
-            placeholder={disabled ? "Unavailable" : isDragOver ? "Drop images here..." : isTranscribing ? "Transcribing..." : isVoiceRecording ? "Recording..." : "Message..."}
+            placeholder={disabled ? "Unavailable" : isDragOver ? "Drop files here..." : isTranscribing ? "Transcribing..." : isVoiceRecording ? "Recording..." : "Message..."}
             disabled={disabled}
             rows={1}
             className="lu-fokus-am-kasten w-full bg-transparent resize-none text-gray-800 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-600 focus:outline-none text-[12px] leading-relaxed max-h-[200px] disabled:opacity-50 scrollbar-thin"
@@ -610,20 +710,20 @@ export function ChatInput({ onSend, onStop, isGenerating, waitingForLocalLane, p
             only the middle spacer giving way, das `flex: 0 0 auto` steckt
             seit der Composer-Grammatik im Rezept `.lu-control` (index.css),
             nicht mehr als `shrink-0` an jedem einzelnen Knopf. */}
-        <div className="flex flex-nowrap items-center gap-1 px-2 py-1.5 min-h-[38px] border-t border-gray-200 dark:border-white/[0.05]">
+        <div className="@container flex flex-nowrap items-center gap-1 px-2 py-1.5 min-h-[38px] border-t border-gray-200 dark:border-white/[0.05]">
           {/* Clip button */}
           <button
             onClick={() => fileInputRef.current?.click()}
-            disabled={isGenerating || preparingImages}
+            disabled={isGenerating || preparingImages || preparingFiles}
             className="lu-control lu-control--icon"
-            title="Attach images. For PDFs and documents use the Documents panel"
+            title="Attach images or files"
           >
             <Paperclip size={14} />
           </button>
           <input
             ref={fileInputRef}
             type="file"
-            accept="image/png,image/jpeg,image/webp,image/gif"
+            data-testid="composer-file-input"
             multiple
             className="hidden"
             onChange={(e) => { if (e.target.files) addFiles(e.target.files); e.target.value = '' }}
@@ -664,7 +764,8 @@ export function ChatInput({ onSend, onStop, isGenerating, waitingForLocalLane, p
             }
           >
             <Brain size={11} />
-            <span>Think</span>
+            {/* In a narrow composer the icon and the tooltip carry it. */}
+            <span className="@max-[30rem]:hidden">Think</span>
           </button>
 
           {/* Reasoning effort. Same shape and size as the Think button beside
@@ -723,8 +824,11 @@ export function ChatInput({ onSend, onStop, isGenerating, waitingForLocalLane, p
           {/* Sampling controls sit next to the picker: same row, collapsed. */}
           <div className="shrink-0"><SamplingControls /></div>
 
-          {/* Model picker, opens upward from the composer */}
-          <div className="shrink-0">{composerModel}</div>
+          {/* Model picker, opens upward from the composer. The one control
+              that may give way when the row runs out of width (Code tab with
+              the explorer open): its name ellipsizes in the middle instead of
+              pushing Stop out of the frame. */}
+          <div className="min-w-[4rem] shrink">{composerModel}</div>
 
           {/* Send and Stop are the SAME slot: one fixed 26x26 box at the end of
               the row, never two, never one below the other. Stop replaces Send
@@ -754,7 +858,7 @@ export function ChatInput({ onSend, onStop, isGenerating, waitingForLocalLane, p
             ) : (
               <button
                 onClick={handleSend}
-                disabled={preparingImages || (!input.trim() && images.length === 0) || isTranscribing || !!waitingForLocalLane}
+                disabled={preparingImages || preparingFiles || (!input.trim() && images.length === 0 && files.length === 0) || isTranscribing || !!waitingForLocalLane}
                 className="lu-control lu-control--icon lu-primary w-full h-full"
                 aria-label="Send message"
               >

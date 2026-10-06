@@ -2,6 +2,7 @@ import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Plus, Search, Trash2, Edit3, Check, X, MessageSquare, Code, Radio, Copy, RefreshCw, Square, Wifi, Globe, QrCode, PanelLeftOpen, PanelLeftClose } from 'lucide-react'
 import { useChatStore } from '../../stores/chatStore'
+import { latestConversationOfMode } from '../../lib/conversation-mode'
 import { useUIStore } from '../../stores/uiStore'
 import { useCompareStore } from '../../stores/compareStore'
 import { useModelStore } from '../../stores/modelStore'
@@ -12,6 +13,7 @@ import { workspaceRejectedMessage } from '../../lib/workspace-rejected'
 import { CHAT_BASE_SYSTEM_PROMPT } from '../../lib/system-prompt'
 import { backendCall, isTauri } from '../../api/backend'
 import { useDismissOnEscape } from '../../hooks/useDismissOnEscape'
+import { openNewCodeSession } from '../../lib/code-session'
 import {
   conversationMatches, sameSidebarRows, toSidebarRow, type SidebarRow,
 } from './sidebar-rows'
@@ -154,9 +156,15 @@ export function Sidebar() {
       // when no model is installed/selected, or the model list hasn't
       // populated yet. Send the user to the Models page where they can
       // install or pick one, instead of a dead click with no feedback.
-      // Cloud mode hides that local-hardware view entirely (the hosted
-      // catalog is just still loading/failed) — stay in chat there.
-      if (useSettingsStore.getState().settings.appMode === 'cloud') return
+      // Cloud mode hides that local-hardware view entirely, so the click
+      // lands on the chat landing page there: its composer holds the model
+      // picker, and in Cloud the user names the model himself (the app picks
+      // none, lib/active-model-mode).
+      if (useSettingsStore.getState().settings.appMode === 'cloud') {
+        setActiveConversation(null)
+        setView('chat')
+        return
+      }
       setView('models')
       return
     }
@@ -165,6 +173,11 @@ export function Sidebar() {
     // systemPrompt (so toggling personaEnabled later "just works"
     // without re-reading global state), but useChat / useAgentChat
     // only apply it when personaEnabled === true.
+    if (chatMode === 'codex') {
+      openNewCodeSession(activeModel)
+      setView('chat')
+      return
+    }
     const persona = personasEnabled ? getActivePersona() : null
     createConversation(activeModel, persona?.systemPrompt || '', chatMode)
     setView('chat')
@@ -432,7 +445,7 @@ export function Sidebar() {
           </button>
           <div className="w-6 h-px bg-gray-200 dark:bg-white/10 my-1" />
           <button
-            onClick={() => { setChatMode('lu'); setActiveConversation(null); setView('chat'); setDispatchPicker(false) }}
+            onClick={() => { setChatMode('lu'); setActiveConversation(latestConversationOfMode(useChatStore.getState().conversations, 'lu')); setView('chat'); setDispatchPicker(false) }}
             title="Chat"
             aria-label="Chat"
             className={railBtn(!isCodingMode && !isRemoteMode)}
@@ -440,7 +453,7 @@ export function Sidebar() {
             <MessageSquare size={15} />
           </button>
           <button
-            onClick={() => { setChatMode('codex'); setActiveConversation(null); setView('chat'); setDispatchPicker(false) }}
+            onClick={() => { setChatMode('codex'); setActiveConversation(latestConversationOfMode(useChatStore.getState().conversations, 'codex')); setView('chat'); setDispatchPicker(false) }}
             title="Code"
             aria-label="Code"
             className={railBtn(isCodingMode)}
@@ -588,7 +601,7 @@ export function Sidebar() {
             </button>
             {/* Chat tab */}
             <button
-              onClick={() => { setChatMode('lu'); setActiveConversation(null); setView('chat'); setDispatchPicker(false) }}
+              onClick={() => { setChatMode('lu'); setActiveConversation(latestConversationOfMode(useChatStore.getState().conversations, 'lu')); setView('chat'); setDispatchPicker(false) }}
               title="Chat"
               aria-label="Chat"
               className={`flex items-center gap-1.25 justify-center px-2.5 h-[var(--control-h-md)] rounded-[5px] font-medium transition-all flex-1 min-w-0 ${
@@ -604,7 +617,7 @@ export function Sidebar() {
             {/* Code tab — direct switch to the coding agent (no dropdown).
                 Internal mode value 'codex' is kept for storage back-compat. */}
             <button
-              onClick={() => { setChatMode('codex'); setActiveConversation(null); setView('chat'); setDispatchPicker(false) }}
+              onClick={() => { setChatMode('codex'); setActiveConversation(latestConversationOfMode(useChatStore.getState().conversations, 'codex')); setView('chat'); setDispatchPicker(false) }}
               title="Code"
               aria-label="Code"
               className={`flex items-center gap-1.25 justify-center px-2.5 h-[var(--control-h-md)] rounded-[5px] font-medium transition-all flex-1 min-w-0 ${

@@ -86,7 +86,13 @@ describe('D-S31: die Regel gibt es genau einmal', () => {
   })
 
   it('der Balken haengt an ihr', () => {
-    expect(CREATE).toMatch(/setupCardOwnsStage \? null : modelLoadError/)
+    expect(CREATE).toMatch(/setupCardOwnsStage \|\| comfyStarting \? null : modelLoadError/)
+  })
+
+  it('schweigt, waehrend ComfyUI startet (Gegenprobe 8, 02.10.)', () => {
+    // "is not running" in Rot neben "is starting up" sagte zweimal Gegensaetzliches.
+    const b = CREATE.match(/const banner = ([^\n]+)/)
+    expect(b![1]).toContain('comfyStarting ? null')
   })
 
   it('echte Laufzeitfehler bleiben unberuehrt', () => {
@@ -123,6 +129,9 @@ describe('D-S31: die Regel selbst', () => {
 
   it('meldet ein nicht erreichbares ComfyUI', () => {
     expect(stageShowsSetupCard({ ...basis, connected: false })).toBe(true)
+    // Gegenprobe 02.10.2026: while ComfyUI is starting, the probe says false
+    // and the models are already on disk. No 6.5 GB offer in that window.
+    expect(stageShowsSetupCard({ ...basis, connected: false, comfyStarting: true })).toBe(false)
   })
 
   it('meldet eine leere Spur', () => {

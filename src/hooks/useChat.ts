@@ -1,4 +1,6 @@
 import { useState, useCallback } from "react"
+import { frameFlush } from '../lib/frame-flush'
+import { sendWindowFor } from '../lib/send-window'
 import { markCannotThink } from '../lib/model-compatibility'
 import { v4 as uuid } from "uuid"
 import { useChatStore } from "../stores/chatStore"
@@ -43,7 +45,8 @@ import { stripNonCanonicalTags, finalStripThinkingTags, settleThinking } from ".
 import { isLocalModelByName } from "../api/agents/model-locality"
 import { isMultimodalUnsupportedError, MULTIMODAL_UNSUPPORTED_MESSAGE } from "../lib/ollama-errors"
 import type { ImageAttachment, Message } from "../types/chat"
-import { isGroupChat, groupSystemPrompt, groupHistory, stripImpersonatedSpeakers } from "../lib/group-chat"
+import { fileMessageFields, filesWithoutWorkspace, type ChatFileInput } from "../lib/chat-files"
+import { isGroupChat, groupSystemPrompt, groupHistory, groupSpeakers, stripImpersonatedSpeakers } from "../lib/group-chat"
 import { explainSendRefusal } from "../lib/template-refusal"
 import { builtinReloadNeeded, ensureBuiltinEngineAlive } from "../api/builtin-ensure"
 import { emptyAnswerExplanation } from "../lib/answer-notes"
@@ -96,7 +99,22 @@ async function runGroupTurn(convId: string, model: string, allModels: string[], 
   // Der Grundtext gilt unabhaengig vom Personenschalter: der Schalter
   // entscheidet ueber die PERSON, nicht darueber, ob ueberhaupt ein Systemtext
   // rausgeht. Siehe lib/system-prompt.ts.
-  const personaPrompt = buildChatSystemPrompt(conv)
+  //
+  // 3.0.5 (samvenice, Discord): a participant can have a persona of its own.
+  // Then ITS prompt is that persona and the others are named to it, so two
+  // models no longer answer as the same character. A participant without one
+  // gets the chat's persona setting, exactly as before.
+  //
+  // Not gated on the Personas switch in Settings, for the same reason the
+  // line for the chat's own persona below never was in a group: that switch
+  // is off by default, and a persona picked for one participant in this
+  // chat's group menu is as explicit as a choice gets. Picking "Chat persona"
+  // there takes it back.
+  const speakers = groupSpeakers(allModels, conv.groupPersonas, useSettingsStore.getState().personas)
+  const ownPersona = speakers[model]?.personaPrompt
+  const personaPrompt = ownPersona !== undefined
+    ? buildChatSystemPrompt({ systemPrompt: ownPersona, personaEnabled: true })
+    : buildChatSystemPrompt(conv)
   const providerId = getProviderIdFromModel(model)
   // Same count cap as the plain path: a long group chat must not outgrow the
   // proxy's message gate either.
@@ -113,8 +131,8 @@ async function runGroupTurn(convId: string, model: string, allModels: string[], 
   // the 262k model beside it.
   const messages = applyChatSendBudget(
     capMessageCount([
-      { role: 'system' as const, content: groupSystemPrompt(model, allModels, personaPrompt) },
-      ...groupHistory(conv.messages, model),
+      { role: 'system' as const, content: groupSystemPrompt(model, allModels, personaPrompt, speakers) },
+      ...groupHistory(conv.messages, model, speakers),
     ]),
     {
       providerId,
@@ -125,7 +143,7 @@ async function runGroupTurn(convId: string, model: string, allModels: string[], 
       modelWindow: chatBudgetApplies(providerId, settings.contextDecay)
         ? await getModelMaxTokens(model)
         : 0,
-      sendWindowTokens: settings.codexSendWindowTokens,
+      sendWindowTokens: sendWindowFor(settings, model),
       contextDecay: settings.contextDecay,
       localBackend: sendsToALanBackend(providerId),
     },
@@ -139,11 +157,15 @@ async function runGroupTurn(convId: string, model: string, allModels: string[], 
   let thinkingAcc = ''
   let inThink = false
   let discardBuf = ''
-  let frameScheduled = false
+  const frames = frameFlush()
   let groupFinish: string | undefined
   // A model's own lines are untagged; a "[other-model]" tag in its OWN reply is
   // it speaking for someone else, which v1 must not show.
-  const others = allModels.filter((m) => m !== model)
+  // The others can show up under their model name or under their persona
+  // name, so both spellings of the tag are cut.
+  const others = allModels
+    .filter((m) => m !== model)
+    .flatMap((m) => (speakers[m].name === m ? [m] : [m, speakers[m].name]))
 
   try {
     // Local speakers share ONE engine process. llama-server holds a single
@@ -215,17 +237,16 @@ async function runGroupTurn(convId: string, model: string, allModels: string[], 
           }
         }
       }
-      if ((chunk.content || (chunk.thinking && keepThinking)) && !frameScheduled) {
-        frameScheduled = true
-        requestAnimationFrame(() => {
+      if (chunk.content || (chunk.thinking && keepThinking)) {
+        frames.schedule(() => {
           useChatStore.getState().updateMessageContent(convId, assistantMessage.id, stripImpersonatedSpeakers(stripNonCanonicalTags(contentAcc), others))
           if (keepThinking && thinkingAcc) {
             useChatStore.getState().updateMessageThinking(convId, assistantMessage.id, thinkingAcc)
           }
-          frameScheduled = false
         })
       }
       if (chunk.done) {
+        frames.close()
         if (chunk.finishReason) groupFinish = chunk.finishReason
         // Same settlement as every other path (2.6.7 Denk-Audit): the state
         // machine above only fires on a literal `<think>`, and a Qwen3
@@ -252,6 +273,7 @@ async function runGroupTurn(convId: string, model: string, allModels: string[], 
         }
       }
     }
+    frames.close()
     if (!abort.signal.aborted && !contentAcc.trim()) {
       // Empty turn: say WHY, length-aware, not a flat "didn't return an answer".
       // The bubble already labels the speaker, so no model prefix here.
@@ -262,6 +284,7 @@ async function runGroupTurn(convId: string, model: string, allModels: string[], 
       )
     }
   } catch (err) {
+    frames.close()
     if ((err as Error).name !== 'AbortError') {
       syncOllamaHealthFromError(err)
       // Bug B3 round 2: a group round on a strict template used to paste the
@@ -383,7 +406,7 @@ export function useChat() {
    * a second local conversation could stream from the built-in engine at the
    * same time, silently, because `localLaneHolder()` never heard about the
    * group round at all. */
-  const runGroupRound = useCallback(async (convId: string, content: string, images: ImageAttachment[] | undefined, models: string[]) => {
+  const runGroupRound = useCallback(async (convId: string, content: string, images: ImageAttachment[] | undefined, models: string[], files?: ChatFileInput[]) => {
     // Auflage 3 (Review composer, 19.09.2026): derselbe Wiedereintritts-Riegel
     // wie sendMessage oben ("Re-entry guard"). Ohne ihn ueberschrieb ein
     // doppeltes Enter auf einem Gruppenchat den Token der ersten Runde weiter
@@ -415,7 +438,9 @@ export function useChat() {
       useChatStore.getState().addMessage(convId, {
         id: uuid(),
         role: 'user',
-        content,
+        // An attached file reaches every speaker as its summary, inside the
+        // one user line they all share (lib/chat-files.ts).
+        ...fileMessageFields(content, filesWithoutWorkspace(files)),
         images,
         timestamp: Date.now(),
       })
@@ -503,7 +528,7 @@ export function useChat() {
     }
   }, [])
 
-  const sendMessage = useCallback(async (content: string, images?: ImageAttachment[]) => {
+  const sendMessage = useCallback(async (content: string, images?: ImageAttachment[], files?: ChatFileInput[]) => {
     const { activeModel } = useModelStore.getState()
     const { settings } = useSettingsStore.getState()
     const store = useChatStore.getState()
@@ -670,9 +695,12 @@ export function useChat() {
           displayContent: content,
           readOnly: slash.command.readOnly === true,
           ...(loop ? { loop } : {}),
+          files,
         })
       }
-      return sendAgentMessage(content, images)
+      // Agent mode: an attached file is also copied into this chat's working
+      // folder, where the file tools can open it (useAgentChat).
+      return sendAgentMessage(content, images, { files })
     }
 
     // Discord 28.09.2026 (xambran): im normalen Chat liest kein Werkzeug die
@@ -691,7 +719,7 @@ export function useChat() {
     {
       const groupConv = store.conversations.find((c) => c.id === store.activeConversationId)
       if (groupConv && isGroupChat(groupConv.groupModels)) {
-        return runGroupRound(groupConv.id, content, images, groupConv.groupModels)
+        return runGroupRound(groupConv.id, content, images, groupConv.groupModels, files)
       }
     }
 
@@ -727,6 +755,7 @@ export function useChat() {
             : CHAT_TOOLS,
           chatToolsMode: true,
           mediaHint: route.mediaHint,
+          files,
         })
       }
     }
@@ -769,7 +798,11 @@ export function useChat() {
     const userMessage = {
       id: uuid(),
       role: "user" as const,
-      content,
+      // Plain chat has no file tools, so an attached file is its summary and
+      // nothing else: name, type, hash, a hex dump of the start and the
+      // readable strings (lib/chat-files.ts). `content` below stays the typed
+      // text, which is what retrieval and memory search with.
+      ...fileMessageFields(content, filesWithoutWorkspace(files)),
       images,
       timestamp: Date.now(),
     }
@@ -1011,7 +1044,7 @@ export function useChat() {
       {
         providerId,
         modelWindow: modelWindowTokens,
-        sendWindowTokens: settings.codexSendWindowTokens,
+        sendWindowTokens: sendWindowFor(settings, activeModel),
         contextDecay: settings.contextDecay,
         // R2-3: der Hauptpfad des einfachen Chats liess dieses Feld weg, also
         // galt hier die Deckelung fuer bezahlte Anbieter und der eigene
@@ -1054,12 +1087,19 @@ export function useChat() {
     // only shows in the chat whose turn is in flight — not in every other chat
     // the user switches to (David 2026-06-12). Cleared in finally.
     useGenerationStore.getState().setGenerating(convId, true)
-    setIsLoadingModel(true)
-    useModelStore.getState().setIsModelLoading(true)
+    // Only a local model is loaded before it answers. A cloud model read
+    // "Loading model" under every reply and spun the picker as if it were
+    // switching models, until the first token arrived.
+    if (isLocalModelByName(activeModel)) {
+      setIsLoadingModel(true)
+      useModelStore.getState().setIsModelLoading(true)
+    }
     // Owns this turn's streamed text end to end, see the ChatRun doc comment
     // above. `convId` is fixed at this point: the `if (!convId)` branch above
     // already resolved it to a real string.
     const run: ChatRun = { convId, content: "", thinking: "", isThinking: false, discardedThinkBuf: "" }
+    // Before the try, so the catch can close it (lib/frame-flush).
+    const frames = frameFlush()
 
     try {
       // ── Multi-Provider: resolve provider for active model ──
@@ -1173,7 +1213,6 @@ export function useChat() {
 
       const stream = createStreamWithFallback()
 
-      let frameScheduled = false
       let firstChunk = true
       // Thinking visibility is driven by the toggle. When OFF, we still
       // have to parse <think>…</think> so the state-machine closes
@@ -1254,9 +1293,8 @@ export function useChat() {
         // the reasoning-only phase too (cloud reasoners stream all their
         // thinking before the first answer token; previously the flush only
         // ran on content chunks and the chat sat in dead air).
-        if ((chunk.content || (chunk.thinking && keepThinking)) && !frameScheduled) {
-          frameScheduled = true
-          requestAnimationFrame(() => {
+        if (chunk.content || (chunk.thinking && keepThinking)) {
+          frames.schedule(() => {
             const cId = run.convId
             const mId = assistantMessage.id
             // Always strip non-canonical thinking markers (Gemma channel
@@ -1269,11 +1307,11 @@ export function useChat() {
             if (keepThinking && run.thinking) {
               useChatStore.getState().updateMessageThinking(cId, mId, run.thinking)
             }
-            frameScheduled = false
           })
         }
 
         if (chunk.done) {
+          frames.close()
           if (chunk.finishReason) {
             finishReason = chunk.finishReason
             useChatStore.getState().updateMessageFinishReason(run.convId, assistantMessage.id, chunk.finishReason)
@@ -1313,6 +1351,9 @@ export function useChat() {
           }
         }
       }
+      // A stream can end without a done chunk; the lines below write the
+      // bubble directly and a late frame must not land on top of them.
+      frames.close()
 
       // Thought-only completion: the model reasoned and then STOPPED without
       // a single visible token (gemma4 primed by remembered tool results does
@@ -1358,6 +1399,7 @@ export function useChat() {
         }
       }
     } catch (err) {
+      frames.close()
       if ((err as Error).name !== "AbortError") {
         // Bug C — translate Ollama provider errors into health-store
         // updates so the header chip + top banner light up reactively.
@@ -1590,14 +1632,18 @@ export function useChat() {
    * per click and the model was asked it twice.
    */
   const resend = useCallback((conversationId: string, targetId: string, override?: string) => {
-    // sendMessage bails without a model; deleting first would eat the question.
-    if (!useModelStore.getState().activeModel) return
+    // sendMessage bails without a model, with a model from the other mode, and
+    // while this conversation's run is in flight; deleting first would eat
+    // the question. The last two were missing (bug hunt 01.10.2026, H9).
+    const { activeModel } = useModelStore.getState()
+    if (!activeModel || modelOutOfMode(activeModel, useSettingsStore.getState().settings.appMode)) return
+    if (activeChatRuns.has(conversationId)) return
     const conv = useChatStore.getState().conversations.find(c => c.id === conversationId)
     if (!conv) return
     const plan = planResend(conv.messages, targetId, override)
     if (!plan) return
     useChatStore.getState().deleteMessagesAfter(conversationId, plan.deleteFromId)
-    sendMessage(plan.content, plan.images)
+    sendMessage(plan.content, plan.images, plan.files?.map((attachment) => ({ attachment })))
   }, [sendMessage])
 
   const regenerateMessage = useCallback((conversationId: string, assistantMessageId: string) => {

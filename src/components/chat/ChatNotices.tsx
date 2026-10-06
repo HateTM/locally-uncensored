@@ -11,29 +11,39 @@
  * fuer Anmerkungen und Fehler vorschreibt: eine Zeile, kein Kasten, ruhiges
  * Grau oder Rot, und ein x, das sie wegnimmt.
  */
-import { Bot, FolderOpen, ImageOff, Images, Paperclip } from 'lucide-react'
+import { Bot, FileText, FolderOpen, ImageOff, Images, Paperclip } from 'lucide-react'
 import { Hinweis } from '../ui/Hinweis'
-import { useChatNoticeStore, type ChatNoticeId } from '../../stores/chatNoticeStore'
+import { useChatNoticeStore, CONVERSATION_BOUND, type ChatNoticeId } from '../../stores/chatNoticeStore'
 import { COMPOSER_MAX_W } from './composer-width'
 
 /** Das Symbol je Zeile. Keine eigene Farbe: die traegt der Ton. */
 const ICON: Record<ChatNoticeId, typeof Paperclip> = {
-  'attachment-is-not-an-image': Paperclip,
+  'document-belongs-in-docs': FileText,
   'model-cannot-see-images': ImageOff,
   'image-attach': Images,
+  'file-attach': Paperclip,
   'agent-outside-workspace': FolderOpen,
   'agent-for-local-files': Bot,
 }
 
+
 interface Props {
-  /** Die Dokumentenablage oeffnen, fuer die Zeile ueber den fehlgegangenen
-   *  Anhang. Fehlt sie, faellt der Knopf weg und der Satz bleibt wahr. */
+  /** Die Dokumentenablage oeffnen, fuer die Zeile ueber ein angehaengtes
+   *  Dokument. Fehlt sie, faellt der Knopf weg und der Satz bleibt wahr. */
   onAttachDocs?: () => void
+  /** Wo gezeichnet wird. Im Code-Bereich fallen die Chat-Agent-Zeilen weg. */
+  surface?: 'chat' | 'code'
 }
 
-export function ChatNotices({ onAttachDocs }: Props) {
-  const notices = useChatNoticeStore((s) => s.notices)
+export function ChatNotices({ onAttachDocs, surface = 'chat' }: Props) {
+  const all = useChatNoticeStore((s) => s.notices)
   const dismiss = useChatNoticeStore((s) => s.dismiss)
+  // Die Zeilen ueber den Agent-Knopf und seinen Ordner gelten im CHAT. Im
+  // Code-Bereich gibt es diesen Knopf nicht (Gegenprobe 01.10.2026).
+  // Dasselbe gilt fuer den Weg in die Dokumentenablage: die gibt es nur im Chat.
+  const notices = surface === 'code'
+    ? all.filter((n) => !CONVERSATION_BOUND.has(n.id) && n.id !== 'document-belongs-in-docs')
+    : all
 
   if (notices.length === 0) return null
 
@@ -50,7 +60,7 @@ export function ChatNotices({ onAttachDocs }: Props) {
             onDismiss={() => dismiss(n.id)}
           >
             {n.text}
-            {n.id === 'attachment-is-not-an-image' && onAttachDocs && (
+            {n.id === 'document-belongs-in-docs' && onAttachDocs && (
               <button
                 onClick={() => { dismiss(n.id); onAttachDocs() }}
                 className="ml-1 underline underline-offset-2 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"

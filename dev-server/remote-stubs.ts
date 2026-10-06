@@ -45,4 +45,19 @@ export function registerRemoteStubs(routes: RouteMount): void {
   for (const path of remoteStubPaths) {
     routes.use(path, remoteDevModeStub)
   }
+
+  // The Local API usage counter (local_api_usage) and the download speed
+  // limit (set_download_limit) live in the Rust process as well. Both callers
+  // already tolerate a failure: the panel shows no numbers, and the limit is
+  // only sent from the desktop app.
+  const DESKTOP_ONLY_BODY = JSON.stringify({
+    error: 'This needs the installed desktop app. The plain vite dev server has no Rust backend.',
+    devModeOnly: true,
+  })
+  for (const path of ['/local-api/local-api-usage', '/local-api/set-download-limit']) {
+    routes.use(path, (_req, res) => {
+      res.writeHead(501, { 'Content-Type': 'application/json' })
+      res.end(DESKTOP_ONLY_BODY)
+    })
+  }
 }

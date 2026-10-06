@@ -366,6 +366,63 @@ describe('the notes table', () => {
     }
   })
 
+  it('the 3.0.4 entry names every fix', () => {
+    // Kundenfall swift_maple90, 30.09.2026. 3.0.5 kam darauf (package.json),
+    // also pinnt dieser Block den 3.0.4-Eintrag ueber seine eigene Version, wie
+    // die Bloecke darueber. Ein Anker pro Fix.
+    const shipping = '3.0.4'
+    const prose = proseOf(shipping)
+    for (const anchor of [
+      // Der Abbruch mitten im Schreiben und was jetzt zaehlt.
+      'in the middle of the write', 'only when no data arrives at all',
+      // "continue" nach Stopp oder Fehler, und das Protokoll der alten Schritte.
+      'after a stop or an error', 'short list of what is already done',
+      // Plan nur auf Wunsch, dunkle Leiste.
+      'in plan mode, when you ask for a plan', 'dark instead of blue',
+      // Buendeln und file_edit.
+      'several files in one step', 'several places in a file in one call',
+      // Kontext.
+      '32k of context by default instead of 64k', 'a small triangle',
+    ]) {
+      expect(prose, `${shipping}: nothing about "${anchor}"`).toContain(anchor)
+    }
+  })
+
+  it('the 3.0.5 entry names what shipped', () => {
+    // Create-Umbau, 03.10.2026. In diesem Fork kam 3.1.0 und 3.2.0 darueber
+    // (package.json), also pinnt dieser Block den 3.0.5-Eintrag ueber seine
+    // eigene Version, wie die Bloecke darueber. Ein Anker pro Punkt.
+    const shipping = '3.0.5'
+    const prose = proseOf(shipping)
+    for (const anchor of [
+      // Die neuen lokalen Modelle und ihre ComfyUI-Mindestversionen.
+      'ltx 2.5 needs comfyui 0.32.0, fasth3 0.35.0 and yue2 0.36.0', 'small (gguf q4)',
+      // Qwen-Image 2.1: Schalter und Prompt Enhancer (GitHub 148).
+      'transparent background', 'rewritten by', 'comfyui 0.37.2', 'issue 148',
+      // Qwen-Image 2.1 mit dem Text-Encoder ohne Verweigerungen.
+      'qwen-image 2.1 (no refusals)', 'which one reads your prompt',
+      // Noct Q, der Community-Finetune von Qwen-Image 2.1.
+      'noct q (qwen-image 2.1, unfiltered)', 'transformer weights were modified',
+      // Shots, LoRA-Staerke, Turbo-LoRA, Marken.
+      'shots slider', 'from -10 to 10', 'ready to install', 'older models',
+      // Passt das Modell zur Grafikkarte: Model Manager, Waehler, Wartezeile.
+      'fits your 12 gb card', 'loading can be slow', 'waiting line says why',
+      // Mehrere Bilder in einem Zug, Figur aus einem Video, Prompt umschreiben.
+      'up to 50 source images', 'save character', 'improve my prompt',
+      // Cloud: neue Modelle, Anzahl, Referenzfotos, Edit ohne Maske.
+      'five additions from open model families', 'images slider from 1 to 4', 'up to five photos', 'needs no mask',
+      // Chat: Dateien und Persona je Gruppenmodell.
+      'up to 3 per message and 64 mb each', 'persona picker',
+      // Fixes: Linux-Sprache, Aufklappmenues (GitHub 149), Pruefsumme.
+      'faster-whisper and piper', 'issue 149', 'right click menu', 'sha-256',
+    ]) {
+      expect(prose, `${shipping}: nothing about "${anchor}"`).toContain(anchor)
+    }
+    // Hausregeln fuer den Text: kein Gedankenstrich, kein Anbietername.
+    expect(prose).not.toMatch(/[\u2013\u2014]/)
+    expect(prose).not.toMatch(/wavespeed|deepinfra/)
+  })
+
   it('the 3.1.0 entry names the media agent, the LoRA prompts and the fork channel', () => {
     // It shipped; since 3.2.0 it is no longer the running version, so it is
     // read by its number, and every anchor stays.
@@ -446,7 +503,7 @@ describe('the notes table', () => {
     // Konstanten. Vorher stand der Nenner des Katalogs darin, der Waechter
     // haette den falschen Nenner also mitgetragen statt ihn zu melden.
     const phrase = `${CLOUD_PITCH.unfilteredChatModels} of the ${CLOUD_PITCH.measuredChatModels}`
-    expect(phrase).toBe('24 of the 46')
+    expect(phrase).toBe('19 of the 46')
     // Entscheid vom 12.09.2026: EIN Satz traegt die Aussage, und er sagt
     // "in full". Vorher standen zwei Saetze mit zwei Formulierungen derselben
     // Messung auf demselben Blatt, einer im Kurztext, einer im Ausklapper.

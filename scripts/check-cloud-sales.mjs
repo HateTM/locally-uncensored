@@ -162,7 +162,10 @@ const zahlenseiten = [['docs/pricing/index.html', pricing], ['docs/cloud/index.h
 // `full` nach strenger Regel in beiden Laeufen | 24". Die Zahl steht hier
 // ausgeschrieben, weil sie ein Entscheid ist und keine Ableitung; abgeleitet
 // wird, was sie darf.
-const MARKED_MODELS = 24
+// Entscheid David vom 05.10.2026: fuenf der 24 haben im Drei-Runden-Test in
+// Runde zwei oder drei abgelehnt und tragen die Marke nicht mehr, seither 19
+// (Bericht lu-305/mail/MARKIERUNGEN-TEST-2026-10-05.md).
+const MARKED_MODELS = 19
 // Strenger lesen kann die Menge nur verkleinern: ein Modell, das die lockere
 // Regel schon durchfallen liess, kommt unter der strengen nicht dazu. Sinkt
 // `unfiltered: 'full'` im Katalog unter die Entscheidzahl, ist der Entscheid

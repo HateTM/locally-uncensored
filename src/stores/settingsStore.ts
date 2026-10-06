@@ -5,6 +5,7 @@ import type { Settings, Persona } from '../types/settings'
 import { DEFAULT_SETTINGS, BUILT_IN_PERSONAS } from '../lib/constants'
 import { isEffortLevel } from '../lib/effort'
 import { isRecord, asString } from '../types/json-guards'
+import { RETIRED_SEND_WINDOW_DEFAULT } from '../lib/send-window'
 
 // v5 (Feature EE v2.5.0): added settings.exclusiveVramMode. The migrate below
 // already merges { ...DEFAULT_SETTINGS, ...persisted.settings }, so bumping the
@@ -180,6 +181,13 @@ export const useSettingsStore = create<SettingsState>()(
         if (!state?.settings) return
         if (!isEffortLevel(String(state.settings.reasoningEffort))) {
           state.settings.reasoningEffort = DEFAULT_SETTINGS.reasoningEffort
+        }
+        // 3.0.4 halved the paid-provider send window. A stored 64000 is the old
+        // default (no UI writes this key), so it follows the new one. Here and
+        // not in migrate for the same reason as above: no version bump, and a
+        // downgrade simply reads the smaller number.
+        if (state.settings.codexSendWindowTokens === RETIRED_SEND_WINDOW_DEFAULT) {
+          state.settings.codexSendWindowTokens = DEFAULT_SETTINGS.codexSendWindowTokens
         }
       },
       migrate: (persisted: unknown, version: number): SettingsState => {

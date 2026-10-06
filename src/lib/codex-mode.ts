@@ -22,7 +22,7 @@
  */
 
 import { MUTATING_TOOLS } from './mutating-tools'
-import { codexConfirmEnabled } from '../hooks/codexShellGate'
+import { CODEX_CONFIRM_TOOLS, codexConfirmEnabled } from '../hooks/codexShellGate'
 
 export type CodexMode = 'ask' | 'bypass' | 'plan'
 
@@ -73,8 +73,9 @@ export interface CodexModeRule {
   decision: PermissionDecision
 }
 
-/** The arbitrary-code-execution tools, same set the H2 confirm gate uses. */
-const EXEC_TOOLS = ['shell_execute', 'code_execute', 'shell_execute_background'] as const
+/** The tools Ask mode confirms, read from the gate itself so the table and
+ *  the gate cannot drift apart. */
+const EXEC_TOOLS = [...CODEX_CONFIRM_TOOLS]
 /** Staged-and-approved writes in Ask mode. */
 const WRITE_TOOLS = ['file_write', 'file_edit'] as const
 
@@ -133,7 +134,6 @@ export interface CodexModeKnobInput {
   settings: {
     codexConfirmShell?: boolean
     codexCloudConfirmOptIn?: boolean
-    codexStageMode?: boolean
     codexReviewMode?: boolean
   }
   /** Provider driving this run, for the cloud arm of the shell gate. */

@@ -3,16 +3,18 @@ import { useCreate } from '../../../hooks/useCreate'
 import { useCloudCreate, hasActiveCloudRun } from '../../../hooks/useCloudCreate'
 import { useCloudSession } from '../../../hooks/useCloudSession'
 import { useCreateStore, type GalleryItem } from '../../../stores/createStore'
-import { getLoraModels, getVAEModels, checkComfyConnection, refreshComfyModels, bundleForVideoIntent } from '../../../api/comfyui'
+import { listedLoras, getVAEModels, checkComfyConnection, refreshComfyModels, bundleForVideoIntent } from '../../../api/comfyui'
 import { getAllNodeInfo, clearNodeCache } from '../../../api/comfyui-nodes'
-import { installCustomNodes, getImageBundles, getVideoBundles, getAudioBundles, getLipsyncBundles, getMotionBundles, startModelDownload, getDownloadProgress, modelsNotVisibleInComfy, judgeableFolders } from '../../../api/discover'
+import { installCustomNodes, nodePacksNotLoaded, assertBundleFits, checkBundlesOnDisk, getImageBundles, getVideoBundles, getAudioBundles, getLipsyncBundles, getMotionBundles, startModelDownload, getDownloadProgress, modelsNotVisibleInComfy, judgeableFolders } from '../../../api/discover'
+import { CUSTOM_NODE_REGISTRY } from '../../../api/model-bundles'
 import { backendCall, isMacOS, isLinux } from '../../../api/backend'
 import { asComfyGpuMode, comfyCpuBannerText, type ComfyCpuBannerFacts } from '../../../lib/comfy-cpu-banner'
 import { installMlxStack } from '../../../api/mlx-install'
 import { useDownloadStore } from '../../../stores/downloadStore'
 import { downloadBundleFiles, waitOrAbort, waitForModelsVisible, InstallCancelled } from '../../../lib/bundle-install'
 import { ensureLocalFilename } from './loadImage'
-import { comfyStartupError, COMFY_INSTALLED_BUT_DEAD } from './comfyError'
+import { batchReady, requestBatchStop, runBatchEdit } from './batchRun'
+import { comfyStartupError, nodePackLoadError, COMFY_INSTALLED_BUT_DEAD } from './comfyError'
 import { restartComfyForNewNodes } from '../../../api/comfy-restart'
 import { BIREFNET, bgRemovalReady, hasCoreBgRemoval } from '../../../api/bg-removal'
 import type { CloudQuota } from '../../../lib/render/cloud-jobs'
@@ -143,6 +145,11 @@ export function CreateExpProvider({ children }: { children: ReactNode }) {
         .then((ref) => useCreateStore.getState().setSource(ref))
         .catch(() => { /* next generate surfaces the error */ })
     }
+    if (s.references.some((r) => !r.filename)) {
+      Promise.all(s.references.map((r, i) => ensureLocalFilename(r, `reference-${i + 2}.png`)))
+        .then((refs) => useCreateStore.getState().setReferences(refs))
+        .catch(() => { /* next generate surfaces the error */ })
+    }
     if (s.mask && !s.mask.filename) {
       ensureLocalFilename(s.mask, 'mask.png')
         .then((ref) => useCreateStore.getState().setMask(ref))
@@ -200,10 +207,12 @@ export function CreateExpProvider({ children }: { children: ReactNode }) {
   const refreshModelLists = useCallback(async () => {
     if (connected !== true) return
     const [loras, vaes] = await Promise.all([
-      getLoraModels().catch(() => [] as string[]),
+      listedLoras().catch(() => null),
       getVAEModels().catch(() => [] as string[]),
     ])
-    setLoraList(loras)
+    setLoraList(loras ?? [])
+    // A file deleted from models/loras leaves the stack here (GH #146).
+    if (loras) useCreateStore.getState().keepListedLoras(loras)
     setVaeList(['auto', ...vaes])
     try {
       const nodes = await getAllNodeInfo(true)
@@ -230,6 +239,13 @@ export function CreateExpProvider({ children }: { children: ReactNode }) {
   // twice on every connect.
   const charactersVersion = useCreateStore((s) => s.charactersVersion)
   useEffect(() => { void refreshModelLists() }, [charactersVersion, refreshModelLists])
+  // A LoRA downloaded from Models while Create stays open (the MiniMax H3
+  // turbo LoRA add-on, a CivitAI pick) shows up in the stack without a Rescan.
+  useEffect(() => {
+    const onDownloaded = () => { void refreshModelLists() }
+    window.addEventListener('comfyui-model-downloaded', onDownloaded)
+    return () => window.removeEventListener('comfyui-model-downloaded', onDownloaded)
+  }, [refreshModelLists])
 
   // Rebuild the ComfyUI venv via the same status contract the installer uses,
   // narrating pip's progress (GH #98). Throws with the last log line on error.
@@ -425,10 +441,8 @@ export function CreateExpProvider({ children }: { children: ReactNode }) {
         }
       } catch { /* ComfyUI still restarting — keep polling */ }
     }
-    throw new Error(
-      `Installed ${pack} and restarted ComfyUI, but it still isn't listing the ${nodeClass} node. ` +
-      'Open the Model Manager to finish the install, or check the ComfyUI console for a pip error.',
-    )
+    const out = await backendCall<{ lines?: string[] }>('comfyui_last_output').catch(() => null)
+    throw new Error(nodePackLoadError(CUSTOM_NODE_REGISTRY[pack].name, nodeClass, out?.lines))
   }, [setCaps, ensureComfyRunning])
 
   // One-click starter models for a fresh PC: ensure ComfyUI, then pull the
@@ -468,9 +482,15 @@ export function CreateExpProvider({ children }: { children: ReactNode }) {
         : getMotionBundles()
       )[0]
     if (!bundle) throw new Error('No starter bundle available for this intent.')
-    if (bundle.customNodes?.length) {
+    // Before anything is installed or restarted: does what is still missing
+    // fit on the drive at all.
+    await assertBundleFits(bundle, (await checkBundlesOnDisk([bundle])).files)
+    // Only the packs ComfyUI has not loaded. With all of them there this used
+    // to pull them again and restart ComfyUI for nothing.
+    const packs = await nodePacksNotLoaded(bundle.customNodes ?? [])
+    if (packs.length > 0) {
       onProgress?.('Installing the required node packs. This can take a minute…')
-      await installCustomNodes(bundle.customNodes)
+      await installCustomNodes(packs)
       onProgress?.('Restarting ComfyUI to register the new nodes…')
       await restartComfyForNewNodes()
       for (let i = 0; i < 20; i++) {
@@ -489,12 +509,17 @@ export function CreateExpProvider({ children }: { children: ReactNode }) {
     const dl = useDownloadStore.getState()
     const files = bundle.files.filter((f) => f.downloadUrl && f.filename && f.subfolder)
     if (files.length > 1) dl.setBundleGroup(bundle.name, files.map((f) => f.filename!))
-    for (const f of files) dl.setMeta(f.filename!, f.downloadUrl!, f.subfolder!)
+    for (const f of files) {
+      dl.setMeta(f.filename!, f.downloadUrl!, f.subfolder!, undefined, {
+        expectedBytes: f.sizeGB ? Math.round(f.sizeGB * 1_073_741_824) : undefined,
+        sha256: f.sha256,
+      })
+    }
     dl.startPolling()
 
     await downloadBundleFiles(
       files.map((f) => ({
-        filename: f.filename!, subfolder: f.subfolder!, downloadUrl: f.downloadUrl!, sizeGB: f.sizeGB,
+        filename: f.filename!, subfolder: f.subfolder!, downloadUrl: f.downloadUrl!, sizeGB: f.sizeGB, sha256: f.sha256,
       })),
       {
         start: startModelDownload,
@@ -582,13 +607,21 @@ export function CreateExpProvider({ children }: { children: ReactNode }) {
     }
   }, [ensureComfyRunning, fetchModels])
 
+  // Several source images (lib/batch-edit): Create runs the same single run
+  // once per image, on the backend the batch started on.
+  const runOne = backend === 'cloud' ? cloud.generate : generate
   const value: CreateExpValue = {
-    generate: backend === 'cloud' ? cloud.generate : generate,
+    generate: () => (batchReady() ? runBatchEdit(runOne) : runOne()),
     // Cancel routes by the backend that STARTED the run, not the current axis:
     // the header switch (or the license probe) can flip local/cloud mid-render,
     // and routing by the live value would abort a null handle while the real
     // run keeps going (a cloud job keeps billing; a local job keeps rendering).
-    cancel: () => (hasActiveCloudRun() ? cloud.cancel() : cancel()),
+    // A batch stops first, so nothing further starts while the run in flight
+    // is cancelled.
+    cancel: () => {
+      requestBatchStop()
+      return hasActiveCloudRun() ? cloud.cancel() : cancel()
+    },
     enhanceVideo: cloud.enhanceVideo,
     makeVoice: cloud.makeVoice,
     samplerList, schedulerList, loraList, vaeList, refreshModelLists,

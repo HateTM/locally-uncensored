@@ -36,6 +36,10 @@ function App() {
         const { useSettingsStore: store } = await import('./stores/settingsStore')
         await syncCustomModelDir(store.getState().settings.hfDownloadPathOverride)
       })()
+
+      // The download speed limit sits in Rust and starts at none on every
+      // launch (lib/download-limit.ts).
+      void import('./lib/download-limit').then(({ startDownloadLimitSync }) => startDownloadLimitSync())
     }
 
     // Probe local Whisper (STT) once at boot and push the result into the voice

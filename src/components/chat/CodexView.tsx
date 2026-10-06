@@ -5,11 +5,14 @@ import { useChatStore } from '../../stores/chatStore'
 import { useBackgroundAgentWake } from '../../hooks/useBackgroundAgentWake'
 import { useGenerationStore } from '../../stores/generationStore'
 import { ChatInput } from './ChatInput'
+import { ChatFileChip } from './ChatFileChip'
+import { FILE_ONLY_TEXT } from '../../lib/chat-files'
 import { ToolCallBlock } from './ToolCallBlock'
 import { ToolCallBand } from './ToolCallBand'
 import { groupAgentBlocks } from '../../lib/tool-call-groups'
 import { ThinkingBlock } from './ThinkingBlock'
 import { MarkdownRenderer } from './MarkdownRenderer'
+import { closeOpenMarkdown } from '../../lib/streaming-markdown'
 import { TokenCounter } from './TokenCounter'
 import { ContextDropdown } from './ContextDropdown'
 import { SmallModelModeToggle } from './SmallModelModeToggle'
@@ -28,6 +31,9 @@ import { LoopBar } from './LoopBar'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useModelStore } from '../../stores/modelStore'
 import { useAnyAgentLoopActive } from '../../stores/agentLoopStore'
+import { useUIStore } from '../../stores/uiStore'
+import { RecentChats } from './RecentChats'
+import { openNewCodeSession } from '../../lib/code-session'
 import { useAgentModeStore } from '../../stores/agentModeStore'
 import {
   CODEX_WORKDIR_LOCK_TITLE,
@@ -136,7 +142,6 @@ export function CodexView() {
   const codexReviewMode = useSettingsStore((s) => s.settings.codexReviewMode)
   const userAvatarDataUrl = useSettingsStore((s) => s.settings.userAvatarDataUrl)
   const activeModel = useModelStore((s) => s.activeModel)
-  const createConversation = useChatStore((s) => s.createConversation)
   const codexWorkingDir = useCodexStore((s) => s.workingDirectory)
   const clearWorkingDirectory = useCodexStore((s) => s.clearWorkingDirectory)
   // A8 (2.6.8): the same Remove sits in the explorer column, but that column
@@ -153,6 +158,9 @@ export function CodexView() {
   // active one's.
   const loop = useAnyAgentLoopActive()
   const lockReason = codexBusyReason({ sendsInFlight, threads, generating: generatingMap, loop })
+  // The open explorer already says why the folder is held (explorer-workdir-lock).
+  const explorerCollapsed = useUIStore((s) => s.explorerCollapsed)
+  const sidebarOpen = useUIStore((s) => s.sidebarOpen)
 
   // Where the agent goes while no folder is picked: a per-chat workspace or
   // settings.defaultWorkspace both beat an empty picker, so the header and the
@@ -193,7 +201,8 @@ export function CodexView() {
   // folder; a brand-new conversation means a brand-new thread on next send.
   const startNewSession = () => {
     stopCodex()
-    if (activeModel) createConversation(activeModel, '', 'codex')
+    if (!activeModel) return
+    openNewCodeSession(activeModel)
   }
 
   return (
@@ -225,7 +234,7 @@ export function CodexView() {
           className="flex items-center gap-1.5 px-2 py-0.5 border-b border-gray-200 dark:border-white/[0.04]"
         >
           <Code size={9} className="text-gray-500" />
-          <span className="text-[0.55rem] text-gray-600 dark:text-gray-400 font-medium">Coding Agent</span>
+          <span className="text-[0.55rem] text-gray-600 dark:text-gray-400 font-medium whitespace-nowrap shrink-0">Coding Agent</span>
           {/* Code-Review Mode badge (B13), makes it impossible to miss
               that the agent is read-only. The toggle itself lives in
               Settings → Codex Agent; clicking the badge jumps you there
@@ -250,7 +259,7 @@ export function CodexView() {
               er ist eigentlich in Dokumenten"). Empty = per-chat sandbox under
               ~/agent-workspace, which is also where shell output now lands. */}
           <span
-            className="flex items-center gap-1 text-[0.5rem] text-gray-500 dark:text-gray-500 font-mono truncate max-w-[200px]"
+            className="flex items-center gap-1 text-[0.5rem] text-gray-500 dark:text-gray-500 font-mono truncate min-w-0 max-w-[200px]"
             title={codexWorkingDir || `No folder picked, the agent works in ${fallbackLabel}`}
           >
             <Folder size={9} className="shrink-0 opacity-70" />
@@ -279,7 +288,7 @@ export function CodexView() {
           <button
             onClick={startNewSession}
             title="New coding session (clears the current run, keeps the folder)"
-            className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[0.55rem] text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/5 transition-colors"
+            className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[0.55rem] text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/5 transition-colors whitespace-nowrap shrink-0"
           >
             <RotateCcw size={10} />
             <span>New</span>
@@ -305,8 +314,11 @@ export function CodexView() {
             und ein `disabled` Knopf nimmt keine Mauszeiger-Ereignisse an, also
             ist der Hinweis nie erschienen (derselbe Fehler wie im ExplorerPanel,
             dort mit `explorer-workdir-lock` behoben). Ruhiger Ton, keine
-            Warnfarbe: gesperrt ist ein Zustand, der von selbst endet. */}
-        {lockReason && (
+            Warnfarbe: gesperrt ist ein Zustand, der von selbst endet.
+            Nur wenn es den Entfernen-Knopf gibt und der offene Explorer
+            denselben Satz nicht schon zeigt: sonst stand er zweimal
+            nebeneinander, einmal ueber nichts. */}
+        {lockReason && codexWorkingDir && explorerCollapsed && (
           <p
             data-testid="codex-workdir-lock"
             className={`px-3 py-1 ${QUIET_HINT_TEXT} border-b border-gray-200 dark:border-white/[0.04]`}
@@ -354,7 +366,7 @@ export function CodexView() {
         {/* Messages */}
         <div ref={scrollRef} className="flex-1 min-h-[10rem] overflow-y-auto scrollbar-thin" data-testid="codex-transcript">
           {messages.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full text-center">
+            <div className="flex flex-col items-center justify-center h-full text-center" data-testid="codex-landing">
               <Code size={28} className="text-gray-300 dark:text-gray-700 mb-2" />
               <p className="text-[0.7rem] text-gray-500 font-medium">Coding Agent</p>
               <p className="text-[0.55rem] text-gray-400 dark:text-gray-600 mt-0.5 max-w-[300px]">
@@ -369,6 +381,14 @@ export function CodexView() {
                   No folder picked. The agent works in {fallbackLabel}. Pick a project with
                   "Select folder..." in the file tree panel on the right.
                 </p>
+              )}
+              {/* With the side panel collapsed the latest code chats stand
+                  here, as they did on the old Code landing (GH #141). With no
+                  conversation open this is the Code area's start screen. */}
+              {!sidebarOpen && !activeConversationId && (
+                <div className="w-full pt-3 flex flex-col items-center text-left">
+                  <RecentChats />
+                </div>
               )}
             </div>
           ) : (
@@ -436,6 +456,9 @@ export function CodexView() {
                       )}
                       {(() => {
                         const running = codexGenerating && msg.id === messages[messages.length - 1]?.id
+                        // While this message streams, an open ` or ** is closed
+                        // for the frame (lib/streaming-markdown.ts).
+                        const shown = (text: string) => (running ? closeOpenMarkdown(text) : text)
                         const hasBlocks = !!(msg.role === 'assistant' && msg.agentBlocks && msg.agentBlocks.length > 0)
                         const stepCount = msg.agentBlocks?.filter((b) => b.phase === 'tool_call' && b.toolCall).length ?? 0
                         const hasAnswerBlock = !!(msg.agentBlocks && msg.agentBlocks.some((b) => b.phase === 'answer' && b.content.trim()))
@@ -532,7 +555,7 @@ export function CodexView() {
                                         return (
                                           <div key={block.id} className="px-1 py-0.5">
                                             <div className="text-[12px] leading-relaxed">
-                                              <MarkdownRenderer content={answer} />
+                                              <MarkdownRenderer content={shown(answer)} />
                                             </div>
                                           </div>
                                         )
@@ -557,7 +580,17 @@ export function CodexView() {
                         // there are no per-iteration answer blocks (interleave
                         // already rendered those). Assistant drops the bubble to
                         // match the regular Chat view; user keeps the right anchor.
-                        const textContent = cleanContent && (msg.role === 'user' || !hasAnswerBlock) ? (
+                        // Files attached to this instruction: a chip each. The
+                        // bytes are in the working folder, not in the chat.
+                        const fileChips = msg.role === 'user' && msg.files?.length ? (
+                          <div className="flex gap-1 flex-wrap justify-end">
+                            {msg.files.map((file, i) => (
+                              <ChatFileChip key={`${file.sha256}-${i}`} file={file} />
+                            ))}
+                          </div>
+                        ) : null
+                        const onlyFiles = !!fileChips && msg.displayContent === FILE_ONLY_TEXT
+                        const textContent = cleanContent && !onlyFiles && (msg.role === 'user' || !hasAnswerBlock) ? (
                           <div className={
                             msg.role === 'user'
                               ? 'rounded-lg px-2.5 py-1.5 bg-gray-100 dark:bg-white/[0.06] border border-gray-200 dark:border-white/[0.08]'
@@ -567,7 +600,7 @@ export function CodexView() {
                               {msg.role === 'user' ? (
                                 <p className="text-gray-800 dark:text-gray-200 whitespace-pre-wrap">{cleanContent}</p>
                               ) : (
-                                <MarkdownRenderer content={cleanContent} />
+                                <MarkdownRenderer content={shown(cleanContent)} />
                               )}
                             </div>
                           </div>
@@ -632,7 +665,7 @@ export function CodexView() {
                               {finalAnswerText && (
                                 <div className="px-1 py-0.5">
                                   <div className="text-[12px] leading-relaxed">
-                                    <MarkdownRenderer content={finalAnswerText} />
+                                    <MarkdownRenderer content={shown(finalAnswerText)} />
                                   </div>
                                 </div>
                               )}
@@ -644,6 +677,7 @@ export function CodexView() {
                           <>
                             {reflection}
                             {transcript}
+                            {fileChips}
                             {textContent}
                           </>
                         )
@@ -677,6 +711,7 @@ export function CodexView() {
                   blocked run never looks like a working one (G15b). */}
               <WorkingAnchor
                 isRunning={codexGenerating}
+                conversationId={activeConversationId}
                 label={pendingConfirm ? 'Waiting for your approval' : undefined}
               />
             </div>
@@ -689,14 +724,16 @@ export function CodexView() {
             als Geschwister UEBER dem Kasten statt darin; die Wartezeile und
             die Composer-Hinweise sind Hinweise und stehen jetzt hier. Die
             Zeile ueber das MODELL ist in den Modellwaehler gezogen. */}
-        <ChatNotices />
+        <ChatNotices surface="code" />
         <LoopBar onStop={stopCodex} />
         <GoalBar />
         <LocalLaneWaitLine waiting={!!queuedForLocalLane} queuePosition={localLaneQueuePosition} />
 
         {/* Input */}
         <ChatInput
-          onSend={(content) => sendInstruction(content)}
+          // Images have no path into a coding run; attached files do, they
+          // are copied into the working folder (lib/chat-files.ts).
+          onSend={(content, _images, files) => sendInstruction(content, files ? { files } : undefined)}
           onStop={stopCodex}
           // Store flag, not the hook's local isRunning (audit A2): the view
           // remounts on every tab switch and a fresh hook says "idle" while

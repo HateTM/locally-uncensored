@@ -146,11 +146,13 @@ pub fn modell_zurueckschreiben(json: &mut serde_json::Value, qualifiziert: &str)
 pub struct SseModellUmschreiber {
     qualifiziert: String,
     rest: Vec<u8>,
+    /// Das letzte `usage`, das im Strom vorbeikam (fuer die Statistik).
+    pub usage: Option<(u64, u64)>,
 }
 
 impl SseModellUmschreiber {
     pub fn neu(qualifiziert: &str) -> Self {
-        Self { qualifiziert: qualifiziert.to_string(), rest: Vec::new() }
+        Self { qualifiziert: qualifiziert.to_string(), rest: Vec::new(), usage: None }
     }
 
     /// Ein Schub roher Upstream-Bytes rein, die fertigen Zeilen raus.
@@ -173,7 +175,7 @@ impl SseModellUmschreiber {
         self.zeile_umschreiben(&zeile)
     }
 
-    fn zeile_umschreiben(&self, zeile: &[u8]) -> Vec<u8> {
+    fn zeile_umschreiben(&mut self, zeile: &[u8]) -> Vec<u8> {
         let Ok(text) = std::str::from_utf8(zeile) else {
             return zeile.to_vec(); // kein UTF-8 — nicht unser Protokoll
         };
@@ -196,6 +198,9 @@ impl SseModellUmschreiber {
         let Ok(mut json) = serde_json::from_str::<serde_json::Value>(nutz_trim) else {
             return zeile.to_vec(); // nicht lesbar — durchreichen, nicht raten
         };
+        if let Some(u) = usage_lesen(&json) {
+            self.usage = Some(u);
+        }
         if !modell_zurueckschreiben(&mut json, &self.qualifiziert) {
             return zeile.to_vec(); // nichts zu tun, also nichts anfassen
         }
@@ -552,10 +557,118 @@ impl Default for LocalApiConfig {
     }
 }
 
+// ── Was ueber die API gelaufen ist (GH Discussion #4, kreake 2026-09-22) ──
+//
+// "If I connect an IDE with the Local API, I really would appreciate some
+// statistics like connections or context (tokens, etc.)." Gezaehlt wird seit
+// dem letzten Start der API, im Speicher und nirgends sonst: was ein Client
+// fragt, landet in keiner Datei. Tokens kennt nur der Modellserver; wir
+// uebernehmen sein `usage`, und eine Antwort ohne `usage` zaehlt als "ohne
+// Zahlen" statt als geschaetzt.
+
+#[derive(Default)]
+pub struct Nutzung {
+    anfragen: std::sync::atomic::AtomicU64,
+    fehlgeschlagen: std::sync::atomic::AtomicU64,
+    laufend: std::sync::atomic::AtomicU64,
+    prompt_tokens: std::sync::atomic::AtomicU64,
+    antwort_tokens: std::sync::atomic::AtomicU64,
+    ohne_zahlen: std::sync::atomic::AtomicU64,
+    /// Modell und Zeitpunkt (Unix-ms) der letzten Anfrage, seit wann gezaehlt wird.
+    letzte: std::sync::Mutex<Option<(String, u64)>>,
+    seit: std::sync::atomic::AtomicU64,
+}
+
+fn jetzt_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+impl Nutzung {
+    /// Frisch gezaehlt, ab jetzt. Jeder Start der API bekommt eine neue.
+    pub fn neu() -> Self {
+        let n = Self::default();
+        n.seit.store(jetzt_ms(), std::sync::atomic::Ordering::Relaxed);
+        n
+    }
+
+    /// Eine Anfrage beginnt. Der Waechter zaehlt sie als laufend, bis er
+    /// faellt, beim Streaming also erst mit dem letzten Byte.
+    fn beginn(self: &Arc<Self>, modell: &str) -> Laufend {
+        use std::sync::atomic::Ordering::Relaxed;
+        self.anfragen.fetch_add(1, Relaxed);
+        self.laufend.fetch_add(1, Relaxed);
+        if let Ok(mut l) = self.letzte.lock() {
+            *l = Some((modell.to_string(), jetzt_ms()));
+        }
+        Laufend { nutzung: Arc::clone(self) }
+    }
+
+    fn fehler(&self) {
+        self.fehlgeschlagen.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Das `usage` einer fertigen Antwort, oder keins.
+    fn zahlen(&self, usage: Option<(u64, u64)>) {
+        use std::sync::atomic::Ordering::Relaxed;
+        match usage {
+            Some((p, a)) => {
+                self.prompt_tokens.fetch_add(p, Relaxed);
+                self.antwort_tokens.fetch_add(a, Relaxed);
+            }
+            None => {
+                self.ohne_zahlen.fetch_add(1, Relaxed);
+            }
+        }
+    }
+
+    pub fn als_json(&self) -> serde_json::Value {
+        use std::sync::atomic::Ordering::Relaxed;
+        let letzte = self.letzte.lock().ok().and_then(|l| l.clone());
+        serde_json::json!({
+            "since": self.seit.load(Relaxed),
+            "requests": self.anfragen.load(Relaxed),
+            "failed": self.fehlgeschlagen.load(Relaxed),
+            "active": self.laufend.load(Relaxed),
+            "promptTokens": self.prompt_tokens.load(Relaxed),
+            "completionTokens": self.antwort_tokens.load(Relaxed),
+            "withoutCounts": self.ohne_zahlen.load(Relaxed),
+            "lastModel": letzte.as_ref().map(|(m, _)| m.clone()),
+            "lastAt": letzte.map(|(_, t)| t),
+        })
+    }
+}
+
+/// Haelt eine Anfrage als laufend, solange er lebt.
+pub struct Laufend {
+    nutzung: Arc<Nutzung>,
+}
+
+impl Drop for Laufend {
+    fn drop(&mut self) {
+        self.nutzung.laufend.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+/// `usage` im OpenAI-Format: Chat und Completions melden prompt_tokens und
+/// completion_tokens, Embeddings nur prompt_tokens.
+pub fn usage_lesen(json: &serde_json::Value) -> Option<(u64, u64)> {
+    let u = json.get("usage")?;
+    let p = u.get("prompt_tokens").and_then(|v| v.as_u64());
+    let a = u.get("completion_tokens").and_then(|v| v.as_u64());
+    if p.is_none() && a.is_none() {
+        return None;
+    }
+    Some((p.unwrap_or(0), a.unwrap_or(0)))
+}
+
 #[derive(Clone)]
 pub struct LocalApiState {
     pub cfg: Arc<RwLock<LocalApiConfig>>,
     pub http: reqwest::Client,
+    pub nutzung: Arc<Nutzung>,
 }
 
 /// Was `stop` braucht, um wirklich zu stoppen.
@@ -563,6 +676,7 @@ pub struct LocalApiServer {
     pub addr: SocketAddr,
     pub shutdown: Option<tokio::sync::oneshot::Sender<()>>,
     pub handle: Option<tauri::async_runtime::JoinHandle<()>>,
+    pub nutzung: Arc<Nutzung>,
 }
 
 impl LocalApiServer {
@@ -704,6 +818,27 @@ async fn handle_models(AxumState(state): AxumState<LocalApiState>) -> Response {
 /// ohne Zwischenspeicher weitergegeben. Alles andere waere ein Puffer, der
 /// genau die Eigenschaft zerstoert, wegen der jemand `stream: true` schreibt.
 async fn weiterleiten(state: LocalApiState, pfad: &str, pflichtfeld: &str, headers: HeaderMap, body: axum::body::Bytes) -> Response {
+    let modell = serde_json::from_slice::<serde_json::Value>(&body)
+        .ok()
+        .and_then(|j| j.get("model").and_then(|m| m.as_str()).map(str::to_string))
+        .unwrap_or_default();
+    let nutzung = Arc::clone(&state.nutzung);
+    let waechter = nutzung.beginn(&modell);
+    let antwort = weiterleiten_mit(state, pfad, pflichtfeld, headers, body, waechter).await;
+    if antwort.status().is_client_error() || antwort.status().is_server_error() {
+        nutzung.fehler();
+    }
+    antwort
+}
+
+async fn weiterleiten_mit(
+    state: LocalApiState,
+    pfad: &str,
+    pflichtfeld: &str,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+    waechter: Laufend,
+) -> Response {
     let mut json: serde_json::Value = match serde_json::from_slice(&body) {
         Ok(v) => v,
         Err(e) => {
@@ -813,6 +948,10 @@ async fn weiterleiten(state: LocalApiState, pfad: &str, pflichtfeld: &str, heade
                 )
             }
         };
+        if status.is_success() {
+            state.nutzung.zahlen(serde_json::from_slice::<serde_json::Value>(&bytes).ok().as_ref().and_then(usage_lesen));
+        }
+        drop(waechter);
         let raus = match serde_json::from_slice::<serde_json::Value>(&bytes) {
             Ok(mut v) => {
                 modell_zurueckschreiben(&mut v, &qualifiziert);
@@ -832,9 +971,14 @@ async fn weiterleiten(state: LocalApiState, pfad: &str, pflichtfeld: &str, heade
     // im Rest liegt — ein abgerissener Upstream soll Bytes verlieren duerfen,
     // wir nicht.
     let quelle = antwort.bytes_stream();
+    // Der Waechter reist im Zustand mit: laufend ist die Anfrage, bis das
+    // letzte Byte draussen ist oder der Client auflegt (dann faellt der Strom
+    // samt Waechter).
+    let erfolg = status.is_success();
+    let nutzung = Arc::clone(&state.nutzung);
     let strom = futures_util::stream::unfold(
-        (quelle, SseModellUmschreiber::neu(&qualifiziert), false),
-        |(mut quelle, mut um, fertig)| async move {
+        (quelle, SseModellUmschreiber::neu(&qualifiziert), false, Some(waechter), nutzung),
+        move |(mut quelle, mut um, fertig, mut waechter, nutzung)| async move {
             use futures_util::StreamExt;
             if fertig {
                 return None;
@@ -842,15 +986,20 @@ async fn weiterleiten(state: LocalApiState, pfad: &str, pflichtfeld: &str, heade
             match quelle.next().await {
                 Some(Ok(chunk)) => {
                     let raus = um.schub(&chunk);
-                    Some((Ok::<_, std::io::Error>(axum::body::Bytes::from(raus)), (quelle, um, false)))
+                    Some((Ok::<_, std::io::Error>(axum::body::Bytes::from(raus)), (quelle, um, false, waechter, nutzung)))
                 }
-                Some(Err(e)) => Some((
-                    Err(std::io::Error::other(e.to_string())),
-                    (quelle, um, true),
-                )),
+                Some(Err(e)) => {
+                    nutzung.fehler();
+                    waechter.take();
+                    Some((Err(std::io::Error::other(e.to_string())), (quelle, um, true, waechter, nutzung)))
+                }
                 None => {
                     let rest = um.schluss();
-                    Some((Ok(axum::body::Bytes::from(rest)), (quelle, um, true)))
+                    if erfolg {
+                        nutzung.zahlen(um.usage);
+                    }
+                    waechter.take();
+                    Some((Ok(axum::body::Bytes::from(rest)), (quelle, um, true, waechter, nutzung)))
                 }
             }
         },
@@ -1182,7 +1331,9 @@ pub async fn start_local_api(
             .connect_timeout(std::time::Duration::from_secs(5))
             .build()
             .map_err(|e| e.to_string())?,
+        nutzung: Arc::new(Nutzung::neu()),
     };
+    let nutzung = Arc::clone(&api_state.nutzung);
 
     let listener = tokio::net::TcpListener::bind(addr)
         .await
@@ -1200,7 +1351,7 @@ pub async fn start_local_api(
     });
 
     if let Ok(mut slot) = state.local_api.lock() {
-        *slot = Some(LocalApiServer { addr: echte_addr, shutdown: Some(tx), handle: Some(handle) });
+        *slot = Some(LocalApiServer { addr: echte_addr, shutdown: Some(tx), handle: Some(handle), nutzung });
     }
 
     Ok(serde_json::json!({
@@ -1235,6 +1386,17 @@ pub async fn local_api_status(state: tauri::State<'_, crate::state::AppState>) -
         .map(|a| serde_json::json!({ "running": true, "address": a.to_string() }))
         .unwrap_or_else(|| serde_json::json!({ "running": false }));
     Ok(laeuft)
+}
+
+/// Die Zahlen seit dem letzten Start der API, fuer Settings, Local API.
+#[tauri::command]
+pub fn local_api_usage(state: tauri::State<'_, crate::state::AppState>) -> serde_json::Value {
+    state
+        .local_api
+        .lock()
+        .ok()
+        .and_then(|s| s.as_ref().map(|x| x.nutzung.als_json()))
+        .unwrap_or_else(|| serde_json::json!({ "running": false }))
 }
 
 /// Ein frisches Token. Aufbewahrt wird es vom Frontend (dort liegt der
@@ -1381,7 +1543,7 @@ mod local_api_echt {
             upstreams: default_upstreams(),
             cors_origins: cors,
         };
-        let state = LocalApiState { cfg: Arc::new(RwLock::new(cfg)), http };
+        let state = LocalApiState { cfg: Arc::new(RwLock::new(cfg)), http, nutzung: Arc::new(Nutzung::neu()) };
         let l = tokio::net::TcpListener::bind(bind_addr(false, 0)).await.ok()?;
         let addr = l.local_addr().ok()?;
         let router = build_local_api_router(state);
@@ -1564,6 +1726,7 @@ mod local_api_echt {
             })),
             http: reqwest::Client::builder()
                 .connect_timeout(std::time::Duration::from_secs(5)).build().unwrap(),
+            nutzung: Arc::new(Nutzung::neu()),
         };
         let l = tokio::net::TcpListener::bind(bind_addr(false, port)).await
             .unwrap_or_else(|e| panic!("Port {} nicht frei: {}", port, e));
@@ -1838,6 +2001,79 @@ mod local_api_echt {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// GH Discussion #4 (kreake): what went through the API, counted per start.
+    /// A stand-in model server answers once plainly, once as a stream, once
+    /// without `usage`; a fourth request names a model nobody has.
+    #[tokio::test]
+    async fn die_api_zaehlt_was_durch_sie_laeuft() {
+        async fn chat(body: axum::body::Bytes) -> Response {
+            let j: serde_json::Value = serde_json::from_slice(&body).unwrap();
+            let stumm = j["messages"][0]["content"] == "no usage";
+            if j["stream"] == true {
+                let sse = "data: {\"model\":\"tiny\",\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n\
+                           data: {\"model\":\"tiny\",\"choices\":[],\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":3}}\n\n\
+                           data: [DONE]\n\n";
+                return Response::builder().header(header::CONTENT_TYPE, "text/event-stream").body(Body::from(sse)).unwrap();
+            }
+            let mut v = serde_json::json!({ "model": "tiny", "choices": [{ "message": { "content": "hi" } }] });
+            if !stumm {
+                v["usage"] = serde_json::json!({ "prompt_tokens": 5, "completion_tokens": 2 });
+            }
+            Json(v).into_response()
+        }
+        let attrappe = Router::new()
+            .route("/v1/models", get(|| async { Json(serde_json::json!({ "data": [{ "id": "tiny" }] })) }))
+            .route("/v1/chat/completions", post(chat));
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let oben = l.local_addr().unwrap();
+        tokio::spawn(async move { let _ = axum::serve(l, attrappe).await; });
+
+        let nutzung = Arc::new(Nutzung::neu());
+        let state = LocalApiState {
+            cfg: Arc::new(RwLock::new(LocalApiConfig {
+                port: 0, lan: false, token: "t0k".into(),
+                upstreams: vec![Upstream { lane_prefix: "ollama".into(), base: format!("http://{}/v1", oben) }],
+                cors_origins: Vec::new(),
+            })),
+            http: reqwest::Client::new(),
+            nutzung: Arc::clone(&nutzung),
+        };
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let api = l.local_addr().unwrap();
+        let router = build_local_api_router(state);
+        tokio::spawn(async move { let _ = axum::serve(l, router).await; });
+
+        let c = reqwest::Client::new();
+        let frage = |modell: &str, stream: bool, text: &str| {
+            c.post(format!("http://{}/v1/chat/completions", api)).bearer_auth("t0k")
+                .json(&serde_json::json!({ "model": modell, "stream": stream, "messages": [{ "role": "user", "content": text }] }))
+                .send()
+        };
+        assert_eq!(frage("ollama/tiny", false, "hi").await.unwrap().status(), 200);
+        let strom = frage("ollama/tiny", true, "hi").await.unwrap();
+        assert!(strom.text().await.unwrap().contains("[DONE]"));
+        assert_eq!(frage("ollama/tiny", false, "no usage").await.unwrap().status(), 200);
+        assert_eq!(frage("ollama/nobody", false, "hi").await.unwrap().status(), 404);
+
+        let z = nutzung.als_json();
+        assert_eq!(z["requests"], 4);
+        assert_eq!(z["failed"], 1);
+        assert_eq!(z["active"], 0, "a finished stream is no longer running");
+        assert_eq!(z["promptTokens"], 12);
+        assert_eq!(z["completionTokens"], 5);
+        assert_eq!(z["withoutCounts"], 1);
+        assert_eq!(z["lastModel"], "ollama/nobody");
+        assert!(z["since"].as_u64().unwrap() > 0);
+    }
+
+    #[test]
+    fn usage_wird_nur_gelesen_wo_es_steht() {
+        assert_eq!(usage_lesen(&serde_json::json!({ "usage": { "prompt_tokens": 4, "completion_tokens": 1 } })), Some((4, 1)));
+        assert_eq!(usage_lesen(&serde_json::json!({ "usage": { "prompt_tokens": 9, "total_tokens": 9 } })), Some((9, 0)));
+        assert_eq!(usage_lesen(&serde_json::json!({ "usage": {} })), None);
+        assert_eq!(usage_lesen(&serde_json::json!({ "choices": [] })), None);
+    }
 
     fn katalog() -> Vec<(Lane, String)> {
         vec![

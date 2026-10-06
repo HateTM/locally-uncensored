@@ -47,6 +47,32 @@ export function promptFilenamePrefix(prompt: string | undefined, isVideo: boolea
   return isVideo ? `${slug}__vid` : slug
 }
 
+/**
+ * Discord 2026-10-01 (theitalianstallion92): downloaded renders "mutated" into
+ * copies of other renders. ComfyUI numbers a file one past the highest it
+ * still finds for the same prefix, and since 3.0.3 a gallery delete moves the
+ * file to the Recycle Bin, so the next run with the same prompt took the freed
+ * name. A download asks ComfyUI by name, so the older gallery entry handed out
+ * the newer picture. A short tag per run gives every run its own prefix, and a
+ * name can never point at two pictures again.
+ */
+export function tagOutputPrefixes(graph: ComfyApiGraph, tag: string): ComfyApiGraph {
+  const out: ComfyApiGraph = {}
+  for (const [id, node] of Object.entries(graph)) {
+    const prefix = node.inputs?.filename_prefix
+    out[id] = typeof prefix === 'string' && prefix
+      ? { ...node, inputs: { ...node.inputs, filename_prefix: `${prefix}_${tag}` } }
+      : node
+  }
+  return out
+}
+
+/** Six letters and digits, new for every run. */
+export function newRunTag(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(6))
+  return Array.from(bytes, (b) => 'abcdefghijklmnopqrstuvwxyz0123456789'[b % 36]).join('')
+}
+
 /** Decode node for video latents: tiled whenever the install has the node.
  *  A full-frame WanVAE decode next to a resident 14B UNet left 312 MB of VRAM
  *  on a 12 GB card; CUDA paged through the Windows driver instead of throwing,

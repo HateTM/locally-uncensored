@@ -17,7 +17,7 @@
  * Ein Ausdruck faellt ueber jede zweite Datei: ueber `'https://...'`, dessen
  * zwei Schraegstriche wie ein Kommentar aussehen, ueber ein `/[;&|`\n]/`, dessen
  * Backtick wie eine Schablone aussieht, und ueber jedes "don't" im JSX-Text.
- * Der Syntaxbaum kennt den Unterschied, und die vier Ausnahmen unten sind
+ * Der Syntaxbaum kennt den Unterschied, und die fuenf Ausnahmen unten sind
  * dadurch wirklich die einzigen.
  *
  * Run: npx vitest run src/lib/__tests__/keine-deutschen-saetze-in-der-oberflaeche.test.ts
@@ -50,8 +50,8 @@ const DEUTSCHE_WOERTER = [
 const DEUTSCH = new RegExp(`\\b(${DEUTSCHE_WOERTER.join('|')})\\b`)
 
 /**
- * Die vier Dateien, in denen Deutsch in einem Literal richtig ist, mit dem
- * Grund. Keine davon schreibt dem Kunden etwas hin: drei lesen, was er getippt
+ * Die fuenf Dateien, in denen Deutsch in einem Literal richtig ist, mit dem
+ * Grund. Keine davon schreibt dem Kunden etwas hin: vier lesen, was er getippt
  * hat, und eine sagt denselben Satz zweimal.
  *
  * Jeder Eintrag wird unten dagegen gehalten, dass er ueberhaupt noch einen
@@ -62,6 +62,7 @@ const DEUTSCH_MIT_GRUND: Record<string, string> = {
   'lib/tool-selection.ts': 'Deutsche Suchhinweise, gegen die getippte Saetze gelesen werden.',
   'lib/turn-summary.ts': 'Absichtlich zweisprachig, deutscher und englischer Satz in einer Zeile.',
   'lib/release-notes.ts': 'Ein englischer Blattsatz, der eine getippte deutsche Wendung zitiert.',
+  'lib/plan-gate.ts': 'Deutsche Planbitten, gegen die getippte Saetze gelesen werden.',
 }
 
 /** Jede .ts und .tsx unter den Ordnern, ohne die Testbaeume. */
@@ -127,7 +128,7 @@ describe('kein deutscher Satz in einem Zeichenkettenliteral', () => {
     expect(offen, offen.join('\n')).toEqual([])
   })
 
-  it('und jede der vier Ausnahmen traegt noch das Deutsch, fuer das sie dasteht', () => {
+  it('und jede der fuenf Ausnahmen traegt noch das Deutsch, fuer das sie dasteht', () => {
     // Sonst waechst die Liste der Ausnahmen, waehrend der Grund laengst weg ist.
     const mitTreffer = new Set(treffer().map((t) => t.datei))
     for (const datei of Object.keys(DEUTSCH_MIT_GRUND)) {

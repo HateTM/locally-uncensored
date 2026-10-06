@@ -2,6 +2,9 @@ import { expect, test, type Page } from '@playwright/test'
 import type { SyncedMemoryRecord } from '../src/api/cloud/memory-sync'
 import { isRecord } from './support/recorded'
 
+// The app's own port, from the configured baseURL, so a second config on another port still works.
+const appPort = () => new URL(test.info().project.use.baseURL ?? 'http://localhost:5273').port
+
 async function accountFixture(page: Page) {
   await page.evaluate(async () => {
     const authPath = '/src/stores/cloudAuthStore.ts'
@@ -21,7 +24,7 @@ test('foreground cancellation stops a held pull and leaving the collection cance
   let finish: (() => Promise<void>) | undefined
   let hold = true
   let reads = 0
-  await page.route('**/*', route => new URL(route.request().url()).port === '5273' ? route.continue() : route.abort())
+  await page.route('**/*', route => new URL(route.request().url()).port === appPort() ? route.continue() : route.abort())
   await page.route('**/api/memory/sync**', async route => {
     expect(route.request().method()).toBe('GET')
     reads++
@@ -69,7 +72,7 @@ test('foreground cancellation stops a held pull and leaving the collection cance
 test('explicit UI sync uploads, downloads, preserves conflicts and persists shared deletion', async ({ page }, testInfo) => {
   let records: SyncedMemoryRecord[] = []
   let writes = 0
-  await page.route('**/*', route => new URL(route.request().url()).port === '5273' ? route.continue() : route.abort())
+  await page.route('**/*', route => new URL(route.request().url()).port === appPort() ? route.continue() : route.abort())
   await page.route('**/api/memory/sync**', async route => {
     expect(route.request().headers().authorization).toBe('Bearer synthetic-proof-token')
     if (route.request().method() === 'POST') {
@@ -187,7 +190,7 @@ test(`a ${responseMode} first-upload response cannot revive a locally deleted me
   let records: SyncedMemoryRecord[] = []
   let lostResponse = false
   let finish: (() => Promise<void>) | undefined
-  await page.route('**/*', route => new URL(route.request().url()).port === '5273' ? route.continue() : route.abort())
+  await page.route('**/*', route => new URL(route.request().url()).port === appPort() ? route.continue() : route.abort())
   await page.route('**/api/memory/sync**', async route => {
     if (route.request().method() === 'GET') return route.fulfill({ json: { ownerId: 'owner-a', records, next: null } })
     const body: unknown = route.request().postDataJSON()

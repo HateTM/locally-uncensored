@@ -35,12 +35,85 @@ export function isGroupChat(groupModels: string[] | undefined): groupModels is s
   return Array.isArray(groupModels) && groupModels.length >= GROUP_CHAT_MIN
 }
 
-export function groupSystemPrompt(model: string, allModels: string[], personaPrompt: string): string {
-  const others = allModels.filter((m) => m !== model).map((m) => `"${m}"`).join(', ')
-  const line =
-    `You are "${model}", one of several AI models answering in the same group conversation with ${others}. ` +
-    `What the other models said arrives as user messages that start with a [model-name] tag; the assistant messages are your own earlier turns. ` +
-    `Answer as yourself in your own voice, add something new, and do not repeat what another model already said.`
+/**
+ * Who sits at the table, and as whom (3.0.5, samvenice on Discord).
+ *
+ * Until now every model in a group answered under the ONE persona of the
+ * chat, so two models were both told "You are Sherlock" and promptly spoke
+ * over each other. Each participant can now have its own persona, picked next
+ * to its name in the group menu and stored on the conversation
+ * (`groupPersonas`, model name to persona id).
+ *
+ * A participant without an entry is exactly what it was before: it follows
+ * the chat's own persona setting and is called by its model name. A persona
+ * id that no longer exists (the persona was deleted) reads as no entry, so a
+ * stale pick never leaves a participant without a role.
+ */
+export interface GroupSpeaker {
+  /** The name the others see this participant under. */
+  name: string
+  /** Its own persona prompt, absent when it follows the chat's setting. */
+  personaPrompt?: string
+}
+
+export function groupSpeakers(
+  models: readonly string[],
+  groupPersonas: Readonly<Record<string, string>> | undefined,
+  personas: readonly { id: string; name: string; systemPrompt: string }[],
+): Record<string, GroupSpeaker> {
+  const picked = models.map((model) => {
+    const id = groupPersonas?.[model]
+    return { model, persona: id ? personas.find((p) => p.id === id) : undefined }
+  })
+  const speakers: Record<string, GroupSpeaker> = {}
+  for (const { model, persona } of picked) {
+    if (!persona) {
+      speakers[model] = { name: model }
+      continue
+    }
+    // Two participants on the same persona still need two names, or the tags
+    // in the shared history could not tell them apart.
+    const shared = picked.filter((other) => other.persona?.name === persona.name).length > 1
+    speakers[model] = {
+      name: shared ? `${persona.name} (${model})` : persona.name,
+      personaPrompt: persona.systemPrompt,
+    }
+  }
+  return speakers
+}
+
+/** True when at least one participant speaks as a persona of its own. */
+export function hasOwnPersonas(speakers: Readonly<Record<string, GroupSpeaker>> | undefined): speakers is Record<string, GroupSpeaker> {
+  return !!speakers && Object.values(speakers).some((s) => s.personaPrompt !== undefined)
+}
+
+export function groupSystemPrompt(
+  model: string,
+  allModels: string[],
+  personaPrompt: string,
+  /** From `groupSpeakers`. Without own personas the wording stays the one
+   *  every group has had since v1. */
+  speakers?: Readonly<Record<string, GroupSpeaker>>,
+): string {
+  let line: string
+  if (hasOwnPersonas(speakers)) {
+    const nameOf = (m: string) => speakers[m]?.name ?? m
+    const self = nameOf(model)
+    const others = allModels.filter((m) => m !== model).map((m) => `"${nameOf(m)}"`).join(', ')
+    // The role belongs to ONE participant. Saying so, and naming the others,
+    // is what keeps a model from answering as the character next to it.
+    line =
+      `In this group conversation you are "${self}" and only "${self}". The other participants are ${others}. ` +
+      `What they said arrives as user messages that start with a [name] tag; the assistant messages are your own earlier turns. ` +
+      `Stay in your own role: never speak as another participant and never write their lines. ` +
+      `Add something new, and do not repeat what another participant already said.`
+  } else {
+    const others = allModels.filter((m) => m !== model).map((m) => `"${m}"`).join(', ')
+    line =
+      `You are "${model}", one of several AI models answering in the same group conversation with ${others}. ` +
+      `What the other models said arrives as user messages that start with a [model-name] tag; the assistant messages are your own earlier turns. ` +
+      `Answer as yourself in your own voice, add something new, and do not repeat what another model already said.`
+  }
   return personaPrompt ? `${personaPrompt}\n\n${line}` : line
 }
 
@@ -91,14 +164,20 @@ export function stripImpersonatedSpeakers(text: string, otherModels: string[]): 
  *  above say who is talking, which is how attribution worked all along. It
  *  also fixes round one for the second speaker, whose prompt used to end on
  *  somebody else's assistant turn and asked it to carry on mid-sentence. */
-export function groupHistory(messages: Message[], model: string): GroupWireMessage[] {
+export function groupHistory(
+  messages: Message[],
+  model: string,
+  /** From `groupSpeakers`: a participant with its own persona is tagged with
+   *  that name, everyone else with the model name as before. */
+  speakers?: Readonly<Record<string, GroupSpeaker>>,
+): GroupWireMessage[] {
   return messages
     .filter((m) => m.role !== 'system' && m.content.trim() !== '')
     .map((m) => {
       const foreign = m.role === 'assistant' && !!m.modelId && m.modelId !== model
       return {
         role: (foreign ? 'user' : m.role) as GroupWireMessage['role'],
-        content: foreign ? `[${m.modelId}] ${m.content}` : m.content,
+        content: foreign ? `[${speakers?.[m.modelId!]?.name ?? m.modelId}] ${m.content}` : m.content,
         ...(m.images?.length ? { images: m.images.map((i) => ({ data: i.data, mimeType: i.mimeType })) } : {}),
       }
     })

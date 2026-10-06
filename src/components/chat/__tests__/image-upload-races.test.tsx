@@ -19,7 +19,7 @@ beforeEach(() => {
 afterEach(cleanup)
 function setup() {
   const send = vi.fn()
-  const { container } = render(<ChatInput onSend={send} onStop={() => {}} isGenerating={false} />)
+  const { container } = render(<ChatInput onSend={send} onStop={() => {}} isGenerating={false} modelReady={() => true} />)
   const input = container.querySelector('input[type=file]')!
   const attach = () => fireEvent.change(input, { target: { files: [new File(['data'], 'test.png', { type: 'image/png' })] } })
   return { send, attach }

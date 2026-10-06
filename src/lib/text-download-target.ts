@@ -80,3 +80,21 @@ export function resolveTextDownloadTarget(input: TextDownloadTargetInput): TextD
   // directory no installed program reads.
   return 'builtin'
 }
+
+/**
+ * Why an Ollama-only model (one listed by its Ollama tag) cannot be pulled
+ * right now, or null when the pull may go ahead.
+ *
+ * The only real blocker is Ollama being switched off. The pull used to also
+ * demand an Ollama model already active in the chat picker, and a user with
+ * no Ollama model yet could never get one: the picker had nothing of Ollama's
+ * to pick, the download wanted one picked (applejames, Discord 2026-09-15 and
+ * 2026-09-20, "It won't let me download Ollama models unless I have Ollama
+ * models installed"). The model can only ever land in Ollama, so there is no
+ * wrong backend to protect against, and the picker lists it once it is there.
+ */
+export function ollamaOnlyDownloadBlock(modelName: string, ollamaEnabled: boolean): string | null {
+  return ollamaEnabled
+    ? null
+    : `${modelName} only runs on Ollama. Enable the Ollama provider (Settings → Providers) before downloading.`
+}

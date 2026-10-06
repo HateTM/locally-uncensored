@@ -1,6 +1,8 @@
+import { transparentPrompt } from '../lib/transparent-image'
 import {
   classifyModel, findMatchingVAE, findMatchingCLIP, findFluxCLIPPair,
   isHunyuanVideo15, findHunyuan15Encoders, isLtx2, wan22Expert,
+  findMiniMaxAudioVAE, findLtx25AudioVAE, isFastH3,
   findMatchingAudioEncoder, findMatchingClipVision, findFramePackCLIPPair,
 } from './comfyui'
 import type { ModelType, GenerateParams, VideoParams } from './comfyui'
@@ -59,6 +61,7 @@ function specDefault(spec: ComfyInputValue | undefined): ComfyInputValue | undef
 // dort). Re-Export, damit bestehende Importpfade unverändert bleiben.
 export { promptFilenamePrefix, videoDecodeNode } from './comfyui-graph'
 import { promptFilenamePrefix, videoDecodeNode, addVideoSaveNodes } from './comfyui-graph'
+import { extraReferenceSlots, isQwenImageEditModel } from '../lib/edit-references'
 
 // ─── Strategy Detection ───
 
@@ -83,10 +86,12 @@ export type WorkflowStrategy =
   | 'unet_ltx'        // LTX-Video 0.9: UNETLoader / checkpoint + CLIPLoader(ltxv, T5) + EmptyLTXVLatentVideo
   | 'ltx2'            // LTX-2 / 2.3: checkpoint + LTXAVTextEncoderLoader(Gemma) + audio VAE, distilled sigmas, optional x2 stage
   | 'wan22_moe'       // Wan 2.2 A14B: high-noise + low-noise UNETs, KSamplerAdvanced hand-off, wan_2.1_vae
+  | 'ltx25'           // LTX 2.5: two pass picture-and-sound graph (distilled), needs ComfyUI 0.32.0
   | 'unet_mochi'      // Mochi: UNETLoader + CLIPLoader + VAELoader + EmptyMochiLatentVideo
   | 'unet_cosmos'     // Cosmos: UNETLoader + CLIPLoader(oldt5) + VAELoader + EmptyCosmosLatentVideo
   | 'svd'             // SVD: ImageOnlyCheckpointLoader + SVD_img2vid_Conditioning
   | 'framepack'       // FramePack: Kijai wrapper + image input
+  | 'minimaxh3'       // MiniMax H3: UNET + CLIPLoader(minimax) + video VAE + audio VAE, picture and sound in one pass
   // cogvideo / pyramidflow / allegro are gone on purpose (2026-07-24). Their
   // builders emitted node names no wrapper registers, so those model types now
   // resolve to 'unavailable' with an honest reason instead of a ComfyUI 400.
@@ -107,6 +112,17 @@ interface StrategyResult {
    */
   installHint?: { pack: string; url: string }
 }
+
+/** The sentence an older ComfyUI gets, per model (not global): the version is
+ *  the release that brought the node the lane cannot run without. Read from the
+ *  ComfyUI tags on 2026-10-02: LTX 2.5 in 0.32.0, FastH3's sparse attention in
+ *  0.35.0, YuE2 in 0.36.0. "Update ComfyUI" in the text is what Create keys the
+ *  one click update on (needsComfyUpdate). */
+export const LTX25_NEEDS_UPDATE = 'LTX 2.5 needs ComfyUI 0.32.0 or newer. Update ComfyUI in Settings.'
+/** A step distillation LoRA names its step count (minimax_h3_fl2v_turbo_8step_...). */
+const H3_STEP_LORA = /turbo\D*?(\d+)\s*_?steps?/i
+export const FASTH3_NEEDS_UPDATE = 'FastH3 needs ComfyUI 0.35.0 or newer. Update ComfyUI in Settings.'
+export const YUE2_NEEDS_UPDATE = 'YuE2 needs ComfyUI 0.36.0 or newer. Update ComfyUI in Settings.'
 
 export function determineStrategy(
   modelType: ModelType,
@@ -195,6 +211,22 @@ export function determineStrategy(
     return { strategy: 'unavailable', reason: 'Krea 2 requires UNETLoader + CLIPLoader + VAELoader nodes' }
   }
 
+  // LTX 2.5 → UNET + CLIPLoader(ltxv, Gemma 4) + both VAEs + the two pass graph
+  // of the official templates. The model patch arrived in ComfyUI 0.32.0
+  // together with LTXVDualCFGGuider (comfy_extras/nodes_lt.py, PR 15499), and
+  // that node is the one this lane cannot run without, so its absence is the
+  // version check: an older install gets the update sentence instead of a 400.
+  if (modelType === 'ltx25') {
+    const hasDual = nodes.samplers.includes('LTXVDualCFGGuider')
+    if (hasUNET && hasCLIPLoader && hasVAELoader && hasDual) {
+      return { strategy: 'ltx25', reason: 'LTX 2.5 → UNETLoader + CLIPLoader(ltxv) + LTXVDualCFGGuider (two pass, sound)' }
+    }
+    if (hasUNET && hasCLIPLoader && hasVAELoader) {
+      return { strategy: 'unavailable', reason: LTX25_NEEDS_UPDATE }
+    }
+    return { strategy: 'unavailable', reason: 'LTX 2.5 requires UNETLoader + CLIPLoader + VAELoader nodes' }
+  }
+
   // LTX Video → UNET + LTXVLatentVideo (no separate VAE needed)
   if (modelType === 'ltx') {
     if (modelName && isLtx2(modelName)) {
@@ -204,6 +236,17 @@ export function determineStrategy(
       return { strategy: 'unet_ltx', reason: 'LTX Video → UNETLoader + EmptyLTXVLatentVideo' }
     }
     return { strategy: 'unavailable', reason: 'LTX Video requires UNETLoader + CLIPLoader nodes' }
+  }
+
+  // MiniMax H3 → its own encode node, which also builds the joint
+  // picture-and-sound latent. The nodes arrived with ComfyUI PR #15224, so an
+  // older install gets the update sentence (fixable in place) instead of a 400.
+  if (modelType === 'minimaxh3') {
+    const hasH3 = nodes.latentInit.includes('MiniMaxH3ImageToVideo')
+    if (hasUNET && hasCLIPLoader && hasVAELoader && hasH3) {
+      return { strategy: 'minimaxh3', reason: 'MiniMax H3 → UNETLoader + CLIPLoader(minimax) + MiniMaxH3ImageToVideo' }
+    }
+    return { strategy: 'unavailable', reason: 'MiniMax H3 needs a newer ComfyUI. Update ComfyUI in Settings.' }
   }
 
   // Wan 2.2 TI2V-5B → UNET + CLIP + Wan 2.2 VAE + Wan22ImageToVideoLatent (T2V & I2V)
@@ -400,13 +443,6 @@ const SNIFFED_FAMILY: Partial<Record<WorkflowStrategy, SniffedFamily>> = {
 /** Latent spaces that start from EmptySD3LatentImage (16 channels). */
 const SD3_LATENT_STRATEGIES = new Set<WorkflowStrategy>(['unet_chroma', 'unet_hidream', 'unet_sd3', 'unet_lumina2', 'unet_qwenimage1'])
 
-/** Qwen-Image-Edit (2509/2511) and FireRed edit files take the source image
- *  through TextEncodeQwenImageEditPlus; plain Qwen-Image does latent img2img. */
-export function isQwenImageEditModel(name: string): boolean {
-  const lower = name.toLowerCase()
-  return lower.includes('edit') && (lower.includes('qwen') || lower.includes('firered'))
-}
-
 /** Verbatim from comfy_extras/nodes_lumina2.py (SYSTEM_PROMPT["superior"]) and
  *  the negative of the NetaYume Lumina template. */
 const LUMINA2_POSITIVE_SYSTEM = 'You are an assistant designed to generate superior images with the superior degree of image-text alignment based on textual prompts or user prompts.'
@@ -417,7 +453,7 @@ const LUMINA2_NEGATIVE_SYSTEM = 'You are an assistant designed to generate low-q
 function registrySpecsNamedIn(type: ModelType, message: string): ComponentSpec[] {
   const req = COMPONENT_REGISTRY[type]
   if (!req) return []
-  return [req.vae, req.clip, req.clipSecondary].filter(
+  return [req.vae, req.clip, req.clipSecondary, req.audioVae, req.upscaler].filter(
     (s): s is ComponentSpec => !!s?.downloadUrl && message.includes(s.downloadFilename),
   )
 }
@@ -658,20 +694,38 @@ export async function buildDynamicWorkflow(
 
   // ─── Wrapper Strategies (custom node pipelines — completely different node chains) ───
 
+  // A wrapper builder looks up its own encoder and VAEs. A file it cannot
+  // find has to reach Create as that sentence plus its download, never as a
+  // reason to try the old checkpoint graph (Discord 2026-09-29 and 10-01:
+  // "CheckpointLoaderSimple: Value not in list" for MiniMax H3).
+  const wrapper = async (build: () => Promise<ComfyApiGraph> | ComfyApiGraph) => {
+    try {
+      return await build()
+    } catch (err) {
+      if (!(err instanceof Error) || err instanceof WorkflowUnavailableError) throw err
+      throw new WorkflowUnavailableError(err.message, strategy, undefined, { missing: registrySpecsNamedIn(type, err.message) })
+    }
+  }
   if (strategy === 'svd') {
-    return buildSVDWorkflow(params as VideoParams, seed, nodes, allNodes)
+    return wrapper(() => buildSVDWorkflow(params as VideoParams, seed, nodes, allNodes))
   }
   if (strategy === 'wan22') {
-    return await buildWan22Workflow(params as VideoParams, seed, nodes, allNodes)
+    return wrapper(() => buildWan22Workflow(params as VideoParams, seed, nodes, allNodes))
   }
   if (strategy === 'framepack') {
-    return await buildFramePackWorkflow(params as VideoParams, seed, nodes, allNodes)
+    return wrapper(() => buildFramePackWorkflow(params as VideoParams, seed, nodes, allNodes))
   }
   if (strategy === 'ltx2') {
     return await buildLtx2Workflow(params as VideoParams, seed, allNodes, { inCheckpoints, inUnets })
   }
   if (strategy === 'wan22_moe') {
     return await buildWan22MoeWorkflow(params as VideoParams, seed, nodes, allNodes, listedUnets)
+  }
+  if (strategy === 'minimaxh3') {
+    return wrapper(() => buildMiniMaxH3Workflow(params as VideoParams, seed, allNodes))
+  }
+  if (strategy === 'ltx25') {
+    return wrapper(() => buildLtx25Workflow(params as VideoParams, seed, allNodes))
   }
 
   // ─── Standard Strategies (UNET/Checkpoint → CLIP → Latent → KSampler → VAEDecode) ───
@@ -847,7 +901,7 @@ export async function buildDynamicWorkflow(
       }
     } else {
       try {
-        clip = await findMatchingCLIP(type, params.model)
+        clip = await findMatchingCLIP(type, params.model, params.qwenTextEncoder)
       } catch (clipErr) {
         if (!carriesClip) {
           const message = clipErr instanceof Error ? clipErr.message : 'Required text encoder not found in ComfyUI.'
@@ -1064,6 +1118,11 @@ export async function buildDynamicWorkflow(
   // the source goes through TextEncodeQwenImageEditPlus on both sides and is
   // the latent itself, sampled at denoise 1.0 like the template.
   const isQwen1Edit = !isVideo && strategy === 'unet_qwenimage1' && !!gp.inputImage && isQwenImageEditModel(params.model)
+  // Extra reference images, only for a family that takes them and only as
+  // many as it has slots for (lib/edit-references); anything else ignores them.
+  const references = (isQwenEdit || isQwen1Edit)
+    ? (gp.referenceImages ?? []).slice(0, extraReferenceSlots(type, params.model))
+    : []
   if (isQwen1Edit && !allNodes['TextEncodeQwenImageEditPlus']) {
     throw new WorkflowUnavailableError(
       'Qwen-Image-Edit needs a newer ComfyUI (TextEncodeQwenImageEditPlus). Update ComfyUI, then try again.',
@@ -1097,17 +1156,23 @@ export async function buildDynamicWorkflow(
     // t2i template, which also carries the widget and never uses it.
     const qwenInputs: ComfyNodeInputs = {
       clip: [clipSourceId, clipOutputSlot],
-      prompt: params.prompt,
+      // Transparent background: the model writes an alpha channel when the
+      // prompt is wrapped the way the official template says, and SaveImage
+      // below keeps it (lib/transparent-image.ts). An edit takes its picture
+      // from the reference, so the wrapper stays out of it.
+      prompt: gp.transparent && !isQwenEdit ? transparentPrompt(params.prompt) : params.prompt,
       negative_prompt: params.negativePrompt || '',
       resolution: qwenEditResolution(params.width, params.height),
     }
     if (isQwenEdit) {
-      const qwenImageId = String(n++)
-      workflow[qwenImageId] = {
-        class_type: 'LoadImage',
-        inputs: { image: gp.inputImage },
+      // The source is image_1 and sets the output shape; the references the
+      // user added follow as image_2 and up, the names the prompt uses.
+      const images = [gp.inputImage!, ...references]
+      for (const [i, image] of images.entries()) {
+        const loadId = String(n++)
+        workflow[loadId] = { class_type: 'LoadImage', inputs: { image } }
+        qwenInputs[`images.image_${i + 1}`] = [loadId, 0]
       }
-      qwenInputs['images.image_1'] = [qwenImageId, 0]
       qwenInputs.vae = [vaeSourceId, vaeOutputSlot]
     }
     workflow[posId] = { class_type: 'TextEncodeQwenImage21', inputs: qwenInputs }
@@ -1121,8 +1186,16 @@ export async function buildDynamicWorkflow(
       workflow[scaleId] = { class_type: 'FluxKontextImageScale', inputs: { image: [loadId, 0] } }
       qwen1EditImageRef = [scaleId, 0]
     }
+    // References go in unscaled as image2 and image3: the node resizes every
+    // extra image itself, only image1 sets the canvas.
+    const refInputs: ComfyNodeInputs = {}
+    for (const [i, image] of references.entries()) {
+      const refId = String(n++)
+      workflow[refId] = { class_type: 'LoadImage', inputs: { image } }
+      refInputs[`image${i + 2}`] = [refId, 0]
+    }
     const editInputs = (prompt: string): ComfyNodeInputs => ({
-      clip: [clipSourceId, clipOutputSlot], prompt, vae: [vaeSourceId, vaeOutputSlot], image1: qwen1EditImageRef!,
+      clip: [clipSourceId, clipOutputSlot], prompt, vae: [vaeSourceId, vaeOutputSlot], image1: qwen1EditImageRef!, ...refInputs,
     })
     workflow[posId] = { class_type: 'TextEncodeQwenImageEditPlus', inputs: editInputs(params.prompt) }
     workflow[negId] = { class_type: 'TextEncodeQwenImageEditPlus', inputs: editInputs(params.negativePrompt || '') }
@@ -2135,6 +2208,291 @@ async function buildWan22MoeWorkflow(
   return workflow
 }
 
+/** MiniMax H3 counts frames in blocks of 17 plus 5 (124 is about five
+ *  seconds at 24 fps). Rounds UP, as the official template does, so a request
+ *  never comes back shorter than asked. */
+export function snapMiniMaxH3Length(frames: number): number {
+  const f = Math.max(5, Number.isFinite(frames) ? Math.round(frames) : 124)
+  return f + ((5 - (f % 17)) + 17) % 17
+}
+
+/**
+ * MiniMax H3 (Discord, throwaway 2026-09-26: "shows up as an image model").
+ * One model writes picture and sound together, wired as the official
+ * Comfy-Org t2v/i2v and r2v templates do: the encode node builds the joint
+ * latent, BasicGuider and SamplerCustomAdvanced sample it, and VAEDecode and
+ * VAEDecodeAudio each pull their half back out before CreateVideo muxes them.
+ *
+ * Two sets of weights share the family. fl2va takes the source image as the
+ * first frame; ref2va takes it as a reference the prompt can call
+ * <Picture 1>.
+ */
+async function buildMiniMaxH3Workflow(params: VideoParams, seed: number, allNodes: NodePresence): Promise<ComfyApiGraph> {
+  const fast = isFastH3(params.model)
+  const isRef2va = !fast && /ref2va/i.test(params.model)
+  const encodeNode = isRef2va ? 'MiniMaxH3ReferenceToVideo' : 'MiniMaxH3ImageToVideo'
+  requireNodes(allNodes, [encodeNode, 'BasicGuider', 'SamplerCustomAdvanced', 'VAEDecodeAudio'], 'MiniMax H3')
+  if (fast) {
+    // FastH3 runs on FastVideo's sparse attention, which ComfyUI has had since
+    // 0.35.0 (BlockSparseAttention), and it only distilled text to video.
+    requireRelease(allNodes, ['BlockSparseAttention', 'MiniMaxH3SigmaShift'], FASTH3_NEEDS_UPDATE, 'minimaxh3')
+    // Read in comfy_extras/nodes_sparse_attention.py (ComfyUI master, 2026-10-02):
+    // BlockSparseAttention does NOT use Triton. It calls the compiled sol_attn
+    // kernels of comfy_kitchen (CUDA sm_80+ on Linux and Windows x64 wheels, or
+    // HIP). Where they are not available (older GPU, CPU) h3_eligible() returns
+    // False and the block runs the model's normal dense attention, so the graph
+    // is valid on every machine and only loses the speed gain. No platform gate.
+    if (params.inputImage) {
+      throw new WorkflowUnavailableError('FastH3 makes video from a prompt only. Pick MiniMax H3 to start from an image.', 'minimaxh3')
+    }
+  }
+
+  const workflow: ComfyApiGraph = {}
+  let n = 1
+  const snap32 = (v: number | undefined, def: number) => Math.max(32, Math.round(((v && v > 0) ? v : def) / 32) * 32)
+  const width = snap32(params.width, 1344)
+  const height = snap32(params.height, 768)
+  const length = snapMiniMaxH3Length(params.frames || 124)
+
+  const [clipName, vaeName, audioVaeName] = await Promise.all([
+    findMatchingCLIP('minimaxh3', params.model),
+    findMatchingVAE('minimaxh3'),
+    findMiniMaxAudioVAE(),
+  ])
+
+  const unetId = String(n++)
+  const clipId = String(n++)
+  const vaeId = String(n++)
+  const audioVaeId = String(n++)
+  addUnetLoader(workflow, unetId, params.model, allNodes)
+  workflow[clipId] = { class_type: 'CLIPLoader', inputs: { clip_name: clipName, type: 'minimax', device: 'default' } }
+  workflow[vaeId] = { class_type: 'VAELoader', inputs: { vae_name: vaeName } }
+  workflow[audioVaeId] = { class_type: 'VAELoader', inputs: { vae_name: audioVaeName } }
+
+  // Video LoRAs (the turbo ones included) patch the model only.
+  let modelSrc = unetId
+  const stack = normalizeLoraList(params.lora)
+  const stackStrengths = normalizeLoraStrengths(params.loraStrength, stack.length)
+  // FastH3 is already the 8 step distillation. A step LoRA (the H3 turbo one)
+  // on top of it distils twice, so on FastH3 it is left out; every other LoRA
+  // in the stack still patches the model.
+  const keep = stack.map((l) => !(fast && H3_STEP_LORA.test(l)))
+  const loras = stack.filter((_, i) => keep[i])
+  const strengths = stackStrengths.filter((_, i) => keep[i])
+  loras.forEach((loraName, i) => {
+    const loraId = String(n++)
+    workflow[loraId] = {
+      class_type: 'LoraLoaderModelOnly',
+      inputs: { lora_name: loraName, strength_model: strengths[i], model: [modelSrc, 0] },
+    }
+    modelSrc = loraId
+  })
+
+  if (fast) {
+    // The official template (video_fastvideo_fasth3_t2v) patches the model with
+    // the distilled schedule's shifts (video 10, audio 3, not the base model's
+    // 12) and then the VSA sparse attention the checkpoint was trained with
+    // (keep 10 percent of the video cubes). The template also picks the comfy
+    // kitchen attention for the dense layers; that choice is left to ComfyUI's
+    // default because the option is missing on cards that cannot run it.
+    const shiftId = String(n++)
+    const sparseId = String(n++)
+    workflow[shiftId] = { class_type: 'MiniMaxH3SigmaShift', inputs: { model: [modelSrc, 0], shift_video: 10, shift_audio: 3 } }
+    workflow[sparseId] = {
+      class_type: 'BlockSparseAttention',
+      inputs: {
+        model: [shiftId, 0], selection: 'vsa', 'selection.keep_percent': 10,
+        start_percent: 0.2, end_percent: 1, dense_blocks: '', min_tokens: 12288, extra_tokens: 256,
+        sink_conditioning: 'exact_kv_and_rows', verbose: false,
+      },
+    }
+    modelSrc = sparseId
+  }
+
+  const encodeInputs: ComfyNodeInputs = { clip: [clipId, 0], vae: [vaeId, 0], prompt: params.prompt, width, height, length }
+  if (params.inputImage) {
+    // The node stretches a first frame to the canvas; a center crop keeps
+    // the picture's proportions instead.
+    const imageId = String(n++)
+    const scaleId = String(n++)
+    workflow[imageId] = { class_type: 'LoadImage', inputs: { image: params.inputImage } }
+    workflow[scaleId] = { class_type: 'ImageScale', inputs: { image: [imageId, 0], upscale_method: 'lanczos', width, height, crop: 'center' } }
+    if (isRef2va) encodeInputs['ref_images.ref_image_0'] = [scaleId, 0]
+    else encodeInputs.first_frame = [scaleId, 0]
+  }
+  if (isRef2va) {
+    encodeInputs.audio_vae = [audioVaeId, 0]
+    encodeInputs.ref_image_size = 'match'
+  }
+  const encodeId = String(n++)
+  workflow[encodeId] = { class_type: encodeNode, inputs: encodeInputs }
+
+  const guiderId = String(n++)
+  const schedulerId = String(n++)
+  const samplerSelectId = String(n++)
+  const noiseId = String(n++)
+  const sampleId = String(n++)
+  workflow[guiderId] = { class_type: 'BasicGuider', inputs: { model: [modelSrc, 0], conditioning: [encodeId, 0] } }
+  // The H3 turbo LoRA says its step count in its name (minimax_h3_fl2v_turbo_
+  // 8step_...), and the official template runs it at exactly that (Discord
+  // 2026-10-02, checkedlemon788's ComfyUI screenshot: turbo_steps 8). The
+  // slider's 20 or more would only cost time on a 24 GB model.
+  const turbo = loras.map((l) => H3_STEP_LORA.exec(l)).find((m) => m)
+  // FastH3 is the 8 step checkpoint: the template runs exactly 8.
+  const steps = fast ? 8 : turbo ? Number(turbo[1]) : params.steps
+  workflow[schedulerId] = { class_type: 'BasicScheduler', inputs: { model: [modelSrc, 0], scheduler: params.scheduler || 'simple', steps, denoise: 1 } }
+  workflow[samplerSelectId] = { class_type: 'KSamplerSelect', inputs: { sampler_name: params.sampler || 'res_multistep' } }
+  workflow[noiseId] = { class_type: 'RandomNoise', inputs: { noise_seed: seed } }
+  workflow[sampleId] = {
+    class_type: 'SamplerCustomAdvanced',
+    inputs: { noise: [noiseId, 0], guider: [guiderId, 0], sampler: [samplerSelectId, 0], sigmas: [schedulerId, 0], latent_image: [encodeId, 1] },
+  }
+
+  const decodeId = String(n++)
+  const decodeAudioId = String(n++)
+  workflow[decodeId] = { class_type: 'VAEDecode', inputs: { samples: [sampleId, 0], vae: [vaeId, 0] } }
+  workflow[decodeAudioId] = { class_type: 'VAEDecodeAudio', inputs: { samples: [sampleId, 0], vae: [audioVaeId, 0] } }
+
+  addVideoWithAudioOutput(workflow, n, decodeId, params.fps || 24, [decodeAudioId, 0], allNodes, params.prompt)
+  return workflow
+}
+
+/** LTX counts frames in blocks of 8 plus 1 (97 and 121 are the usual ones).
+ *  Rounds to the nearest block, never below 9. */
+export function snapLtx25Length(frames: number): number {
+  const f = Number.isFinite(frames) && frames > 0 ? Math.round(frames) : 121
+  return Math.max(9, Math.round((f - 1) / 8) * 8 + 1)
+}
+
+/** The two sigma ladders of the distilled model: 8 steps on the half size
+ *  picture, then 3 after the latent upscale. Straight from the official
+ *  video_ltx2_5_t2v / _i2v templates. */
+const LTX25_SIGMAS_FIRST = '1.0, 0.99375, 0.9875, 0.98125, 0.975, 0.909375, 0.725, 0.421875, 0.0'
+const LTX25_SIGMAS_SECOND = '0.85, 0.7250, 0.4219, 0.0'
+
+/**
+ * LTX 2.5 (Lightricks, ComfyUI 0.32.0). Picture and sound come out of one
+ * model in two passes, wired as the official Comfy-Org templates
+ * video_ltx2_5_t2v and video_ltx2_5_i2v do:
+ *
+ *   pass 1  an empty picture latent at HALF size plus an empty sound latent,
+ *           joined (LTXVConcatAVLatent), sampled with the 8 step ladder
+ *   upscale the picture half is split off, doubled by the latent upscaler and
+ *           joined with the sound half again
+ *   pass 2  3 more steps at full size
+ *   output  tiled VAE decode for the frames, the audio VAE for the sound,
+ *           CreateVideo muxes them
+ *
+ * A start image (i2v) is cut to the canvas, preprocessed and written into the
+ * first frame twice: at strength 0.7 on the half size latent, at 1 after the
+ * upscale. The official template also has a prompt enhancer (a second, 5 GB
+ * Gemma) and an auto duration head; both are optional there and left out here.
+ * Multishot needs nothing in the graph: it is the model's own behaviour.
+ */
+async function buildLtx25Workflow(params: VideoParams, seed: number, allNodes: NodePresence): Promise<ComfyApiGraph> {
+  requireRelease(allNodes, ['LTXVDualCFGGuider'], LTX25_NEEDS_UPDATE, 'ltx25')
+  requireNodes(allNodes, [
+    'LTXVConditioning', 'EmptyLTXVLatentVideo', 'LTXVEmptyLatentAudio', 'LTXVConcatAVLatent', 'LTXVSeparateAVLatent',
+    'LTXVLatentUpsampler', 'LatentUpscaleModelLoader', 'LTXVAudioVAEDecode', 'ManualSigmas', 'KSamplerSelect',
+    'RandomNoise', 'SamplerCustomAdvanced', 'VAEDecodeTiled', 'CLIPTextEncode',
+  ], 'LTX 2.5')
+  if (params.inputImage) requireNodes(allNodes, ['LTXVImgToVideoInplace', 'LTXVPreprocess', 'LoadImage', 'ImageScale'], 'LTX 2.5 image to video')
+
+  // The graph is the distilled one. The dev weights need a different schedule
+  // and guidance, and running them on this one gives noise.
+  if (/dev/i.test(params.model) && !/distilled/i.test(params.model)) {
+    throw new WorkflowUnavailableError(
+      'LU runs the distilled LTX 2.5 model. Pick the file with "distilled" in its name.',
+      'ltx25',
+    )
+  }
+
+  // The first pass runs at half size, so the final canvas must halve onto the
+  // 32 pixel grid the video VAE works on: multiples of 64.
+  const snap64 = (v: number | undefined, def: number) => Math.max(256, Math.round(((v && v > 0) ? v : def) / 64) * 64)
+  const width = snap64(params.width, 1280)
+  const height = snap64(params.height, 704)
+  const length = snapLtx25Length(params.frames || 121)
+  const fps = params.fps || 24
+
+  const [clipName, vaeName, audioVaeName] = await Promise.all([
+    findMatchingCLIP('ltx25', params.model),
+    findMatchingVAE('ltx25'),
+    findLtx25AudioVAE(),
+  ])
+  const upscalerName = nodeComboOptions(allNodes, 'LatentUpscaleModelLoader', 'model_name')
+    .find((m) => /ltx[._\- ]?2[._\- ]?5/i.test(m) && /spatial/i.test(m))
+  if (!upscalerName) {
+    throw new Error('No LTX 2.5 latent upscaler found. Download "ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors" from the Model Manager.')
+  }
+
+  const workflow: ComfyApiGraph = {}
+  let n = 1
+  const add = (class_type: string, inputs: ComfyNodeInputs): string => {
+    const id = String(n++)
+    workflow[id] = { class_type, inputs }
+    return id
+  }
+
+  // The small variant is a GGUF quant (ComfyUI-GGUF), the full one a safetensors file.
+  const unetId = String(n++)
+  addUnetLoader(workflow, unetId, params.model, allNodes)
+  const clipId = add('CLIPLoader', { clip_name: clipName, type: 'ltxv', device: 'default' })
+  const vaeId = add('VAELoader', { vae_name: vaeName })
+  const audioVaeId = add('VAELoader', { vae_name: audioVaeName })
+  const upscaleLoaderId = add('LatentUpscaleModelLoader', { model_name: upscalerName })
+
+  const posId = add('CLIPTextEncode', { text: params.prompt, clip: [clipId, 0] })
+  const negId = add('CLIPTextEncode', { text: params.negativePrompt || '', clip: [clipId, 0] })
+  const condId = add('LTXVConditioning', { positive: [posId, 0], negative: [negId, 0], frame_rate: fps })
+
+  let imageSrc: string | null = null
+  if (params.inputImage) {
+    const loadId = add('LoadImage', { image: params.inputImage })
+    const scaleId = add('ImageScale', { image: [loadId, 0], upscale_method: 'lanczos', width, height, crop: 'center' })
+    imageSrc = add('LTXVPreprocess', { image: [scaleId, 0], img_compression: 18 })
+  }
+  const pin = (latent: string, strength: number): string =>
+    imageSrc
+      ? add('LTXVImgToVideoInplace', { vae: [vaeId, 0], image: [imageSrc, 0], latent: [latent, 0], strength, bypass: false })
+      : latent
+
+  // Pass 1: half size.
+  const emptyId = add('EmptyLTXVLatentVideo', { width: width / 2, height: height / 2, length, batch_size: 1 })
+  const videoLatent1 = pin(emptyId, 0.7)
+  const audioLatentId = add('LTXVEmptyLatentAudio', { frames_number: length, frame_rate: fps, batch_size: 1, audio_vae: [audioVaeId, 0] })
+  const joint1 = add('LTXVConcatAVLatent', { video_latent: [videoLatent1, 0], audio_latent: [audioLatentId, 0] })
+  const guider1 = add('LTXVDualCFGGuider', { model: [unetId, 0], positive: [condId, 0], negative: [condId, 1], video_cfg: 1, audio_cfg: 1 })
+  const sampler1 = add('KSamplerSelect', { sampler_name: 'euler_ancestral' })
+  const sigmas1 = add('ManualSigmas', { sigmas: LTX25_SIGMAS_FIRST })
+  const noise1 = add('RandomNoise', { noise_seed: seed })
+  const sample1 = add('SamplerCustomAdvanced', {
+    noise: [noise1, 0], guider: [guider1, 0], sampler: [sampler1, 0], sigmas: [sigmas1, 0], latent_image: [joint1, 0],
+  })
+  const split1 = add('LTXVSeparateAVLatent', { av_latent: [sample1, 0] })
+
+  // Upscale the picture half, keep the sound half.
+  const upscaled = add('LTXVLatentUpsampler', { samples: [split1, 0], upscale_model: [upscaleLoaderId, 0], vae: [vaeId, 0] })
+  const videoLatent2 = pin(upscaled, 1)
+  const joint2 = add('LTXVConcatAVLatent', { video_latent: [videoLatent2, 0], audio_latent: [split1, 1] })
+
+  // Pass 2: full size.
+  const guider2 = add('LTXVDualCFGGuider', { model: [unetId, 0], positive: [condId, 0], negative: [condId, 1], video_cfg: 1, audio_cfg: 1 })
+  const sampler2 = add('KSamplerSelect', { sampler_name: 'euler_ancestral' })
+  const sigmas2 = add('ManualSigmas', { sigmas: LTX25_SIGMAS_SECOND })
+  const noise2 = add('RandomNoise', { noise_seed: seed })
+  const sample2 = add('SamplerCustomAdvanced', {
+    noise: [noise2, 0], guider: [guider2, 0], sampler: [sampler2, 0], sigmas: [sigmas2, 0], latent_image: [joint2, 0],
+  })
+  const split2 = add('LTXVSeparateAVLatent', { av_latent: [sample2, 0] })
+
+  const decodeId = add('VAEDecodeTiled', { samples: [split2, 0], vae: [vaeId, 0], tile_size: 512, overlap: 64, temporal_size: 64, temporal_overlap: 16 })
+  const audioDecodeId = add('LTXVAudioVAEDecode', { samples: [split2, 1], audio_vae: [audioVaeId, 0] })
+
+  addVideoWithAudioOutput(workflow, n, decodeId, fps, [audioDecodeId, 0], allNodes, params.prompt)
+  return workflow
+}
+
 // ─── 2.5.8 specialized local lanes (music / talking character / motion) ─────
 //
 // These intents run on node families that ship with CURRENT ComfyUI cores
@@ -2176,8 +2534,19 @@ function requireNodes(allNodes: NodePresence, needed: string[], lane: string): v
     throw new WorkflowUnavailableError(
       `${lane} needs ComfyUI nodes this install does not have yet (${missing.join(', ')}). ${UPDATE_COMFY_HINT}`,
       'unavailable',
+      undefined,
+      { needsComfyUpdate: true },
     )
   }
+}
+
+/** Like requireNodes, for a model that arrived in a known ComfyUI release: the
+ *  missing marker node means an older install, and the answer is the update
+ *  sentence for THAT model (not a list of node names), flagged so Create offers
+ *  the one click update. */
+function requireRelease(allNodes: NodePresence, marker: string[], updateSentence: string, strategy: WorkflowStrategy): void {
+  if (marker.every((m) => allNodes[m])) return
+  throw new WorkflowUnavailableError(updateSentence, strategy, undefined, { needsComfyUpdate: true })
 }
 
 /** UNET loader that understands GGUF quants: .gguf files load through the
@@ -2260,6 +2629,59 @@ function addVideoWithAudioOutput(
 }
 
 /**
+ * YuE2 (m-a-p, ComfyUI 0.36.0). Songs with vocals from a style and lyrics, the
+ * graph of the official template audio_yue2_text2music with ABC planning off:
+ * the checkpoint's own text model writes the music tokens
+ * (YuE2GenerateMusic, which also reports how many seconds it made), a
+ * KSampler turns them into audio latents of exactly that length
+ * (EmptyYuE2LatentAudio) and the checkpoint's VAE decodes them.
+ *
+ * The sampler is the template's (32 steps, cfg 1, dpm_2, sgm_uniform) and is
+ * pinned: the music sliders are tuned for ACE Step. The prompt is the style,
+ * the lyrics field is the lyrics. An empty ABC input makes the node switch to
+ * its own "off" mode, as the template does.
+ */
+function buildYue2Workflow(params: LocalOpParams, seed: number, allNodes: NodePresence): ComfyApiGraph {
+  requireRelease(allNodes, ['YuE2GenerateMusic', 'EmptyYuE2LatentAudio'], YUE2_NEEDS_UPDATE, 'unavailable')
+  requireNodes(allNodes, ['ConditioningZeroOut', 'KSampler', 'VAEDecodeAudio', 'SaveAudioMP3'], 'Local music')
+
+  const workflow: ComfyApiGraph = {}
+  let n = 1
+  const seconds = Math.max(5, Math.min(600, params.seconds || 120))
+
+  const ckptId = String(n++)
+  workflow[ckptId] = { class_type: 'CheckpointLoaderSimple', inputs: { ckpt_name: params.model } }
+  const musicId = String(n++)
+  workflow[musicId] = {
+    class_type: 'YuE2GenerateMusic',
+    inputs: {
+      clip: [ckptId, 1], style: params.prompt, lyrics: params.lyrics || '', abc: '', seed, mode: 'full',
+      max_duration: seconds, temperature: 1, top_p: 0.95, top_k: 100, repetition_penalty: 1.2,
+    },
+  }
+  const negId = String(n++)
+  workflow[negId] = { class_type: 'ConditioningZeroOut', inputs: { conditioning: [musicId, 0] } }
+  const latentId = String(n++)
+  workflow[latentId] = { class_type: 'EmptyYuE2LatentAudio', inputs: { seconds: [musicId, 1], batch_size: 1 } }
+  const samplerId = String(n++)
+  workflow[samplerId] = {
+    class_type: 'KSampler',
+    inputs: {
+      model: [ckptId, 0], positive: [musicId, 0], negative: [negId, 0], latent_image: [latentId, 0],
+      seed, steps: 32, cfg: 1.0, sampler_name: 'dpm_2', scheduler: 'sgm_uniform', denoise: 1.0,
+    },
+  }
+  const decodeId = String(n++)
+  workflow[decodeId] = { class_type: 'VAEDecodeAudio', inputs: { samples: [samplerId, 0], vae: [ckptId, 2] } }
+  const saveId = String(n++)
+  workflow[saveId] = {
+    class_type: 'SaveAudioMP3',
+    inputs: { audio: [decodeId, 0], filename_prefix: promptFilenamePrefix(params.prompt, false), quality: 'V0' },
+  }
+  return workflow
+}
+
+/**
  * Music (ACE-Step). All-in-one checkpoint → ACE text encode (tags + lyrics) →
  * KSampler → VAEDecodeAudio → SaveAudioMP3. ACE-Step 1.5 checkpoints route
  * through the 1.5 encoder/latent pair (different node ids AND different latent
@@ -2268,6 +2690,7 @@ function addVideoWithAudioOutput(
  * encoder runs an LLM pass that would double the cost for no benefit.
  */
 export function buildMusicWorkflow(params: LocalOpParams, seed: number, allNodes: NodePresence): ComfyApiGraph {
+  if (classifyModel(params.model) === 'yue2') return buildYue2Workflow(params, seed, allNodes)
   const workflow: ComfyApiGraph = {}
   let n = 1
   const isAce15 = /1[._-]?5/.test(params.model.toLowerCase().replace(/\.safetensors$/, '').replace(/^.*ace[_-]?step/, ''))

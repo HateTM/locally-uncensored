@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
+import { usePopoverPlatz } from '../../hooks/usePopoverPlatz'
 import { useDismissOnEscape } from '../../hooks/useDismissOnEscape'
 import { ChevronDown, ShieldCheck, Zap, ClipboardList } from 'lucide-react'
 import { useChatStore } from '../../stores/chatStore'
@@ -16,9 +17,10 @@ import {
  *
  * Lives in the CODE composer only, hooked in through ChatInput's
  * `composerActions` so ChatInput itself stays surface-neutral and the Chat tab
- * inherits nothing. The mode is remembered per conversation, with
- * settings.codexDefaultMode as the fallback; picking one here NEVER writes the
- * global settings, so another conversation and the Agent surface are untouched.
+ * inherits nothing. The mode is remembered per conversation; a new one is
+ * created in the last Ask/Bypass picked here (codexStore.startConversationMode),
+ * otherwise settings.codexDefaultMode applies. Picking one here NEVER writes the global settings,
+ * so a running conversation and the Agent surface are untouched.
  *
  * A switch takes effect from the NEXT send. While a run is in flight the
  * trigger says so and the pick is parked, because the running turn resolved its
@@ -56,6 +58,8 @@ const MODE_ACTIVE_ROW: Record<CodexMode, string> = {
 export function CodexModeDropdown({ openUpward = false }: { openUpward?: boolean } = {}) {
   const [open, setOpen] = useState(false)
   useDismissOnEscape(open, () => setOpen(false))
+  const menuRef = useRef<HTMLDivElement>(null)
+  const menu = usePopoverPlatz(menuRef, open, { bevorzugt: openUpward ? 'oben' : 'unten' })
   const activeConvId = useChatStore((s) => s.activeConversationId)
   const defaultMode = useSettingsStore((s) => s.settings.codexDefaultMode)
   const modeByConversation = useCodexStore((s) => s.modeByConversation)
@@ -119,7 +123,11 @@ export function CodexModeDropdown({ openUpward = false }: { openUpward?: boolean
       {open && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className={`absolute right-0 z-50 w-60 rounded-lg lu-elevated py-1.5 ${openUpward ? 'bottom-full mb-1' : 'top-full mt-1'}`}>
+          {/* left-0: the trigger sits at the LEFT of the composer row, so a
+              menu hung off its right edge ran 240px to the left and the panel
+              cut off the first letters ("ypass permissions", Gegenprobe
+              01.10.2026). The room is to the right. */}
+          <div ref={menuRef} style={menu.style} className={`absolute left-0 z-50 w-60 rounded-lg lu-elevated py-1.5 overflow-y-auto scrollbar-thin ${menu.nachOben ? 'bottom-full mb-1' : 'top-full mt-1'}`}>
             {!activeConvId ? (
               <p className="px-3 py-1.5 text-[0.5rem] text-gray-400">
                 Open a coding chat first, the mode lives on the conversation.

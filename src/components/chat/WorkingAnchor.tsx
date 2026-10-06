@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 import { formatElapsed } from '../../lib/format-elapsed'
+import { useGenerationStore } from '../../stores/generationStore'
+import { useRunActivityStore } from '../../stores/runActivityStore'
 
 interface Props {
   isRunning: boolean
@@ -8,7 +10,22 @@ interface Props {
    * whenever the surface knows better, because a wait that looks like work
    * is how a nine minute approval stall got mistaken for progress (G15b). */
   label?: string
+  /** The conversation whose run this is. Its booked start (generationStore
+   *  `runs[id].bookedAt`) drives the clock, so leaving the tab and coming
+   *  back does not start the count again at 0 (Gegenprobe 30.09.2026: an
+   *  eight minute run read "12s" after a tab switch). */
+  conversationId?: string | null
 }
+
+/**
+ * When the explicit label of a conversation's run appeared, so the clock next
+ * to "Waiting for your approval" says how long the card has been waiting, not
+ * how long the run has been going ("Waiting for your approval 6s" the moment
+ * the card came up, Gegenprobe 01.10.2026). Module scope, like the run's
+ * booked start, so a tab switch does not start the wait at 0 again.
+ */
+const labelSince = new Map<string, number>()
+const labelKey = (conversationId: string, label: string) => `${conversationId}\u0000${label}`
 
 /**
  * THE bottom-of-run status line (G14-6, David 2026-08-07): the word "Working"
@@ -18,8 +35,12 @@ interface Props {
  * exactly one anchor that says the app is alive, what it is doing, and for
  * how long. Reference is the Claude desktop app.
  */
-export function WorkingAnchor({ isRunning, label }: Props) {
+export function WorkingAnchor({ isRunning, label, conversationId }: Props) {
   const [elapsed, setElapsed] = useState(0)
+  const bookedAt = useGenerationStore((s) => (conversationId ? s.runs[conversationId]?.bookedAt : undefined))
+  // What the run reports it is doing (a tool call being written). An explicit
+  // label from the surface still wins: an approval wait is the more urgent fact.
+  const activity = useRunActivityStore((s) => (conversationId ? s.activity[conversationId] : undefined))
 
   // The clock resets in the render where `isRunning` flips, not in an effect
   // afterwards. Two things were wrong with the effect version: `useRef(Date.now())`
@@ -28,22 +49,41 @@ export function WorkingAnchor({ isRunning, label }: Props) {
   // lands AFTER paint — so the first quarter second of a new run showed the
   // previous run's time. React's documented "adjust state while rendering"
   // shape re-runs only this component, before anything paints.
+  // Same render-time reset when the clock switches between the run and an
+  // explicit label, so the old count never paints under the new word.
   const [wasRunning, setWasRunning] = useState(isRunning)
-  if (wasRunning !== isRunning) {
+  const [wasLabel, setWasLabel] = useState(label)
+  if (wasRunning !== isRunning || wasLabel !== label) {
     setWasRunning(isRunning)
+    setWasLabel(label)
     setElapsed(0)
   }
 
   useEffect(() => {
+    // A label that is gone (or a run that ended under it) gives its start up,
+    // so the next approval of this conversation counts from its own start.
+    if (conversationId && (!isRunning || !label)) {
+      for (const k of labelSince.keys()) if (k.startsWith(`${conversationId}\u0000`)) labelSince.delete(k)
+    }
     if (!isRunning) return
-    // The start belongs to this run, so it lives in the run's own closure —
-    // no ref, and nothing left over from the previous run to read back.
-    const start = Date.now()
+    // An explicit label counts from when it appeared; otherwise the run's
+    // booked start; otherwise the start belongs to this mount, in the effect's
+    // own closure, with nothing left over from the previous run to read back.
+    let start: number
+    if (label && conversationId) {
+      const key = labelKey(conversationId, label)
+      if (!labelSince.has(key)) labelSince.set(key, Date.now())
+      start = labelSince.get(key)!
+    } else if (label) {
+      start = Date.now()
+    } else {
+      start = bookedAt ?? Date.now()
+    }
     const interval = setInterval(() => {
-      setElapsed(Math.floor((Date.now() - start) / 1000))
+      setElapsed(Math.max(0, Math.floor((Date.now() - start) / 1000)))
     }, 250)
     return () => clearInterval(interval)
-  }, [isRunning])
+  }, [isRunning, bookedAt, label, conversationId])
 
   if (!isRunning) return null
 
@@ -85,7 +125,12 @@ export function WorkingAnchor({ isRunning, label }: Props) {
           aria-hidden="true"
           className="lu-band-dot w-1.5 h-1.5 rounded-full bg-lu-accent-edge dark:bg-lu-accent shrink-0"
         />
-        <span className="lu-tool-shimmer t-control">{label ?? 'Working'}</span>
+        <span className="lu-tool-shimmer t-control">{label ?? activity?.label ?? 'Working'}</span>
+        {!label && activity?.detail && (
+          <span aria-hidden="true" className="lu-hud-num t-micro text-gray-500 dark:text-gray-500">
+            {activity.detail}
+          </span>
+        )}
         {elapsed >= 1 && (
           <span aria-hidden="true" className="lu-hud-num t-micro text-gray-500 dark:text-gray-500">
             {formatElapsed(elapsed)}

@@ -29,7 +29,7 @@ import { useCreateStore, deriveIntent } from '../createStore'
 import { visibleIntents } from '../../components/create/experimental/intents'
 import type { CreateIntent } from '../createStore'
 
-const sichtbar = () => new Set(visibleIntents('local', true).map((m) => m.id))
+const sichtbar = () => new Set(visibleIntents('local', true, true).map((m) => m.id))
 const jetzt = () => deriveIntent(useCreateStore.getState())
 
 describe('der Mac strandet nicht auf einem Werkzeug, das er lokal nicht hat', () => {
@@ -41,7 +41,7 @@ describe('der Mac strandet nicht auf einem Werkzeug, das er lokal nicht hat', ()
   it('drei Werkzeuge sind lokal auf dem Mac wirklich versteckt', () => {
     // Ohne diesen Fall koennte der Rest gruen sein, weil gar nichts versteckt
     // ist. Genau das waere die stille Fassung des Fehlers.
-    const alle = new Set(visibleIntents('cloud', true).map((m) => m.id))
+    const alle = new Set(visibleIntents('cloud', true, true).map((m) => m.id))
     const fehlend = [...alle].filter((id) => !sichtbar().has(id))
     expect(fehlend.sort()).toEqual(['animate', 'edit', 'removebg'])
   })
@@ -61,7 +61,7 @@ describe('der Mac strandet nicht auf einem Werkzeug, das er lokal nicht hat', ()
     useCreateStore.setState({ backend: 'cloud' })
     useCreateStore.getState().setIntent('removebg')
     useCreateStore.getState().setBackend('local')
-    const liste = visibleIntents('local', true)
+    const liste = visibleIntents('local', true, true)
     expect(liste.findIndex((m) => m.id === jetzt())).toBeGreaterThan(-1)
   })
 

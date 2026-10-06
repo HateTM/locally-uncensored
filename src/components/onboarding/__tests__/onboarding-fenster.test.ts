@@ -113,10 +113,18 @@ describe('die Dekoration folgt dem Hauptfenster der jeweiligen Plattform', () =>
   it('Windows: rahmenlos und transparent ohne DWM-Schatten, wie das Hauptfenster', () => {
     expect(win.decorations).toBe(false)
     expect(win.transparent).toBe(true)
-    expect(RUST).toContain('#[cfg(not(target_os = "macos"))]')
-    expect(RUST).toContain('.decorations(false).transparent(true)')
+    expect(RUST).toContain('#[cfg(target_os = "windows")]\n    let builder = builder.decorations(false).transparent(true);')
     expect(RUST).toContain('#[cfg(target_os = "windows")]')
     expect(RUST).toContain('window.set_shadow(false)')
+  })
+
+  // GH #145 (Bazzite, RX 9060 XT, Wayland und X11): ein transparentes
+  // WebKitGTK-Fenster verschwindet, sobald es den Fokus hat.
+  it('Linux: rahmenlos wie Windows, aber deckend, Haupt- und Onboarding-Fenster', () => {
+    const lin = JSON.parse(read('src-tauri', 'tauri.linux.conf.json')).app.windows[0]
+    expect(lin.decorations).toBe(false)
+    expect(lin.transparent).toBe(false)
+    expect(RUST).toContain('#[cfg(target_os = "linux")]\n    let builder = builder.decorations(false);')
   })
 
   it('rahmenlos braucht eine Ziehfläche — der Streifen bleibt, festgenagelt', () => {

@@ -475,8 +475,10 @@ function ToolCallBlockImpl({ toolCall, onApprove, onReject }: Props) {
                 </pre>
               )}
 
-              {/* Error */}
-              {toolCall.error && (
+              {/* Error. Not when the result above already says it: a refused
+                  path showed "Path escapes the allowed workspace" twice
+                  (3.0.4 box run). */}
+              {toolCall.error && !(toolCall.result ?? '').includes(toolCall.error.trim()) && (
                 <pre className="text-[0.55rem] leading-relaxed text-gray-500 dark:text-gray-500 bg-gray-50 dark:bg-white/[0.02] rounded px-2 py-1">
                   {toolCall.error}
                 </pre>

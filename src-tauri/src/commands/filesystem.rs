@@ -558,21 +558,15 @@ fn resolve_path(path: &str, chat_id: Option<&str>, working_dir: Option<&str>) ->
     contain_within(&root, &candidate)
 }
 
-/// True when `path` LOOKS like the workspace ROOT itself ("", ".", "./",
-/// trailing slashes) rather than a named subpath. Used to decide whether a
-/// missing directory answers as the empty per-chat sandbox root.
-///
-/// A guess on the raw string, and it is wrong in both directions: it misses
-/// `"unterordner/.."` (which resolves to the root) and it claims `"  "` and
-/// `".\\"` (which resolve to ordinary files inside it, on a platform where a
-/// backslash is an ordinary character). That is affordable for its ONE caller —
-/// `fs_list`, where the answer only decides whether a missing directory reads
-/// as an empty listing or as "Not a directory", and either way nothing is
-/// written. It is NOT affordable for a write; see `reject_root_as_write_target`.
-fn is_workspace_root_path(path: &str) -> bool {
-    let t = path.trim().replace('\\', "/");
-    let t = t.trim_end_matches('/');
-    t.is_empty() || t == "."
+/// True when `dir`, already resolved, IS the workspace root of this chat.
+/// `fs_list` and `fs_search` answer a root that does not exist yet as empty
+/// (a fresh workspace has no files), every other missing path stays an error.
+/// Mutual containment like `reject_root_as_write_target`, so `"./."`,
+/// `"a/.."` and the absolute spelling all count, and case folds on Windows.
+fn resolves_to_workspace_root(dir: &Path, chat_id: Option<&str>, working_dir: Option<&str>) -> bool {
+    let root = lexical_normalize(&workspace_root(chat_id, working_dir));
+    let dir = lexical_normalize(dir);
+    is_within(&root, &dir) && is_within(&dir, &root)
 }
 
 /// KF-15 / KF-12: refuse a write whose target IS the workspace root.
@@ -587,10 +581,8 @@ fn is_workspace_root_path(path: &str) -> bool {
 /// a 6-byte file containing `GEHEIM` at the workspace root. The caller chose
 /// both the place and the content.
 ///
-/// ON THE RESOLVED PATH, NOT ON THE STRING. `is_workspace_root_path` above is a
-/// string guess with errors in both directions; a write cannot pay for either.
-/// The resolved path has already been through `contain_within`, so comparing it
-/// to the root is exact.
+/// ON THE RESOLVED PATH, NOT ON THE STRING. The resolved path has already been
+/// through `contain_within`, so comparing it to the root is exact.
 ///
 /// MUTUAL CONTAINMENT, NOT `==`. Same idiom as `may_be_a_picked_root`'s `same`
 /// closure — it is the only comparison in this file that folds case on Windows
@@ -816,6 +808,129 @@ pub fn fs_write(path: String, content: String, chatId: Option<String>, workingDi
     }))
 }
 
+/// The largest file a chat attachment may be. The WebView enforces the same
+/// number before it reads the file (src/lib/chat-files.ts); this is the side
+/// that cannot be talked out of it.
+const WRITE_BYTES_CAP: u64 = 64 * 1024 * 1024;
+
+/// The hidden sibling a binary upload grows in until its last chunk arrived.
+fn upload_part_path(target: &Path) -> Result<PathBuf, String> {
+    let parent = target.parent().ok_or_else(|| "No parent directory".to_string())?;
+    let name = target
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .ok_or_else(|| "No file name".to_string())?;
+    Ok(parent.join(format!(".{name}.lu-part")))
+}
+
+/// Put a BINARY file into the workspace, in base64 chunks, through the same
+/// jail as every other fs command (`resolve_path` -> `contain_within`).
+///
+/// This is how a file attached in the chat reaches the agent's working folder
+/// (3.0.5, applejames on Discord: a ROM file for the model to look at).
+/// `fs_write` cannot carry it: it takes text and rewrites line endings.
+///
+/// CHUNKED, because the alternative is one IPC message with the whole file in
+/// base64: 4/3 of the file as a string in the WebView, again as JSON, again in
+/// Rust. The chat has been taken down by exactly that shape of memory use
+/// before (see chat_attachments.rs). `offset` is where this chunk starts and
+/// must be the number of bytes already received, so a lost or repeated chunk
+/// is an error and never a silently damaged file.
+///
+/// NEVER OVER AN EXISTING FILE. With a folder workspace the root is the
+/// user's real project, and an attachment that happens to share a name with a
+/// file there must not replace it. The caller picks another name and tries
+/// again. For the same reason the bytes grow in a hidden `.name.lu-part` file
+/// and only the last chunk renames it into place: the visible file is either
+/// absent or complete, also for an agent tool that looks at the folder in the
+/// middle of the upload.
+#[tauri::command]
+#[allow(non_snake_case)]
+pub async fn fs_write_bytes(
+    path: String,
+    base64: String,
+    offset: u64,
+    last: bool,
+    chatId: Option<String>,
+    workingDirectory: Option<String>,
+) -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        fs_write_bytes_sync(path, base64, offset, last, chatId, workingDirectory)
+    })
+    .await
+    .map_err(|e| format!("fs_write_bytes task failed to run: {e}"))?
+}
+
+#[allow(non_snake_case)]
+pub(crate) fn fs_write_bytes_sync(
+    path: String,
+    base64: String,
+    offset: u64,
+    last: bool,
+    chatId: Option<String>,
+    workingDirectory: Option<String>,
+) -> Result<serde_json::Value, String> {
+    use std::io::Write;
+
+    let full = resolve_path(&path, chatId.as_deref(), workingDirectory.as_deref())?;
+    reject_root_as_write_target(
+        &workspace_root(chatId.as_deref(), workingDirectory.as_deref()),
+        &full,
+    )?;
+    if full.exists() {
+        return Err(format!("File already exists: {}", full.display()));
+    }
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(base64.as_bytes())
+        .map_err(|_| "Invalid base64 data".to_string())?;
+    let total = offset.saturating_add(bytes.len() as u64);
+    if total > WRITE_BYTES_CAP {
+        return Err(format!(
+            "File is too large to attach: more than {} bytes",
+            WRITE_BYTES_CAP
+        ));
+    }
+
+    let part = upload_part_path(&full)?;
+    if let Some(parent) = full.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("Create dir: {}", os_error::english(&e)))?;
+    }
+    let mut file = if offset == 0 {
+        // A first chunk starts over, also over the leftover of an upload that
+        // was abandoned half way.
+        fs::File::create(&part)
+    } else {
+        let have = fs::metadata(&part).map(|m| m.len()).unwrap_or(0);
+        if have != offset {
+            return Err(format!(
+                "Upload out of order: expected the chunk at byte {}, got the one at byte {}",
+                have, offset
+            ));
+        }
+        fs::OpenOptions::new().append(true).open(&part)
+    }
+    .map_err(|e| format!("Write error: {}", os_error::english(&e)))?;
+    if let Err(e) = file.write_all(&bytes) {
+        drop(file);
+        let _ = fs::remove_file(&part);
+        return Err(format!("Write error: {}", os_error::english(&e)));
+    }
+    drop(file);
+
+    if !last {
+        return Ok(serde_json::json!({ "status": "partial", "bytes": total }));
+    }
+    if let Err(e) = fs::rename(&part, &full) {
+        let _ = fs::remove_file(&part);
+        return Err(format!("Write error (rename): {}", os_error::english(&e)));
+    }
+    Ok(serde_json::json!({
+        "status": "saved",
+        "path": full.to_string_lossy(),
+        "bytes": total,
+    }))
+}
+
 #[tauri::command]
 #[allow(non_snake_case)]
 pub fn fs_list(
@@ -860,8 +975,12 @@ pub fn fs_list(
         // measures this function, and
         // `the_dev_server_answers_the_root_the_same_way` reads the dev-server's
         // own source so the two cannot drift apart again.
-        let cleaned = normalize_duplicate_drive_prefix(&path);
-        if is_workspace_root_path(&cleaned) && !Path::new(&cleaned).is_absolute() {
+        //
+        // The root is recognised on the RESOLVED path, not on the string. The
+        // string guess knew "", "." and "./" only; Mistral listed "./." in the
+        // 3.0.4 box run and got "Not a directory" for its own fresh Code
+        // workspace, then told the user to check the path.
+        if resolves_to_workspace_root(&dir, chatId.as_deref(), workingDirectory.as_deref()) {
             return Ok(serde_json::json!({ "entries": [], "count": 0 }));
         }
         return Err(format!("Not a directory: {}", dir.display()));
@@ -942,6 +1061,10 @@ pub fn fs_search(
 ) -> Result<serde_json::Value, String> {
     let dir = resolve_path(&path, chatId.as_deref(), workingDirectory.as_deref())?;
     if !dir.is_dir() {
+        // Same answer as fs_list: a workspace that has no file yet has no match.
+        if resolves_to_workspace_root(&dir, chatId.as_deref(), workingDirectory.as_deref()) {
+            return Ok(serde_json::json!({ "results": [], "count": 0 }));
+        }
         return Err(format!("Not a directory: {}", dir.display()));
     }
 
@@ -1108,7 +1231,7 @@ pub async fn save_binary_file_dialog(
 
 #[cfg(test)]
 mod tests {
-    use super::{allow_root_for_test, is_workspace_root_path, normalize_to_existing_style, resolve_path};
+    use super::{allow_root_for_test, normalize_to_existing_style, resolve_path};
     use crate::os_paths::test_dir;
     use std::path::Path;
 
@@ -1185,20 +1308,6 @@ mod tests {
     fn no_bom_stays_no_bom() {
         let existing = b"plain\n";
         assert_eq!(normalize_to_existing_style(Some(existing), "x\n"), b"x\n");
-    }
-
-    #[test]
-    fn workspace_root_paths_match() {
-        for p in ["", ".", "./", ".\\", "  .  ", "/", "\\"] {
-            assert!(is_workspace_root_path(p), "expected root-ish: {:?}", p);
-        }
-    }
-
-    #[test]
-    fn named_subpaths_are_not_root() {
-        for p in ["src", "./src", "package.json", "a/b", ".git", ".."] {
-            assert!(!is_workspace_root_path(p), "expected NOT root-ish: {:?}", p);
-        }
     }
 
     // ── #62: relative paths must honor the folder workspace ──────────
@@ -2104,6 +2213,151 @@ mod explorer_byte_read_tests {
     }
 }
 
+/// A file attached in the chat reaches the agent's folder through
+/// `fs_write_bytes` (3.0.5). Same jail, never over an existing file, and the
+/// visible file is complete or absent.
+#[cfg(test)]
+mod attachment_byte_write_tests {
+    use super::*;
+    use std::fs;
+
+    fn ws(tag: &str) -> crate::os_paths::TestDir {
+        let d = crate::os_paths::test_dir(&format!("fswritebytes-{tag}"));
+        allow_root_for_test(&d);
+        d
+    }
+
+    fn b64(bytes: &[u8]) -> String {
+        base64::engine::general_purpose::STANDARD.encode(bytes)
+    }
+
+    fn put(dir: &Path, name: &str, bytes: &[u8], offset: u64, last: bool) -> Result<serde_json::Value, String> {
+        fs_write_bytes_sync(
+            name.into(),
+            b64(bytes),
+            offset,
+            last,
+            None,
+            Some(dir.to_string_lossy().to_string()),
+        )
+    }
+
+    #[test]
+    fn one_chunk_lands_byte_for_byte() {
+        let dir = ws("one");
+        // Bytes no text write would survive: NUL, a lone CR, invalid UTF-8.
+        let raw: Vec<u8> = vec![0x00, 0x0d, 0xff, 0xfe, 0x0a, 0x80, 0x4e, 0x45, 0x53, 0x1a];
+        let v = put(&dir, "game.nes", &raw, 0, true).expect("write");
+        assert_eq!(v["status"], "saved");
+        assert_eq!(v["bytes"], raw.len());
+        assert_eq!(fs::read(dir.join("game.nes")).unwrap(), raw);
+        assert!(!dir.join(".game.nes.lu-part").exists(), "the part file must be gone");
+    }
+
+    #[test]
+    fn chunks_are_joined_and_the_file_only_appears_with_the_last_one() {
+        let dir = ws("chunks");
+        let a = vec![1u8; 1000];
+        let b = vec![2u8; 500];
+        let first = put(&dir, "rom.bin", &a, 0, false).expect("first");
+        assert_eq!(first["status"], "partial");
+        assert!(!dir.join("rom.bin").exists(), "half a file must not be visible under its name");
+        let second = put(&dir, "rom.bin", &b, 1000, true).expect("second");
+        assert_eq!(second["status"], "saved");
+        assert_eq!(second["bytes"], 1500);
+        let mut whole = a.clone();
+        whole.extend_from_slice(&b);
+        assert_eq!(fs::read(dir.join("rom.bin")).unwrap(), whole);
+    }
+
+    #[test]
+    fn a_chunk_at_the_wrong_offset_is_refused() {
+        let dir = ws("order");
+        put(&dir, "rom.bin", &[1u8; 100], 0, false).expect("first");
+        let err = put(&dir, "rom.bin", &[2u8; 100], 50, true).expect_err("wrong offset");
+        assert!(err.contains("out of order"), "got: {err}");
+        assert!(!dir.join("rom.bin").exists());
+        // And a chunk for an upload that never started.
+        let err = put(&dir, "other.bin", &[2u8; 100], 100, true).expect_err("no first chunk");
+        assert!(err.contains("out of order"), "got: {err}");
+    }
+
+    #[test]
+    fn a_first_chunk_starts_over_after_an_abandoned_upload() {
+        let dir = ws("restart");
+        put(&dir, "rom.bin", &[9u8; 300], 0, false).expect("abandoned");
+        put(&dir, "rom.bin", &[7u8; 10], 0, true).expect("fresh");
+        assert_eq!(fs::read(dir.join("rom.bin")).unwrap(), vec![7u8; 10]);
+    }
+
+    #[test]
+    fn an_existing_file_is_never_replaced() {
+        let dir = ws("exists");
+        fs::write(dir.join("notes.txt"), b"the user's own file").unwrap();
+        let err = put(&dir, "notes.txt", b"attachment", 0, true).expect_err("exists");
+        assert!(err.contains("already exists"), "got: {err}");
+        assert_eq!(fs::read(dir.join("notes.txt")).unwrap(), b"the user's own file");
+    }
+
+    #[test]
+    fn a_path_outside_the_workspace_is_refused() {
+        let dir = ws("outside");
+        let root = dir.join("repo");
+        fs::create_dir_all(&root).unwrap();
+        let climb = fs_write_bytes_sync(
+            "../escaped.bin".into(),
+            b64(b"x"),
+            0,
+            true,
+            None,
+            Some(root.to_string_lossy().to_string()),
+        );
+        assert!(climb.is_err(), "a .. climb must not write");
+        assert!(!dir.join("escaped.bin").exists());
+        let absolute = fs_write_bytes_sync(
+            dir.join("escaped.bin").to_string_lossy().to_string(),
+            b64(b"x"),
+            0,
+            true,
+            None,
+            Some(root.to_string_lossy().to_string()),
+        );
+        assert!(absolute.is_err(), "an outside absolute path must not write");
+        assert!(!dir.join("escaped.bin").exists());
+    }
+
+    #[test]
+    fn the_workspace_root_itself_is_not_a_file() {
+        let dir = ws("root");
+        let err = put(&dir, ".", b"x", 0, true).expect_err("root as target");
+        assert!(err.contains("Not a file"), "got: {err}");
+    }
+
+    #[test]
+    fn bytes_past_the_cap_are_refused() {
+        let dir = ws("cap");
+        let err = put(&dir, "huge.bin", &[0u8; 16], WRITE_BYTES_CAP, true).expect_err("over the cap");
+        assert!(err.contains("too large"), "got: {err}");
+        assert!(!dir.join("huge.bin").exists());
+    }
+
+    #[test]
+    fn broken_base64_is_an_error_not_an_empty_file() {
+        let dir = ws("b64");
+        let err = fs_write_bytes_sync(
+            "x.bin".into(),
+            "not base64 !!".into(),
+            0,
+            true,
+            None,
+            Some(dir.to_string_lossy().to_string()),
+        )
+        .expect_err("bad base64");
+        assert!(err.contains("Invalid base64"), "got: {err}");
+        assert!(!dir.join("x.bin").exists());
+    }
+}
+
 /// KF-15 — `fs_write` and the workspace ROOT itself.
 ///
 /// The dev-server half of this was closed in a50fddef; this is the same hole on
@@ -2126,9 +2380,8 @@ mod write_needs_a_target_tests {
         d
     }
 
-    /// Every spelling that RESOLVES to the workspace root. The first three are
-    /// the ones the string predicate `is_workspace_root_path` knows; the last
-    /// three it does not — they only collapse once `..` is applied.
+    /// Every spelling that RESOLVES to the workspace root, including the ones
+    /// that only collapse once `.` and `..` are applied.
     const ROOT_SPELLINGS: [&str; 6] = ["", ".", "./", "./.", "unterordner/..", "a/b/../.."];
 
     /// The sharp form: the caller picks BOTH the place and the content.
@@ -2291,10 +2544,10 @@ mod write_needs_a_target_tests {
     fn listing_a_root_that_does_not_exist_creates_nothing() {
         let parent = picked("list");
 
-        for spelling in ["", ".", "./"] {
+        for (n, spelling) in ROOT_SPELLINGS.iter().copied().enumerate() {
             // A fresh root per spelling: the first call must not be able to
             // create the directory the second one is asked about.
-            let root = parent.join(format!("ws-{}", spelling.len()));
+            let root = parent.join(format!("ws-{n}"));
             let root_arg = root.to_string_lossy().to_string();
             assert!(!root.exists(), "the fixture must not exist yet");
 
@@ -2302,9 +2555,13 @@ mod write_needs_a_target_tests {
                 .unwrap_or_else(|e| panic!("fs_list({spelling:?}) was refused: {e}"));
             assert_eq!(v["count"], 0);
             assert_eq!(v["entries"], serde_json::json!([]));
+            // A search of a workspace without files finds nothing, it is not an error.
+            let v = fs_search(spelling.into(), "x".into(), None, None, Some(root_arg.clone()))
+                .unwrap_or_else(|e| panic!("fs_search({spelling:?}) was refused: {e}"));
+            assert_eq!(v["count"], 0);
             assert!(
                 !root.exists(),
-                "fs_list({spelling:?}) created {} — a listing must not write",
+                "fs_list/fs_search({spelling:?}) created {} — a listing must not write",
                 root.display(),
             );
 
@@ -2391,47 +2648,20 @@ mod write_needs_a_target_tests {
         );
     }
 
-    // ── Why the guard measures the RESOLVED path and not the string ─────────
-
-    /// The string predicate is wrong in BOTH directions, which is why the guard
-    /// does not use it.
-    ///
-    /// * `"unterordner/.."` resolves to the root and the predicate says no.
-    /// * `"  "` and `".\\"` resolve to ordinary FILES inside the root (on Unix a
-    ///   backslash is an ordinary character) and the predicate says yes — a
-    ///   guard built on it would refuse two legitimate writes.
-    ///
-    /// `is_workspace_root_path` keeps its one caller, `fs_list`, where it only
-    /// decides whether to auto-create a directory and a wrong answer costs
-    /// nothing.
+    /// Names that only LOOK like the root are ordinary files and still write.
+    /// On Unix a space and a backslash are ordinary characters in a file name.
+    #[cfg(not(windows))]
     #[test]
-    fn the_string_predicate_disagrees_with_the_resolved_path() {
-        assert!(is_workspace_root_path(""));
-        assert!(is_workspace_root_path("."));
-        assert!(is_workspace_root_path("./"));
-        // Misses a root: `..` is never applied.
-        assert!(!is_workspace_root_path("unterordner/.."));
-        assert!(!is_workspace_root_path("a/b/../.."));
-
+    fn names_that_only_look_like_the_root_still_write() {
         let root = picked("predicate");
         let root_arg = root.to_string_lossy().to_string();
         let resolve = |p: &str| resolve_path(p, None, Some(&root_arg)).expect("resolve");
-        assert_eq!(resolve("unterordner/.."), lexical_normalize(&root));
-        assert_eq!(resolve("a/b/../.."), lexical_normalize(&root));
-
-        // Claims a root where the resolved path is a named child.
-        #[cfg(not(windows))]
-        {
-            assert!(is_workspace_root_path("  "));
-            assert!(is_workspace_root_path(".\\"));
-            assert_ne!(resolve("  "), lexical_normalize(&root));
-            assert_ne!(resolve(".\\"), lexical_normalize(&root));
-            // …and those writes still go through.
-            fs_write("  ".into(), "leerzeichen".into(), None, Some(root_arg.clone()))
-                .expect("a file named with a space was refused");
-            fs_write(".\\".into(), "backslash".into(), None, Some(root_arg))
-                .expect("a file named with a backslash was refused");
-        }
+        assert_ne!(resolve("  "), lexical_normalize(&root));
+        assert_ne!(resolve(".\\"), lexical_normalize(&root));
+        fs_write("  ".into(), "leerzeichen".into(), None, Some(root_arg.clone()))
+            .expect("a file named with a space was refused");
+        fs_write(".\\".into(), "backslash".into(), None, Some(root_arg))
+            .expect("a file named with a backslash was refused");
     }
 
     /// A COMPLETELY MISSING `path` — the dev-server's `{}` body — cannot reach

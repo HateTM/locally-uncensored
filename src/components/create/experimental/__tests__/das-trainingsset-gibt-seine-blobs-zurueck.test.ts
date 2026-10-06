@@ -74,11 +74,19 @@ describe('das Trainingsset gibt seine Blob-URLs zurück', () => {
     expect(live.size).toBe(1)
   })
 
-  it('was die 30er-Kappe abschneidet, gibt seine Datei frei', () => {
+  it('was die Cloud-Kappe (30) abschneidet, gibt seine Datei frei', () => {
     // Diese Grenze hat gar keine UI: der Schnitt passiert still.
+    useCreateStore.setState({ backend: 'cloud' })
     drop(...Array.from({ length: 34 }, (_, i) => `f${i}.png`))
     expect(useCreateStore.getState().trainImages).toHaveLength(30)
     expect(live.size).toBe(30)
+  })
+
+  it('lokal liegt die Kappe bei 100 (GH #121), und auch dort wird frei, was sie abschneidet', () => {
+    useCreateStore.setState({ backend: 'local' })
+    drop(...Array.from({ length: 104 }, (_, i) => `f${i}.png`))
+    expect(useCreateStore.getState().trainImages).toHaveLength(100)
+    expect(live.size).toBe(100)
   })
 
   it('das Leeren des Sets gibt jede Datei zurück, die es hielt', () => {

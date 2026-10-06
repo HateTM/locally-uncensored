@@ -63,10 +63,7 @@ export function WorkflowFinder({ modelName, modelType }: Props) {
                   : workflow.mode === 'video'
                     ? 'Video'
                     : 'Image',
-              badge: {
-                label: workflow.mode.toUpperCase(),
-                color: 'bg-lu-accent-soft text-lu-accent',
-              },
+              badge: { label: workflow.mode.toUpperCase() },
             })),
           ]}
         />

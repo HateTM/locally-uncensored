@@ -13,6 +13,11 @@ export interface CloudJobParams {
   /** Idempotency key (a UUID minted client-side): a retried submit after a
    *  dropped response replays the same job instead of booking twice. */
   client_request_id?: string
+  /** Bilder in diesem Lauf, 1 bis 4 (nur Bild und Bearbeiten). Fehlt das Feld,
+   *  bucht der Server genau einen Auftrag, wie vor dem 02.10.2026. Ein Server
+   *  ohne die Anzahl bucht ebenfalls einen, deshalb schickt der Start sie nur,
+   *  wenn er mehr als ein Bild will, und prueft die Antwort (`jobs`). */
+  count?: number
   /** The picked step's option values, validated client-side against the same
    *  provider schema studio-contract.ts reads (createStore.cloudStudioOptions). */
   studio_options?: Record<string, unknown>
@@ -100,6 +105,12 @@ export interface CloudMe {
      *  what the invoice contradicts. Absent on older servers = unknown, which
      *  every surface reads as "promise nothing". */
     paidPlan?: boolean
+    /** True while a renewal payment of this account failed and no paid plan
+     *  is active. Independent of status: pack credits keep such an account
+     *  'active' on tier 'starter'. Absent on older servers = false. */
+    pastDue?: boolean
+    /** The plan waiting for that payment (hosted | hosted-pro | hosted-max). */
+    pastDueTier?: string | null
   }
 }
 
@@ -132,6 +143,13 @@ export interface CloudJobSubmitResult {
    *  `cost` is guaranteed. */
   quota: { cost: number; used?: number; limit?: number }
   replayed?: boolean
+  /** Nur bei einem Lauf mit mehreren Bildern: alle gebuchten Auftraege. Fehlt
+   *  das Feld trotz count > 1, kennt der Server die Anzahl nicht und hat genau
+   *  einen Auftrag gebucht. */
+  jobs?: { id: string; status: string; cost: number }[]
+  requested?: number
+  /** Gesetzt, wenn weniger liefen als gewuenscht. Gebucht ist nur, was in `jobs` steht. */
+  stopped?: 'credits_exhausted' | 'error'
 }
 
 /** The server re-quoted at submit time (prepareStudio()) and its own number
@@ -146,14 +164,38 @@ export class QuoteChangedError extends CloudJobError {
   }
 }
 
+/** Answers after which nobody knows whether the server booked the job. */
+const SUBMIT_FATE_UNKNOWN = new Set([0, 408, 502, 503, 504])
+const SUBMIT_ATTEMPTS = 3
+/** Pause before a retry, times the attempt number. */
+const SUBMIT_RETRY_MS = 1_000
+
 export async function submitCloudJob(
   submit: CloudJobSubmit,
 ): Promise<CloudJobSubmitResult> {
-  const res = await cloudFetch('/api/jobs', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(submit),
+  // A dropped or timed-out submit may have booked the job anyway (bug hunt
+  // 01.10.2026, K8): it ran, it was charged, and the desktop, which has no job
+  // list, never saw it. The request id was minted for exactly this and never
+  // used: the same body goes out again, and the server replays the booking
+  // it already made instead of charging twice.
+  const body = JSON.stringify({
+    ...submit,
+    params: { ...submit.params, client_request_id: submit.params.client_request_id ?? crypto.randomUUID() },
   })
+  let res: Response
+  for (let attempt = 1; ; attempt++) {
+    try {
+      res = await cloudFetch('/api/jobs', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body,
+      })
+      if (!SUBMIT_FATE_UNKNOWN.has(res.status) || attempt >= SUBMIT_ATTEMPTS) break
+    } catch (err) {
+      if (!(err instanceof CloudJobError) || !SUBMIT_FATE_UNKNOWN.has(err.status) || attempt >= SUBMIT_ATTEMPTS) throw err
+    }
+    await new Promise((r) => setTimeout(r, SUBMIT_RETRY_MS * attempt))
+  }
   if (res.status === 409) {
     // Read by hand rather than through jsonOrError: only this one status
     // carries the extra `credits` figure QuoteChangedError needs, and every

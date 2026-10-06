@@ -3,29 +3,16 @@
  * the app spawns its own MLX Python sidecar (server.py on 127.0.0.1:47712)
  * directly from Rust (`commands::mlx`), no separate lu-bridge daemon. Ported
  * from uselu/apps/web/api/mlx-image.ts; the transport is a direct Tauri
- * `invoke` via `invokeMedia` (see below) plus a readiness wait: the FastAPI
+ * `invoke` via `invokeMedia` (api/mlx-invoke) plus a readiness wait: the FastAPI
  * sidecar binds a beat after `mlx_start` returns, so a cold first generate
  * can race and 500 with "mlx unreachable".
  *
  * Hard rule: this is the Mac local image backend, NOT ComfyUI.
  */
-import { backendCall, isMacOS } from './backend'
+import { isMacOS } from './backend'
+import { invokeMedia } from './mlx-invoke'
 import { siGbToBytes } from '../lib/formatters'
 import type { ClassifiedModel } from './comfyui'
-
-/**
- * Invoke an in-process MLX media Tauri command. The Rust wrappers
- * (`src-tauri/src/commands/media_cmds.rs`) each take a single
- * `args: serde_json::Value` parameter — matching the existing `shell_task_*`
- * convention in this codebase (see `src/api/agents/bg-tasks.ts`) — so the
- * payload must be nested under an `args` key, not passed at the top level.
- */
-async function invokeMedia<T = unknown>(
-  command: string,
-  args?: Record<string, unknown>,
-): Promise<T> {
-  return backendCall<T>(command, { args: args ?? {} })
-}
 
 export interface MlxStatus {
   installed: boolean

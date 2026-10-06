@@ -52,7 +52,7 @@ export function LoraManager({ rows, total, searchQuery, onDelete, onGetNew }: Pr
         <div className="space-y-1">
           <p className="t-control text-gray-800 dark:text-gray-200">No LoRAs installed yet</p>
           <p className="t-micro text-gray-500 max-w-[300px] leading-relaxed">
-            Get new searches CivitAI and puts what you pick into ComfyUI&apos;s models/loras folder. {LORA_USE_HINT}
+            Get new has ready-made LoRAs and a CivitAI search. What you pick lands in ComfyUI&apos;s models/loras folder. {LORA_USE_HINT}
           </p>
         </div>
         <button

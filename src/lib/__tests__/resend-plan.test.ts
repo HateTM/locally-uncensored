@@ -167,3 +167,41 @@ describe('nothing to resend', () => {
     expect(planResend([], 'a1')).toBeNull()
   })
 })
+
+describe('a question with attached files (3.0.5)', () => {
+  const file = { name: 'emerald.gba', size: 2048, kind: 'Game Boy Advance ROM', sha256: 'ab'.repeat(32), summary: 'SUMMARY' }
+  const withFile = [
+    {
+      id: 'u1',
+      role: 'user' as const,
+      // What the model received: the typed text plus the summary block.
+      content: 'what game is this?\n\n[Attached file: emerald.gba]\nSUMMARY\n[End of attached file: emerald.gba]',
+      displayContent: 'what game is this?',
+      files: [file],
+    },
+    { id: 'a1', role: 'assistant' as const, content: 'Pokemon Emerald' },
+  ]
+
+  it('regenerate sends back what was TYPED plus the files, not the content with the summaries in it', () => {
+    // Sending the content back in would put the summary block into the
+    // question, and the send would then append a second copy of it.
+    expect(planResend(withFile, 'a1')).toEqual({ deleteFromId: 'u1', content: 'what game is this?', files: [file] })
+  })
+
+  it('an edit keeps the files and takes the new text', () => {
+    expect(planResend(withFile, 'u1', 'and which region?')).toEqual({
+      deleteFromId: 'u1',
+      content: 'and which region?',
+      files: [file],
+    })
+  })
+
+  it('NEGATIVE CONTROL: a label in displayContent without files is still not input', () => {
+    // The /loop driver writes "pass 3 of 5" there over the instruction.
+    const loop = [
+      { id: 'u1', role: 'user' as const, content: 'the real instruction', displayContent: 'pass 3 of 5' },
+      { id: 'a1', role: 'assistant' as const, content: 'done' },
+    ]
+    expect(planResend(loop, 'a1')).toEqual({ deleteFromId: 'u1', content: 'the real instruction' })
+  })
+})

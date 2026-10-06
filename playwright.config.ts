@@ -14,6 +14,14 @@ import { defineConfig, devices } from '@playwright/test'
  * dev middleware only spawns on `/local-api/*` requests, which the mock never
  * triggers, so boot has no side effects.
  */
+// Several worktrees on one machine: the fixed port plus reuseExistingServer made
+// a run test the dev server of ANOTHER worktree (two red tests on 03.10.2026 that
+// pass on their own server). LU_E2E_PORT gives a run its own server on its own
+// port, and such a run never adopts a server that is already there.
+const ownPort = Number(process.env.LU_E2E_PORT) || 0
+const port = ownPort || 5273
+const origin = `http://localhost:${port}`
+
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: false,
@@ -24,7 +32,7 @@ export default defineConfig({
   timeout: 60_000,
   expect: { timeout: 15_000 },
   use: {
-    baseURL: 'http://localhost:5273',
+    baseURL: origin,
     trace: 'on-first-retry',
     headless: true,
   },
@@ -32,9 +40,9 @@ export default defineConfig({
     { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
   ],
   webServer: {
-    command: 'npm run dev',
-    url: 'http://localhost:5273',
-    reuseExistingServer: !process.env.CI,
+    command: ownPort ? `npx vite --port ${port} --strictPort` : 'npm run dev',
+    url: origin,
+    reuseExistingServer: !process.env.CI && !ownPort,
     timeout: 120_000,
     stdout: 'ignore',
     stderr: 'pipe',

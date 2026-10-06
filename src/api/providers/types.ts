@@ -144,6 +144,21 @@ export interface ProviderModel {
   /** The rung the model itself defaults to (`reasoning_effort_default`). Used
    *  only where no wish was made; the user's own choice always wins. */
   effortDefault?: string
+  /** The context window the server itself stated in its listing, and nothing
+   *  else: no table, no guess from the name. `contextLength` above always
+   *  holds a number to budget with; this one is absent when nobody stated
+   *  one, so the model picker can leave the figure empty. */
+  declaredContext?: number
+  /** What the model draws per one million tokens, in credits, input and output
+   *  apart (LU Cloud /models `credit_rates`, from the meter's own price
+   *  source). Credits per token count only, never a money amount. Absent on a
+   *  server that does not send the field. */
+  creditRates?: CreditRates
+}
+
+export interface CreditRates {
+  inputPerMillion: number
+  outputPerMillion: number
 }
 
 // ── Chat Messages (unified format) ────────────────────────────
@@ -228,10 +243,21 @@ export interface ChatOptions {
 
 // ── Streaming Chunk (unified output) ──────────────────────────
 
+export interface ToolCallProgress {
+  name: string
+  argsChars: number
+}
+
 export interface ChatStreamChunk {
   content: string
   thinking?: string    // Model reasoning (Ollama thinking field, <think> tags)
   toolCalls?: ToolCall[]
+  // A tool call the model is still writing: its name and how much of its
+  // arguments has arrived. The finished calls still come only on the done
+  // chunk; this is what the run shows in the meantime instead of "Working"
+  // (a 4 kB file_write streams for ~11 s on Mistral Small, measured
+  // 01.10.2026).
+  toolProgress?: ToolCallProgress
   done: boolean
   // Why generation ended, on the final done:true chunk. 'stop' | 'length'
   // (token budget exhausted, e.g. the whole budget went into reasoning) |

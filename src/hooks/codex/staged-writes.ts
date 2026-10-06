@@ -1,6 +1,6 @@
 import { useStagedChangesStore } from '../../stores/stagedChangesStore'
 import { computeUnifiedDiff } from '../../lib/diff'
-import { applyUniqueEdit } from '../../lib/surgical-edit'
+import { applyEdits, editsFromArgs } from '../../lib/surgical-edit'
 import { findStagedForPath, stagedReadResult, stagedListingNote } from '../../lib/staged-overlay'
 import { codexReadCtx, type CodexFsCtx, type CodexFileRead } from './workspace-fs'
 import type { ToolArgs } from '../../api/mcp/types'
@@ -113,6 +113,13 @@ export function createStagedWriter(deps: StagedWriterDeps): StagedWriter {
     } else {
       try {
         const r = await readFile(resolvedPath, stageReadCtx)
+        // A file that is not UTF-8 (Latin-1, UTF-16 from PowerShell) comes
+        // back without content. Read as '' it was reviewed as a brand new
+        // file, an all-insert diff hiding what gets overwritten (bug hunt
+        // 01.10.2026, C8). Refused like file_edit refuses it.
+        if (r?.encoding === 'binary' || r?.encoding === 'base64') {
+          return `file_write: ${path} exists but is not a UTF-8 text file, so the review cannot show what this write would replace. It was not staged. Ask the user before overwriting it.`
+        }
         oldContent = r?.content ?? ''
       } catch {
         // New file — leave oldContent empty so the diff renders an
@@ -142,8 +149,7 @@ export function createStagedWriter(deps: StagedWriterDeps): StagedWriter {
   const stageFileEdit = async (args: ToolArgs): Promise<string> => {
     const path = String(args.path ?? '')
     if (!path) return 'file_edit: missing path'
-    const oldString = typeof args.old_string === 'string' ? args.old_string : ''
-    const newString = typeof args.new_string === 'string' ? args.new_string : ''
+    const edits = editsFromArgs(args).map((e) => ({ ...e, new_string: e.new_string ?? '' }))
     const resolvedPath = resolveStagedPath(path, workDir)
     const stageReadCtx = codexReadCtx(workspaceSlug, workDir)
     // Read-your-writes: chain onto the STAGED content when this path is
@@ -166,7 +172,7 @@ export function createStagedWriter(deps: StagedWriterDeps): StagedWriter {
         return `file_edit: could not read ${path}. To create a new file use file_write.`
       }
     }
-    const applied = applyUniqueEdit(baseContent, oldString, newString)
+    const applied = applyEdits(baseContent, edits)
     if (!applied.ok) {
       switch (applied.reason) {
         case 'empty_old': return 'file_edit: old_string must be non-empty. Use file_write to create a new file.'

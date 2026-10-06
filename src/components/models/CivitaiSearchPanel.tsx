@@ -9,7 +9,7 @@
  */
 import { useEffect, useState } from 'react'
 import { Search, Loader2, ExternalLink, Download, CheckCircle } from 'lucide-react'
-import { fetchCivitaiPopular, searchCivitaiModels, startModelDownload, type CivitAIModelResult } from '../../api/discover'
+import { fetchCivitaiPopular, searchCivitaiModels, startCivitaiDownload, type CivitAIModelResult } from '../../api/discover'
 import { civitaiFamily } from '../../lib/civitai-base-models'
 import { openExternal } from '../../api/backend'
 import { useDownloadStore } from '../../stores/downloadStore'
@@ -106,7 +106,9 @@ export function CivitaiSearchPanel({ modelType, title, placeholder, search = '',
     dlStore.getState().setMeta(model.filename, model.downloadUrl, model.subfolder)
     // A LoRA's trigger words go into every later prompt that uses it.
     if (model.subfolder === 'loras') rememberLoraHit(model)
-    await startModelDownload(model.downloadUrl, model.subfolder, model.filename)
+    // startCivitaiDownload installs the ComfyUI-GGUF pack for a GGUF quant
+    // before it hands the file to startModelDownload (api/discover).
+    await startCivitaiDownload(model)
     dlStore.getState().startPolling()
   }
 

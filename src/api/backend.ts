@@ -520,6 +520,10 @@ export async function backendCall<T = unknown>(
     // gives. See dev-server/mlx-media-stubs.ts for the shared stub handler
     // and its reasoning; the systematic check behind this list is
     // dev-server/__tests__/mlx-media-endpoint-coverage.test.ts.
+    // Desktop only, answered by a 501 stub in dev-server/remote-stubs.ts:
+    // the Local API usage counter and the download speed limit live in Rust.
+    local_api_usage: { path: "/local-api/local-api-usage" },
+    set_download_limit: { path: "/local-api/set-download-limit", method: "POST" },
     mlx_status: { path: "/local-api/mlx-status" },
     mlx_start: { path: "/local-api/mlx-start", method: "POST" },
     mlx_unload: { path: "/local-api/mlx-unload", method: "POST" },
@@ -587,6 +591,9 @@ export async function backendCall<T = unknown>(
     // command" and every preview fell over.
     fs_read_bytes: { path: "/local-api/fs-read-bytes", method: "POST" },
     fs_write: { path: "/local-api/fs-write", method: "POST" },
+    // One base64 chunk of a file attached in the chat, on its way into the
+    // working folder (3.0.5, lib/chat-files.ts).
+    fs_write_bytes: { path: "/local-api/fs-write-bytes", method: "POST" },
     fs_list: { path: "/local-api/fs-list", method: "POST" },
     fs_search: { path: "/local-api/fs-search", method: "POST" },
     fs_info: { path: "/local-api/fs-info", method: "POST" },

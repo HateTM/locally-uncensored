@@ -13,6 +13,7 @@ import {
   groupIsLive,
   type BandNote,
 } from '../../lib/tool-call-groups'
+import { hasUnrecoveredFailure } from '../../lib/recovered-failure'
 import { MOTION_S } from '../ui/motion'
 
 interface Props {
@@ -45,7 +46,9 @@ export function ToolCallBand({ calls, notes, renderNote, pendingApprovalId, onAp
   const expanded = userToggled ?? false
   const live = groupIsLive(calls)
   const active = activeToolCall(calls)
-  const anyFailed = calls.some((c) => c.status === 'failed' || c.status === 'rejected')
+  // A failure the run fixed by itself does not mark the header (Gegenprobe
+  // 01.10.2026); the step keeps its own mark in the expanded list.
+  const anyFailed = hasUnrecoveredFailure(calls)
   const durationLabel = groupDurationLabel(calls)
 
   const blockFor = (tc: AgentToolCall) => {

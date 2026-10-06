@@ -8,6 +8,8 @@ import {
 } from '../../../api/comfyui'
 import { ParamGroups } from './ParamGroups'
 import { StudioParams } from './StudioParams'
+import { ImproveToggle } from './ImproveToggle'
+import { ImageCount } from './ImageCount'
 
 export function AdvancedDrawer({
   open,
@@ -82,6 +84,8 @@ export function AdvancedDrawer({
       title="Advanced settings"
       width={320}
     >
+      <ImproveToggle />
+      <ImageCount />
       {studioModel ? (
         <StudioParams model={studioModel} />
       ) : (

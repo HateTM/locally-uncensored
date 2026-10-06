@@ -45,7 +45,7 @@
 //! ── Plattformabhängig ─────────────────────────────────────────────────────
 //!
 //! Die Dekoration folgt dem Rezept des Hauptfensters DER JEWEILIGEN PLATTFORM
-//! (`tauri.macos.conf.json` bzw. `tauri.windows.conf.json`), damit das erste
+//! (`tauri.macos.conf.json`, `tauri.windows.conf.json`, `tauri.linux.conf.json`), damit das erste
 //! Fenster der App nicht wie eine andere App aussieht:
 //!
 //!   macOS    `decorations: true`, `titleBarStyle: Overlay`, `hiddenTitle`:
@@ -56,6 +56,11 @@
 //!            Minimieren und Schließen selbst (kein Maximieren — das Fenster
 //!            ist nicht größenveränderbar). Die Ziehfläche ist der
 //!            `data-tauri-drag-region`-Streifen in `Onboarding.tsx`.
+//!   Linux    `decorations: false` wie Windows, aber DECKEND. Ein
+//!            transparentes WebKitGTK-Fenster malt auf aktuellen Mesa- und
+//!            WebKit-Staenden seinen Hintergrund nicht und verschwindet,
+//!            sobald es den Fokus hat (GH #145, Bazzite, RX 9060 XT, Wayland
+//!            und X11). Die Oberflaeche nutzt die Transparenz nirgends.
 //!
 //! Die `#[cfg]`-Zeilen in `open()` sind die einzigen plattformabhängigen
 //! Zeilen dieses Moduls.
@@ -276,8 +281,10 @@ pub fn open(app: &AppHandle) -> tauri::Result<WebviewWindow> {
     let builder = builder
         .title_bar_style(tauri::TitleBarStyle::Overlay)
         .hidden_title(true);
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
     let builder = builder.decorations(false).transparent(true);
+    #[cfg(target_os = "linux")]
+    let builder = builder.decorations(false);
 
     let window = builder.build()?;
 

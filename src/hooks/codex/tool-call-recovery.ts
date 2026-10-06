@@ -65,7 +65,7 @@ export function recoverToolCallsFromContent(toolCalls: ToolCall[], content: stri
   // tool-call JSON alongside native tool_calls — native was parsed
   // already, but the same JSON still sits in the content. Strip
   // those too so the chat bubble stays readable.
-  if (calls.length > 0 && turnContent && /\{\s*"(?:name|tool|function)"\s*:/.test(turnContent)) {
+  if (calls.length > 0 && turnContent && /\{\s*"(?:name|tool|function|call)"\s*:/.test(turnContent)) {
     const { ranges } = extractToolCallsWithRanges(turnContent)
     if (ranges.length > 0) {
       turnContent = stripRanges(turnContent, ranges)
@@ -82,6 +82,8 @@ export function recoverToolCallsFromContent(toolCalls: ToolCall[], content: stri
   // darf nicht sein"). Older answers auto-collapse in the UI, so the
   // old "stack of duplicated I'm-about-to paragraphs" problem is gone.
   // Only drop it when nothing but punctuation/whitespace remains.
+  // The marker some models put in front of each call (GH #147) is no prose.
+  if (extractedFromContent) turnContent = turnContent.replace(/!function_call:\s*/g, '').trim()
   if (extractedFromContent && !/[A-Za-z0-9]/.test(turnContent)) turnContent = ''
   return { toolCalls: calls, content: turnContent, extractedFromContent }
 }

@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import { usePopoverPlatz } from '../../hooks/usePopoverPlatz'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useChat } from '../../hooks/useChat'
 import { useChatStore } from '../../stores/chatStore'
@@ -37,6 +38,7 @@ import { SmallModelModeToggle } from './SmallModelModeToggle'
 import { ABCompare } from './ABCompare'
 import { RecentChats } from './RecentChats'
 import { useUIStore } from '../../stores/uiStore'
+import { chatModelReady } from '../../lib/chat-model-ready'
 import { useCompareStore } from '../../stores/compareStore'
 import { exportConversation, missingImagesNote } from '../../lib/chat-export'
 import { conversationMode } from '../../lib/conversation-mode'
@@ -47,7 +49,7 @@ import { useGenerationStore } from '../../stores/generationStore'
 import { composerBusy } from '../../lib/composer-busy'
 import { useIsQueuedForLocalLane, useLocalLaneQueuePosition, useLocalLaneHolderWaitsForApproval, useLocalLaneHolderId } from '../../lib/run-idle'
 import { useRemoteStore } from '../../stores/remoteStore'
-import { displayModelName } from '../../api/providers'
+import { modelDisplayLabel } from '../../lib/model-label'
 import { MONOGRAM, MONOGRAM_INVERT } from '../layout/brand'
 
 /** Was die Eingangsseite sagt und anbietet, je nach Lage. */
@@ -108,6 +110,10 @@ export function ChatView() {
   const [exportOpen, setExportOpen] = useState(false)
   const [exportToast, setExportToast] = useState<string>('')
   const [toolsDropdownOpen, setToolsDropdownOpen] = useState(false)
+  const exportMenuRef = useRef<HTMLDivElement>(null)
+  const exportMenu = usePopoverPlatz(exportMenuRef, exportOpen)
+  const toolsMenuRef = useRef<HTMLDivElement>(null)
+  const toolsMenu = usePopoverPlatz(toolsMenuRef, toolsDropdownOpen, { bevorzugt: 'oben', abstand: 2 })
   // Beide Aufklapplisten dieser Datei legen eine volle `fixed inset-0`-Flaeche
   // ueber die App, und beide hatten Escape nie bekommen. Der Datei-Waechter
   // hat es uebersehen, weil weiter unten der Genehmigungsdialog auf 'Escape'
@@ -270,11 +276,18 @@ export function ChatView() {
     : !activeModel
       // Der Waehler steht IM Composer und oeffnet nach oben. Der alte Satz
       // hier hiess „Select a model above." und zeigte in die falsche Richtung.
-      ? { subline: 'Choose a model below. Automatic picks require a known size of at least 7B.', cta: null }
+      // In der Cloud waehlt die App nie selbst (lib/active-model-mode), der
+      // Satz ueber die 7B-Regel waere dort eine Auskunft ueber nichts.
+      ? {
+          subline: appMode === 'cloud'
+            ? 'Choose a model below.'
+            : 'Choose a model below. Automatic picks require a known size of at least 7B.',
+          cta: null,
+        }
       // Der Modellname steht auf einer EIGENEN Zeile und wird gekuerzt: er ist
       // haeufig 50+ Zeichen lang (`hf.co/DevQuasar/huihui-ai_Qwen3-4B-abliterated-GGUF`),
       // und im Fliesstext liess er die Zeile dreimal umbrechen.
-      : { subline: 'Type below to start.', note: displayModelName(activeModel), cta: null }
+      : { subline: 'Type below to start.', note: modelDisplayLabel(models, activeModel), cta: null }
 
   return (
     <div className="h-full flex flex-col min-w-0">
@@ -299,7 +312,13 @@ export function ChatView() {
           traegt seinen eigenen `overflow-y-auto` weiter unten. */}
       <div className="flex-1 flex overflow-clip min-h-0">
         <div className="flex-1 flex flex-col min-w-0 relative">
-          {chatMode === 'codex' && activeConversationId ? (
+          {/* 3.0.4 Gegenprobe on the Windows box (02.10.2026): the Code area
+              with no conversation fell through to the chat landing page, which
+              says "Type below to start." over a composer the Code area hides,
+              so there was nothing to type into until New Chat. The Code view
+              has its own composer and its first send creates the code
+              conversation (useCodex), so it serves the empty state too. */}
+          {chatMode === 'codex' ? (
             <CodexView />
           ) : (<>
           <AnimatePresence mode="wait">
@@ -431,8 +450,8 @@ export function ChatView() {
                       sind (David, 21.09.2026: „NICHTS im prompt fenster!").
                       Oben im Verlauf, ruhig, mit x, und ausdruecklich NICHT am
                       Eingabefeld. `ChatNotices` traegt die beiden Zeilen, die
-                      im Composer entstehen (Anhang ist kein Bild, Modell sieht
-                      keine Bilder), `RetrievalErrorBar` den Fehler, dass die
+                      im Composer entstehen (ein Dokument gehoert in die Ablage,
+                      Modell sieht keine Bilder), `RetrievalErrorBar` den Fehler, dass die
                       Dokumente zu einer Antwort nicht durchsucht wurden. */}
                   <ChatNotices onAttachDocs={() => setRagPanelOpen(true)} />
                   <RetrievalErrorBar />
@@ -647,7 +666,7 @@ export function ChatView() {
                         {exportOpen && (
                           <>
                             <div className="fixed inset-0 z-40" onClick={() => setExportOpen(false)} />
-                            <div className="absolute right-0 top-full mt-1 z-50 w-32 rounded-lg bg-white dark:bg-[#1a1a1a] border border-gray-200 dark:border-white/10 shadow-xl py-1">
+                            <div ref={exportMenuRef} style={exportMenu.style} className={`absolute right-0 z-50 w-32 rounded-lg bg-white dark:bg-[#1a1a1a] border border-gray-200 dark:border-white/10 shadow-xl py-1 overflow-y-auto scrollbar-thin ${exportMenu.nachOben ? 'bottom-full mb-1' : 'top-full mt-1'}`}>
                               {(['markdown', 'json'] as const).map(fmt => (
                                 <button
                                   key={fmt}
@@ -765,94 +784,89 @@ export function ChatView() {
               LoopBar und GoalBar sind Bedienelemente (Bremse, Loeschen) und
               bleiben sichtbar, nur eine Etage hoeher; die Wartezeile der
               lokalen Spur ist ein Hinweis und war vorher im Kasten. */}
-          {chatMode !== 'codex' && (
-            <>
-              <LoopBar onStop={stopGeneration} />
-              <GoalBar />
-              <LocalLaneWaitLine
-                waiting={!!queuedForLocalLane}
-                queuePosition={localLaneQueuePosition}
-                onApproval={waitingOnApproval}
-                onApprovalIn={localLaneHolderTitle}
-              />
-            </>
-          )}
+          <LoopBar onStop={stopGeneration} />
+          <GoalBar />
+          <LocalLaneWaitLine
+            waiting={!!queuedForLocalLane}
+            queuePosition={localLaneQueuePosition}
+            onApproval={waitingOnApproval}
+            onApprovalIn={localLaneHolderTitle}
+          />
 
-          {/* Code mode brings its own composer, so it stays out of this one. */}
-          {chatMode !== 'codex' && (
-            <ChatInput
-              onSend={sendMessage}
-              onStop={stopGeneration}
-              isGenerating={busy.thisChat || queuedForLocalLane}
-              waitingForLocalLane={queuedForLocalLane}
-              pendingApproval={pendingApproval}
-              onApprove={approveToolCall}
-              onReject={rejectToolCall}
-              // Commands need the tool catalog to drive, which only Agent
-              // mode has here. Plain chat leaves "/cmd" as ordinary text.
-              slashCommands={isAgentActive ? 'agent' : 'chat'}
-              composerModel={
-                /* What this chat's answers were written by rides on the
-                   picker itself now, as a dot plus a tooltip, instead of a
-                   second chip in the row (Meldung 4, R5 re-measure; David
-                   2026-09-02 wanted it hidden away). */
-                <ModelSelector openUpward answeredBy={conversationModelHint} />
-              }
-              // No plan lives here. The prompt window is the prompt window
-              // (David, 2026-08-22): the plan band sits in the session strip
-              // above, next to the other standing status controls.
-              // Was HIER noch steht, ist genau eine Zeile, und sie steht
-              // unter Vorbehalt: `GroupCostHint` sagt, was der naechste Enter
-              // kostet („1 round = 3 answers = 3x the cost"). Geld wird nicht
-              // stumm geschaltet, ohne dass der Eigner es entschieden hat, und
-              // die Zeile gibt es ueberhaupt nur in einem Gruppenchat. Alles
-              // andere, was hier stand, ist ausgezogen (siehe oben).
-              composerAbove={<GroupCostHint />}
-              composerActions={
-                <>
-                  {/* Documents (RAG), shown in both modes since A9. In
-                      Cloud mode without an embedding lane it stays visible
-                      and says what is missing. */}
-                  <DocsButton
-                    availability={docs}
-                    open={ragPanelOpen}
-                    ragEnabled={ragEnabled}
-                    docCount={docCount}
-                    onToggle={() => setRagPanelOpen(!ragPanelOpen)}
-                  />
+          {/* Code mode brings its own composer (CodexView above). */}
+          <ChatInput
+            onSend={sendMessage}
+            modelReady={chatModelReady}
+            onStop={stopGeneration}
+            isGenerating={busy.thisChat || queuedForLocalLane}
+            waitingForLocalLane={queuedForLocalLane}
+            pendingApproval={pendingApproval}
+            onApprove={approveToolCall}
+            onReject={rejectToolCall}
+            // Commands need the tool catalog to drive, which only Agent
+            // mode has here. Plain chat leaves "/cmd" as ordinary text.
+            slashCommands={isAgentActive ? 'agent' : 'chat'}
+            composerModel={
+              /* What this chat's answers were written by rides on the
+                 picker itself now, as a dot plus a tooltip, instead of a
+                 second chip in the row (Meldung 4, R5 re-measure; David
+                 2026-09-02 wanted it hidden away). */
+              <ModelSelector openUpward answeredBy={conversationModelHint} />
+            }
+            // No plan lives here. The prompt window is the prompt window
+            // (David, 2026-08-22): the plan band sits in the session strip
+            // above, next to the other standing status controls.
+            // Was HIER noch steht, ist genau eine Zeile, und sie steht
+            // unter Vorbehalt: `GroupCostHint` sagt, was der naechste Enter
+            // kostet („1 round = 3 answers = 3x the cost"). Geld wird nicht
+            // stumm geschaltet, ohne dass der Eigner es entschieden hat, und
+            // die Zeile gibt es ueberhaupt nur in einem Gruppenchat. Alles
+            // andere, was hier stand, ist ausgezogen (siehe oben).
+            composerAbove={<GroupCostHint />}
+            composerActions={
+              <>
+                {/* Documents (RAG), shown in both modes since A9. In
+                    Cloud mode without an embedding lane it stays visible
+                    and says what is missing. */}
+                <DocsButton
+                  availability={docs}
+                  open={ragPanelOpen}
+                  ragEnabled={ragEnabled}
+                  docCount={docCount}
+                  onToggle={() => setRagPanelOpen(!ragPanelOpen)}
+                />
 
-                  {/* Plugins (Chat Tools + Caveman + Personas) */}
-                  <PluginsDropdown openUpward />
+                {/* Plugins (Chat Tools + Caveman + Personas) */}
+                <PluginsDropdown openUpward />
 
-                  {/* Tools: agent permission overrides (only when agent active) */}
-                  {isAgentActive && (
-                    <div className="relative">
-                      <button
-                        onClick={() => setToolsDropdownOpen(!toolsDropdownOpen)}
-                        aria-expanded={toolsDropdownOpen}
-                        className="lu-control"
-                      >
-                        {/* Kein eigener Gruenton mehr: das Icon erbt die
-                            Farbe des Controls, sonst traegt ein neutrales
-                            Control wieder einen Akzent von sich aus. */}
-                        <Wrench size={11} />
-                        <span>Tools</span>
-                        <ChevronDown size={9} className={`transition-transform ${toolsDropdownOpen ? 'rotate-180' : ''}`} />
-                      </button>
-                      {toolsDropdownOpen && (
-                        <>
-                          <div className="fixed inset-0 z-40" onClick={() => setToolsDropdownOpen(false)} />
-                          <div className="absolute left-0 bottom-full mb-0.5 z-50 w-28 rounded-md bg-white dark:bg-[#1a1a1a] border border-gray-200 dark:border-white/10 shadow-xl py-0.5 px-0.5">
-                            <PermissionOverrideBar />
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  )}
-                </>
-              }
-            />
-          )}
+                {/* Tools: agent permission overrides (only when agent active) */}
+                {isAgentActive && (
+                  <div className="relative">
+                    <button
+                      onClick={() => setToolsDropdownOpen(!toolsDropdownOpen)}
+                      aria-expanded={toolsDropdownOpen}
+                      className="lu-control"
+                    >
+                      {/* Kein eigener Gruenton mehr: das Icon erbt die
+                          Farbe des Controls, sonst traegt ein neutrales
+                          Control wieder einen Akzent von sich aus. */}
+                      <Wrench size={11} />
+                      <span>Tools</span>
+                      <ChevronDown size={9} className={`transition-transform ${toolsDropdownOpen ? 'rotate-180' : ''}`} />
+                    </button>
+                    {toolsDropdownOpen && (
+                      <>
+                        <div className="fixed inset-0 z-40" onClick={() => setToolsDropdownOpen(false)} />
+                        <div ref={toolsMenuRef} style={toolsMenu.style} className={`absolute left-0 z-50 w-28 rounded-md bg-white dark:bg-[#1a1a1a] border border-gray-200 dark:border-white/10 shadow-xl py-0.5 px-0.5 overflow-y-auto scrollbar-thin ${toolsMenu.nachOben ? 'bottom-full mb-0.5' : 'top-full mt-0.5'}`}>
+                          <PermissionOverrideBar />
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
+              </>
+            }
+          />
           </>)}
         </div>
 

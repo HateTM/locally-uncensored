@@ -103,16 +103,17 @@ function parseJsonObjectCalls(text: string, known: Set<string>): { call: LooseTo
   // closed one brace early (wrong arguments).
   const candidates: string[] = findBalancedObjects(text)
   for (const cand of candidates) {
-    if (!/["']?(?:name|tool|tool_name|tool_call|function)["']?\s*[:=]/.test(cand)) continue
+    if (!/["']?(?:name|tool|tool_name|tool_call|function|call)["']?\s*[:=]/.test(cand)) continue
     const parsed = repairJson(cand)
     if (!parsed) continue
     // Name + args may arrive in three shapes, all seen from small local models:
     //   flat     {"name":"file_list","arguments":{…}}
     //   nested   {"function":{"name":"file_list","arguments":{…}}}  (OpenAI/Phi)
     //   wrapped  {"tool_call":{"name":…}} or {"tool_call":"file_list","arguments":{…}}
+    //   call     !function_call:{"call":"file_list","arguments":{…}}  (GH #147, LU Cloud)
     // Unwrap an object-valued name carrier so the nested forms resolve too.
     let nameField: unknown = parsed.name || prop(parsed, 'tool') || prop(parsed, 'tool_name')
-      || prop(parsed, 'tool_call') || prop(parsed, 'function')
+      || prop(parsed, 'tool_call') || prop(parsed, 'function') || prop(parsed, 'call')
     let argsField: unknown = parsed.arguments ?? parsed.parameters ?? prop(parsed, 'args') ?? prop(parsed, 'params')
     if (isRecord(nameField)) {
       argsField = argsField ?? nameField.arguments ?? nameField.parameters ?? nameField.args
@@ -297,6 +298,53 @@ export function canonicalToolName(name: string, known: string[]): string {
   return name
 }
 
+/** Names that say "this is a call" instead of naming one. */
+const GENERIC_CALL_NAMES = new Set(['function', 'functions', 'tool', 'tools', 'tool_call', 'call', 'function_call', 'invoke', 'use_tool'])
+
+/** True for a name like "function" that names no tool at all. */
+export function isGenericCallName(name: string): boolean {
+  return GENERIC_CALL_NAMES.has(name.trim().toLowerCase())
+}
+
+interface ToolShape {
+  name: string
+  inputSchema?: { properties?: Record<string, unknown>; required?: string[] }
+}
+
+/**
+ * GH #147 (LU Cloud, 2026-10-01): a model sent native calls named "function",
+ * once with {"todos": [...]}, once with {"path": "."}, and every one came back
+ * "Unknown tool: function" while it retried. A generic name is resolved from
+ * the call itself: a tool named inside the arguments, or else the one tool
+ * whose parameters the arguments fit. Two tools that fit equally leave the
+ * call as it was, and the executor says what to send instead.
+ */
+export function repairToolCall(
+  name: string,
+  args: Record<string, unknown>,
+  tools: ToolShape[],
+): { name: string; arguments: Record<string, unknown> } {
+  const known = tools.map((t) => t.name)
+  if (!isGenericCallName(name)) return { name: canonicalToolName(name, known), arguments: args }
+  for (const key of ['name', 'tool', 'tool_name', 'function', 'call']) {
+    const inner = args[key]
+    if (typeof inner !== 'string') continue
+    const hit = canonicalToolName(inner, known)
+    if (!known.includes(hit)) continue
+    const nested = args.arguments ?? args.parameters ?? args.args
+    const rest = Object.fromEntries(Object.entries(args).filter(([k]) => k !== key))
+    return { name: hit, arguments: isRecord(nested) ? nested : rest }
+  }
+  const keys = Object.keys(args)
+  if (keys.length === 0) return { name, arguments: args }
+  const fits = tools.filter((t) => {
+    const props = Object.keys(t.inputSchema?.properties ?? {})
+    const required = t.inputSchema?.required ?? []
+    return keys.every((k) => props.includes(k)) && required.every((r) => keys.includes(r))
+  })
+  return fits.length === 1 ? { name: fits[0].name, arguments: args } : { name, arguments: args }
+}
+
 /** Remove the matched call snippets from a prose answer (best-effort). */
 export function stripMatchedCalls(text: string, matched: string[]): string {
   let out = text
@@ -304,7 +352,7 @@ export function stripMatchedCalls(text: string, matched: string[]): string {
     if (snip) out = out.split(snip).join('')
   }
   // Tidy leftover empty code fences / blank lines.
-  return out.replace(/```(?:json|python|tool_code)?\s*```/gi, '').replace(/\n{3,}/g, '\n\n').trim()
+  return out.replace(/```(?:json|python|tool_code)?\s*```/gi, '').replace(/!function_call:\s*/g, '').replace(/\n{3,}/g, '\n\n').trim()
 }
 
 /**

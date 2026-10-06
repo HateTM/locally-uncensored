@@ -80,18 +80,25 @@ async function reconcile(
   change: StagedChange,
 ): Promise<{ content: string; merged: number }> {
   const base = change.oldContent ?? ''
-  let current: string
+  let res: { content?: string; encoding?: string } | undefined
   try {
-    const res = await backendCall<{ content?: string }>('fs_read', {
+    res = await backendCall<{ content?: string; encoding?: string }>('fs_read', {
       path: change.resolvedPath || change.path,
       chatId: jail,
       workingDirectory: change.workingDirectory,
     })
-    current = res?.content ?? ''
   } catch {
     // gone or unreadable, the write recreates it, which is what the user asked for
     return { content: change.newContent, merged: 0 }
   }
+  // Not UTF-8 on disk (bug hunt 01.10.2026, C8): read as '' it matched an
+  // empty base and was overwritten without the drift check ever seeing it.
+  if (typeof res?.content !== 'string' && (res?.encoding === 'binary' || res?.encoding === 'base64')) {
+    throw new Error(
+      `${change.path} is not a UTF-8 text file on disk, so this edit cannot be checked against it and was not applied. Reject this one and let the model read the file again.`,
+    )
+  }
+  const current = res?.content ?? ''
   // The file on disk decides the form; an empty file inherits the model's.
   const eol = current ? eolOf(current) : eolOf(change.newContent)
   const baseLf = toLf(base)
@@ -124,9 +131,21 @@ async function jailFor(chatId: string): Promise<string> {
   return resolveChatWorkspaceSlug(chatId, title)
 }
 
-export async function applyStagedChange(chatId: string, change: StagedChange): Promise<void> {
+/** True when the change is still queued. A Reject removes it from the store;
+ *  the Apply loops run over a snapshot and the reconcile read is async, so
+ *  without this check a change the user rejected mid "Apply all" was written
+ *  anyway. */
+function stillPending(chatId: string, change: StagedChange): boolean {
+  return useStagedChangesStore.getState().list(chatId).some((c) => c.id === change.id)
+}
+
+/** Writes one staged change. Returns false, without writing, when the user
+ *  rejected it before the write happened. */
+export async function applyStagedChange(chatId: string, change: StagedChange): Promise<boolean> {
+  if (!stillPending(chatId, change)) return false
   const jail = await jailFor(chatId)
   const { content, merged } = await reconcile(jail, change)
+  if (!stillPending(chatId, change)) return false
   const res = await backendCall<{ status?: string; path?: string }>('fs_write', {
     path: change.resolvedPath || change.path,
     content,
@@ -160,21 +179,22 @@ export async function applyStagedChange(chatId: string, change: StagedChange): P
     timestamp: Date.now(),
     notice: merged > 0 ? 'warn' : 'info',
   })
+  return true
 }
 
-/** Apply every pending change for a chat, sequentially (fs_write serializes
- *  per path anyway). Failures stay in the queue for manual retry and are
- *  reported by path instead of throwing, so one bad write never blocks the
- *  rest. */
+/** Apply the pending changes of a chat staged at or after `since` (all of
+ *  them without it), sequentially (fs_write serializes per path anyway).
+ *  Failures stay in the queue for manual retry and are reported by path
+ *  instead of throwing, so one bad write never blocks the rest. */
 export async function applyAllStagedChanges(
   chatId: string,
+  since = 0,
 ): Promise<{ applied: string[]; failed: string[] }> {
   const applied: string[] = []
   const failed: string[] = []
-  for (const change of [...useStagedChangesStore.getState().list(chatId)]) {
+  for (const change of useStagedChangesStore.getState().list(chatId).filter((c) => c.stagedAt >= since)) {
     try {
-      await applyStagedChange(chatId, change)
-      applied.push(change.path)
+      if (await applyStagedChange(chatId, change)) applied.push(change.path)
     } catch {
       failed.push(change.path)
     }

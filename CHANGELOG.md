@@ -115,6 +115,427 @@ models and seven image models in the cloud catalogue.
 - **The chat agent's renders now pass the same safety check as Create.** The
   agent's image and video path reached ComfyUI without the check that refuses
   sexual content involving minors, and a LoRA's saved prompt is checked too.
+## [3.0.5] - 2026-10-05
+
+Create runs LTX 2.5, FastH3 and YuE2 on your own machine, edits several images
+in one go and has five new models on LU Cloud. Chat takes any file, and each
+model in a group chat can have its own persona. Dropdowns stay inside the
+window, and the speech install on Linux works again.
+The open-model counts from 3.0.2 still hold: fourteen video models and seven
+image models in the cloud catalogue.
+
+### Added
+
+- **LTX 2.5, FastH3 and YuE2 run on your own machine.** Models, Video, Get new
+  has four new downloads. LTX 2.5 makes video with its own sound from a prompt
+  or a first frame, as the full version for cards with 24 GB or more and as
+  Small (GGUF Q4) for 16 GB cards. FastH3 is MiniMax H3 in 8 steps, text to
+  video only, for 24 GB or more. YuE2 writes songs from a style and your
+  lyrics on 6 to 8 GB and is licensed for non-commercial use only. LTX 2.5
+  needs ComfyUI 0.32.0, FastH3 0.35.0 and YuE2 0.36.0. With an older ComfyUI,
+  Create asks once and then updates it.
+- **LTX 2.5 cuts between up to four shots in one run.** For text to video with
+  LTX 2.5, the advanced settings have a Shots slider. Your prompt is shot 1
+  and every further shot gets a field of its own. Describe the same person the
+  same way in every shot.
+- **Qwen-Image 2.1 gets a transparent background and its prompt enhancer.** On
+  your own machine, the image settings have a "Transparent background" switch
+  for new pictures with Qwen-Image 2.1. The picture is saved as a PNG with an
+  alpha channel and shown on a checkerboard. The Model Manager offers the
+  Qwen-Image 2.1 Prompt Enhancer as two downloads, Official and No Refusals,
+  both running on a 12 GB card (issue 148). With one installed, "Improve my
+  prompt" lets you choose who writes in the "Rewritten by" row: the enhancer or
+  your chat model. The enhancer needs ComfyUI 0.37.2 or newer.
+- **Qwen-Image 2.1 comes with a text encoder without refusals.** Models,
+  Image, Get new has "Qwen-Image 2.1 (No Refusals)". It is the same image
+  model and the same VAE with a community text encoder that has its refusal
+  direction removed (Heretic). If you already have Qwen-Image 2.1, only the
+  text encoder is downloaded, about 9 GB. With both text encoders installed,
+  the Expert settings in Create have a "Text encoder" row to pick which one
+  reads your prompt, for new pictures, for edits and for pictures made in
+  chat. The official one stays the default.
+- **Noct Q, an unfiltered finetune of Qwen-Image 2.1, is in the Model
+  Manager.** Models, Image, Get new has "Noct Q (Qwen-Image 2.1,
+  Unfiltered)", a community finetune of Qwen-Image 2.1 by Noctaluna. Here
+  the image model itself is changed: its notice says the Qwen-Image 2.1
+  transformer weights were modified. It uses the official text encoder and
+  VAE, so if you already have Qwen-Image 2.1, only the image model is
+  downloaded, about 7 GB. The app treats it as Qwen-Image 2.1: new pictures,
+  edits with reference images, transparent background, the text encoder
+  choice and the prompt enhancer are there for it. Qwen Research License,
+  non-commercial use. Not yet run on our own hardware.
+- **"Improve my prompt" lets your chat model rewrite the prompt before a
+  run.** The switch is in the advanced settings, off by default and
+  remembered. When it is on, the chat model you picked rewrites your prompt
+  for the image, video or music model before the run. A cloud chat model is
+  billed like chat. The gallery details show what you wrote and what ran. A
+  rewrite that fails or takes too long is dropped and the run uses your own
+  prompt.
+- **Edit, Remove Background and Enhance Image take several images at once.**
+  Pick or drop up to 50 source images, or a whole folder with "Add a folder".
+  Each image runs on its own, one after the other, and the queue shows which
+  one is running. Cancel stops the rest, and an image that fails does not stop
+  the others and is named at the end. On LU Cloud the price per image and for
+  the whole list is shown before you start. A model that needs a painted mask
+  keeps one image.
+- **"Save character" on a video keeps frames as a character.** In the large
+  view of a video, "Save character" lets you pick frames at the playback
+  position and give the figure a name. It is stored on this device, up to 30
+  photos. From there, "Use as reference photos" loads it into the reference
+  strip, and "Train in Character Studio" starts a training set with it.
+- **LoRA strength takes values from -10 to 10.** The slider in the LoRA stack
+  still runs from 0 to 2. Next to it is a number field for the exact value
+  from -10 to 10, for slider LoRAs that are made for a wide range around zero.
+  Each LoRA keeps its own value, also while it is switched off and after a
+  restart.
+- **The MiniMax H3 Turbo LoRA is a one click download.** 3.0.4 said the turbo
+  LoRA runs MiniMax H3 at 8 steps but not where to get it. It is now under
+  Models, Video, Get new and under Models, LoRAs, Get new in a "Ready to
+  install" list. The LoRA stack in Create shows it as soon as the download is
+  done. FastH3 is already an 8 step model and leaves the turbo LoRA out.
+- **Models carry a Best mark, and older ones sit under "Older models".** The
+  model picker in Create and the Model Manager put the current models first
+  with a Best mark and collect the ones a newer family has replaced under
+  "Older models". No model was removed.
+- **Local image, video and music models say whether they fit your graphics
+  card.** With a detected graphics card, each download in the Model Manager
+  compares itself with it: "Fits your 12 GB card", "Tight on your 12 GB card:
+  runs, loading can be slow" or "Needs more than your 12 GB card". The
+  model picker in Create marks a model that is tight or needs more, and when
+  loading such a model takes longer than a minute, the waiting line says why.
+  The Z-Image Turbo description no longer promises 8 to 15 seconds per image,
+  which did not hold on smaller cards. Without a detected card, as on a Mac,
+  nothing changes.
+- **LU Cloud: Qwen Image 2.1, LTX 2.5, MiniMax H3 and Wan 3.0 Reference.** The
+  cloud pickers in Create have five additions from open model families: Qwen
+  Image 2.1 for images, Qwen Image 2.1 for editing, LTX 2.5, MiniMax H3 and
+  Wan 3.0 Reference. LTX 2.5 makes video from a prompt or from a first frame.
+  MiniMax H3 now also starts from a prompt alone, works from reference photos
+  and edits a clip from an instruction. A model shows up once the cloud
+  catalogue lists it. "Open weights" next to a name means this exact version
+  has open weights, "Open family" means its family has them and this version
+  does not.
+- **LU Cloud: Image and Edit make up to four images per run.** The settings
+  have an Images slider from 1 to 4. Each image is its own job at its own
+  price, lands in the gallery when it is done, and is refunded alone if it
+  fails. The credit counter shows the total before you start.
+- **LU Cloud: reference models take several of your photos.** Models that work
+  from reference photos, such as MiniMax H3 Reference and Wan 3.0 Reference,
+  and the editors that take more than one image now have a strip under the
+  source image for up to five photos.
+- **Chat takes any file, not only images.** The paperclip, drag and drop and
+  paste used to turn everything but images away. They now take any file, up to
+  3 per message and 64 MB each. The model gets a description of the file: its
+  name, its type, its size and the readable text in it. In Agent and Code mode
+  the file is also copied into the working folder, so the file tools can open
+  it. Documents you want to ask questions about still belong in Document Chat.
+- **Each model in a group chat can have its own persona.** In the Plugins menu
+  under Group chat, every model row has a persona picker. Each model then
+  speaks as its persona, knows the names of the others, and a line it writes
+  in another one's name is cut. A group without a pick works as before.
+- **An answer that declines says what to do next.** When a model declines, a
+  line under the answer says so: a refusal stays in the chat history, and
+  other models tend to copy it. "New chat" in that line opens a fresh chat
+  with the same model, and the line points you to the models marked No
+  refusals.
+- **The model picker in Cloud mode has a search and tags.** In Chat, Agent and
+  Code, the Cloud model list is grouped by model family and has a search
+  field. Four tags narrow it: No refusals, Vision, Thinking and No credits. A
+  row shows the name, the No refusals mark, image input, thinking and the
+  context size where the server states it. The "?" on a row opens the credit
+  rates per 1M input and output tokens. Arrow keys move, Enter picks and
+  Escape closes. On LU Cloud, the model select in Create has the same family
+  heads. The local model list is unchanged.
+- **LM Studio is one line in the local model list.** When LM Studio is
+  installed and its server is off, the local model list showed a box with a
+  paragraph of text. It is now a single line with a status dot, the number of
+  models on disk and a small Start button. What Start does to your local chat
+  backend is in the tooltip of the button. While the menu is open the line
+  follows the server: it goes away once the server is up and its models are in
+  the list, and it comes back when the server stops, and the models leave the
+  list with it. The number counts chat models only, without embedding models
+  and vision projectors, so it matches the list after Start.
+
+### Changed
+
+- **Five cloud models no longer carry the No refusals mark.** Qwen3 30B A3B,
+  Qwen3 Coder 480B, Llama 4 Scout, DeepSeek V4 Flash 0731 and Qwen 3.5 397B
+  A17B declined in the second or third round of a longer test on 2026-10-05.
+  19 of the 46 cloud chat models we measured answer in full without refusing,
+  and only those carry the No refusals mark.
+
+### Fixed
+
+- **LU Cloud picks no chat model for you.** In Cloud mode a new account
+  chatted on the first model of the list without ever having picked it. The
+  picker button now reads "Choose a model" until you pick one. Sending without
+  a model keeps your message and its attachments and opens the picker. A model
+  you picked yourself stays picked. If your Cloud chat stood on that first
+  model, Llama 3.1 8B Turbo, the pick is cleared once. Local mode still picks
+  a model on its own.
+- **Dropdowns stay inside the window.** On the Linux AppImage and in small
+  windows the model list in Create opened below the bottom edge, so no model
+  could be picked (issue 149). Every dropdown and popover now opens on the
+  side that has room, is never taller than that room and scrolls inside. The
+  right click menu sat a little off the pointer and now opens at it.
+- **Linux: speech to text and Piper install again.** On Ubuntu 24.04 and other
+  distributions that protect the system Python, installing faster-whisper and
+  Piper ended with "Can not perform a '--user' install" when ComfyUI ran in
+  its own Python environment. The installer mistook that environment for the
+  protected system Python and added options pip refuses there. It now
+  recognises the environment and installs into it.
+- **LU Cloud: Edit starts without a mask on models that need none.** With a
+  model that edits from the instruction alone, the Edit stage still showed
+  "Paint mask" and the Create button waited for one. The stage now says the
+  model needs no mask, and Create starts with the source image and your
+  prompt.
+- **LU Cloud: settings stay with the model and the tool they were chosen
+  for.** The Images slider is in the advanced settings for every Image and
+  Edit model and goes back to 1 when you change the tool. Settings chosen for
+  one model no longer carry over to the next one. In Music, the length slider
+  and the Lyrics or Style field show only where the model reads them, and a
+  tool without a prompt field sends no leftover prompt.
+- **Image settings survive a visit to Music, Lip sync or Motion.** Steps, CFG
+  and Quality for images came back changed after you opened Music, Lip sync or
+  Motion in between. Quality on Draft, for example, read High with 50 steps
+  afterwards. The same happened when the app was closed on one of those tabs.
+  Each tab now keeps its own values, and a distilled video model keeps its few
+  steps instead of the 30 of its model family.
+- **Draft, Standard and High follow the model you picked.** The Quality
+  buttons for images counted from the step count of the model family, so on a
+  checkpoint built for a few steps, such as SD Turbo with 4, Draft meant 15
+  steps and the image came out overcooked. Standard is now the model's own
+  step count, and Draft and High scale from it. "Reset to model defaults" goes
+  back to those values as well, for images and for fast video models.
+- **A failed subscription payment is shown as one.** When a renewal payment
+  failed, the account window said "No active plan" and the Cloud window
+  offered the plans again, although a new plan cannot be bought until the open
+  invoice is paid. Both now say that the last payment failed and have a "Pay
+  open invoice" button that opens your account on lu-labs.ai in the browser.
+  Credits you bought stay usable, also after a plan has ended.
+- **A model download checks its checksum on a retry too.** After a failed
+  download, Retry and Resume started the file again without its SHA-256 and
+  expected size, so the second attempt was not verified. Both are kept now. A
+  file with the same name but another size no longer counts as installed where
+  the catalogue knows the exact size.
+
+## [3.0.4] - 2026-10-02
+
+A fix for the Code agent and the agent in chat on LU Cloud. Long file writes
+no longer end the run, "continue" picks up where a run stopped, and the agent
+no longer spends requests on steps nobody asked for. The open-model counts
+from 3.0.2 still hold: fourteen video models and seven image models in the
+cloud catalogue. It also fixes the bugs reported on GitHub and Discord since
+3.0.3, and Edit in Create can now take more than one image.
+
+### Added
+
+- **Edit takes more than one image.** With Qwen-Image 2.1 or Qwen-Image-Edit
+  on your own machine, small tiles under the source image take up to three
+  more images (two for Qwen-Image-Edit). Name them in the prompt as image 2,
+  image 3, for example "put the jacket from image 2 on the person". Asked on
+  GitHub (issue 144) and in Discord.
+- **MiniMax H3 runs as a video model with sound.** A MiniMax H3 file showed up
+  as an image model. It now sits in the video list, also under a CivitAI name,
+  and renders picture and sound together, from a prompt or from a first frame.
+  The Model Manager offers it as one download with its text encoder and both
+  decoders. With the 8-step turbo LoRA in the stack it runs 8 steps, as the
+  official template does.
+- **A download speed limit.** Settings, Model Storage takes a limit in MB/s
+  for the model files LU downloads itself, shared by all downloads at once.
+  0 means no limit. Ollama pulls and installs are not limited.
+- **The Local API shows what went through it.** While it runs, Settings,
+  Local API shows the requests and failures, the requests running now,
+  tokens in and out as the model server reports them, and the last model,
+  counted since the API started and kept in memory only.
+
+### Fixed
+
+- **A group chat answers with every LU Engine model in it.** When the models
+  sat in the folder set under Settings, Model Storage, only the loaded one
+  answered. The others got "The LU Engine has X loaded" instead of the engine
+  switching to them.
+- **Ollama models download without one already installed.** The Download
+  button asked you to pick an Ollama model in the chat first, which is not
+  possible before the first download.
+- **A GGUF from the CivitAI search lands where ComfyUI reads it.** It went to
+  the checkpoints folder, so the download finished and the model never showed
+  up. It now goes to diffusion_models, and the ComfyUI-GGUF nodes are installed
+  with it when they are missing.
+- **ComfyUI installs into its own Python environment on Windows.** A fresh
+  install could put PyTorch into the system Python, where an AMD card failed
+  with "hipdnn_backend.dll Bad Image". Every new install now gets its own
+  environment in the ComfyUI folder.
+- **The window no longer disappears on Linux.** On Bazzite and other Linux
+  systems with an AMD card the main window could vanish, under Wayland and
+  X11. The window is no longer transparent on Linux (issue 145).
+- **A chat model from LM Studio says where it is deleted.** Its row has no
+  bin, because LM Studio offers no way to delete a model from outside, and
+  Details showed nothing. Details now says to delete it in LM Studio under
+  My Models, and does the same for other local servers.
+- **The Code area always has an input box.** With no code conversation open
+  it showed "Type below to start." over nothing; the first instruction can now
+  be typed right there.
+- **Turbo checkpoints start at a few steps.** SD-Turbo, SDXL-Turbo,
+  Lightning, Hyper-SD and LCM checkpoints start at 4 steps and CFG 1 instead
+  of the family's 25 steps.
+- **Installed models show their real file format.** Every ComfyUI file that
+  was not a .gguf was labelled "safetensors", a .ckpt motion module too; the
+  list now reads the file ending.
+- **Local API counts say what they count.** "Requests" is now "Model
+  requests", since listing the models is not counted.
+- **A render says when it left a LoRA out.** The "Skipping LoRA" line was
+  gone a second later; the result now keeps it under the picture. Character
+  Studio LoRAs say "Z-Image only" before you tick them, and the strength
+  slider shows its number.
+- **A no to a download is not a failure.** Cancel in the "One more file is
+  needed" question now reads "Not started." with the reason, instead of
+  "Generation failed".
+- **One message while ComfyUI starts.** The red "ComfyUI is not running" no
+  longer stands next to "ComfyUI is starting up."
+- **Back from Video, the image model gets its own settings.** Image, Edit
+  and the other image modes only switched the mode, so an image model could
+  render with the video model's steps, sampler and size (sd_turbo after
+  MiniMax H3: 20 steps at 1344x768, several plates instead of one).
+- **New Chat in Code works like New.** The sidebar button added an empty
+  "Coding Agent" on every click and reset Bypass to Ask; it now reuses an
+  untouched session and keeps your mode.
+- **No download offer while ComfyUI is starting.** Right after launch the
+  Create stage could offer the 6.5 GB starter download while ComfyUI was still
+  coming up and the models were already on disk. It now waits.
+- **A downloaded render is the render you picked.** After a gallery delete,
+  ComfyUI could give the next render with the same prompt the freed file name,
+  and downloading the older entry then saved the newer picture. Every run now
+  writes its own file names. Download in the gallery strip also did nothing on
+  Windows; it now opens the same Save dialog as the result view.
+- **The Code agent runs calls a cloud model writes in unusual shapes.** A call
+  named "function" with a to-do list came back "Unknown tool: function", and
+  calls written into the answer as `!function_call:{"call": ...}` were never
+  picked up on LU Cloud, so the run stopped and the model kept retrying. Both
+  now reach their tool; a call that fits several tools is answered with what to
+  send instead (issue 147).
+- **A LoRA deleted from the loras folder leaves the stack.** Its pick stayed
+  saved, the stack said "2 active" with nothing ticked, and every run sent it
+  until ComfyUI refused with "Value not in list". Rescan and every connect now
+  drop picks whose file is gone, a run leaves out anything ComfyUI does not
+  list, a Character Studio character (a Z-Image LoRA) only goes to Z-Image
+  models, and Clear turns the whole stack off (issue 146).
+- **A missing encoder or VAE no longer ends in "Value not in list".** When a
+  Qwen-Image 2.1, MiniMax H3 or other newer model was missing one of its files,
+  Create tried the old checkpoint graph and ComfyUI answered with
+  "CheckpointLoaderSimple: Value not in list". Create now names the missing file
+  and offers to download it.
+- **Installing the MLX engine in a browser dev build says what is wrong.** It
+  said "Unknown backend command". It now says that the engine install needs the
+  desktop app (issue 135).
+
+- **Writing a long file no longer ends the run.** While a model writes a file,
+  the app receives the file in pieces but has no text to show. After five
+  minutes without text it treated the connection as stalled and ended the run
+  in the middle of the write, and the next run started that step again. The
+  app now ends a run only when no data arrives at all for a minute. While a
+  model is still working, the server sends a short signal every 15 seconds.
+- **"continue" picks up where the run stopped.** After a stop or an error, the
+  next message lost the steps the run had already done, and the agent started
+  over. The steps of a run are now kept for the next message, also after a
+  stop or an error. Older steps that no longer fit into the context are kept
+  as a short list of what is already done, instead of being dropped.
+- **The agent keeps a plan only when you ask for one.** The Code agent wrote a
+  todo list for almost every task and sent an update after each step, each one
+  a request of its own. It now keeps a plan in Plan mode, when you ask for a
+  plan, or while a plan is still open. The plan panel, the approval bar and the
+  file explorer are dark instead of blue.
+- **The run says which tool the model is writing.** A model writing a long
+  file sends the call in pieces for many seconds, and the run said only
+  "Working" the whole time. It now shows the tool's name and how much of the
+  call has arrived, for example "Preparing file_write 3 kB", as soon as the
+  first piece is in. A run that waits for your approval says so in the
+  chat too, and Stop before the first word leaves a short note instead of an
+  empty answer. Stop pressed right after Send ends the run on the first
+  press; before, the run could keep going or hang on "Working".
+- **Code conversations stay in the Code tab.** After a restart the last Code
+  conversation opened in the Chat tab, where the agent was off and a
+  "continue" ran without tools. The app now opens the chat you worked on last,
+  and the Chat and Code buttons each take you back to the conversation you
+  worked on last there, also while a run is going.
+- **Fewer interruptions while the agent works.** New in the Code tab keeps Ask
+  or Bypass, whichever you picked last. In the agent chat, reading, listing and
+  searching files in the agent's own folder no longer asks for approval;
+  writing still does. When the agent fixes a failed step on its own, the steps
+  no longer show a red mark and no line asks you to try again. After you say
+  No to a tool, the model is told its other tools are still there, so it
+  carries on instead of saying it has none. The clock next to "Waiting for
+  your approval" counts the wait, and a tool's time no longer includes the
+  time the card waited for you. No "Thinking" label shows while a model that
+  does not think is working, an answer that is still arriving shows no stray
+  backtick or asterisks, the context counter shows the right size from the
+  first message, and the mode menu in the Code tab is no longer cut off. No
+  approval card appears for a file outside the agent's folder, which it could
+  never open anyway. Asked to write a new file somewhere outside, the agent
+  writes it inside its folder and tells you. A new Code session lists its
+  still empty folder as empty instead of reporting an error,
+  a failed step shows its error once, and pressing New again on an untouched
+  Code session adds no extra empty entry. The hint about the agent's folder
+  stays with the chat it belongs to, and asking the chat to put a file name in
+  backticks no longer starts a file write.
+- **The agent stops repeating a tool that fails.** Tools report most failures
+  as text, and the loop guard only counted an unknown tool as failed, so a run
+  could repeat a failing call until its round limit. Failed calls now count. A
+  failure is no longer served again from the cache within the same run, and a
+  call the model was cut off in the middle of is not run half-written.
+- **Ask mode asks before tests, commits, pushes and pull requests.** It used to
+  ask only before shell commands. The approval card shows every argument. Two
+  approvals at once wait in line instead of the second one rejecting the first,
+  and the end of a run no longer rejects a question from a background
+  sub-agent. A tool you switched off in the tool permissions is refused instead
+  of offered for approval.
+- **Pending changes are written only when you mean it.** A change you reject
+  during "Apply all" is no longer written. Auto-apply follows the mode and
+  applies only the changes of the run that just finished. A file that is not
+  UTF-8 text is no longer shown as a new file and then overwritten.
+- **Chat keeps its error messages.** An error, or the note for an empty answer,
+  was sometimes overwritten by the last frame of the answer. Regenerate and Edit
+  no longer delete your question when the message cannot be sent.
+- **Create tells you what happened to a render.** Cancel on a render that a GPU
+  already took now says that it will finish and be charged, and the result
+  still lands in your gallery. A submit whose answer got lost is sent again with
+  the same request id instead of leaving a paid job you never see. The preset
+  workshop can generate again after a failed step and after Try again.
+- **The free Flash allowance lasts as long as on the web.** The app asked LU
+  Cloud to hold room for 32K answer tokens on every request, so a stopped Flash
+  request used four times as much of the daily allowance as the same request
+  on the web. LU Cloud now sizes the answer itself.
+- **Smaller fixes in Chat, Agent and Code.** The Working clock counts from the
+  start of the run, also after you switch tabs. The answer header names the
+  model the way the model picker does. Cloud models no longer show "Loading
+  model". Code blocks no longer show a light band behind every line. An
+  approval card that appears at the bottom scrolls into view. In a narrow
+  window the Code tab keeps its header on one line and the Stop button inside
+  the prompt box. Diffs of new files no longer count an empty last line, and
+  the file name shows once.
+
+### Changed
+
+- **The setup offers models without refusals.** The two chat models the
+  first start suggests are now the abliterated builds of Qwen 2.5 7B and
+  Qwen 3.5 9B, same size and speed as before. The 9B refused some requests
+  (Discord).
+- **A character trained on your own machine takes up to 100 photos.** The limit
+  was 30 everywhere. Cloud training keeps 30 and says how many photos to
+  remove (issue 121).
+- **Fewer requests for the same work.** The agent is now told to read several
+  files in one step instead of one request per file. file_edit changes several
+  places in a file in one call, all or nothing, can replace every occurrence of
+  a string, and still finds the place when the indentation in the file differs
+  slightly from the model's copy.
+- **The "Stage writes for review" setting is gone.** The mode decides whether
+  writes wait for review (Ask mode does). The auto-apply switch is always shown
+  and applies what Ask mode staged when the run finishes.
+- **Cloud context is 32K by default and can be set per model.** Cloud models
+  now send at most 32K of context by default instead of 64K. You can change it
+  per model in the context menu in the header. Once you set it above the
+  default, a small triangle shows that every message then sends more and costs
+  more credits.
 
 ## [3.0.3] - 2026-09-28
 

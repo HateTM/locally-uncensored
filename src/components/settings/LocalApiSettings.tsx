@@ -3,8 +3,9 @@ import { Copy, Check, KeyRound, Eye, EyeOff, Globe } from 'lucide-react'
 import { useLocalApiStore } from '../../stores/localApiStore'
 import {
   localApiBaseUrl, curlBeispiel, clientFelder, reichweiteText, kannStarten, pruefePort,
-  corsText,
+  corsText, nutzungZeilen, ohneZahlenText, type LocalApiNutzung,
 } from '../../lib/local-api'
+import { backendCall } from '../../api/backend'
 import { InlineToggle } from './InlineToggle'
 import { HINWEIS_TEXT } from '../../lib/hinweis'
 
@@ -32,6 +33,26 @@ export function LocalApiSettings() {
   const [corsRoh, setCorsRoh] = useState(corsOrigins.join(', '))
 
   useEffect(() => { auffrischen() }, [auffrischen])
+
+  // GH Discussion #4 (kreake): what went through the API since it started.
+  // Asked every three seconds while it runs and the panel is open.
+  // Mit dem Zeitpunkt des Abrufs, damit "vor wie langem" nicht im Rendern rechnet.
+  const [nutzung, setNutzung] = useState<{ u: LocalApiNutzung; jetzt: number } | null>(null)
+  useEffect(() => {
+    // Gestoppt: nichts fragen. Das Feld blendet sich ueber `laeuft` aus, und
+    // ein Neustart holt sofort frische Zahlen.
+    if (!laeuft) return
+    let aus = false
+    const holen = async () => {
+      try {
+        const u = await backendCall<LocalApiNutzung & { running?: boolean }>('local_api_usage')
+        if (!aus) setNutzung(u.running === false ? null : { u, jetzt: Date.now() })
+      } catch { /* die Zahlen sind Beiwerk, die API laeuft auch ohne */ }
+    }
+    void holen()
+    const t = setInterval(holen, 3000)
+    return () => { aus = true; clearInterval(t) }
+  }, [laeuft])
 
   const base = localApiBaseUrl(port, lan)
   const startbar = kannStarten(token, port)
@@ -81,6 +102,21 @@ export function LocalApiSettings() {
         <div className={`t-micro ${HINWEIS_TEXT.fehler}`}>{startbar.grund}</div>
       )}
       {fehler && <div className={`t-micro ${HINWEIS_TEXT.fehler}`}>{fehler}</div>}
+
+      {laeuft && nutzung && (
+        <div className="space-y-1" data-testid="local-api-usage">
+          <div className="t-micro text-gray-500">Since the API started</div>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
+            {nutzungZeilen(nutzung.u, nutzung.jetzt).map(({ feld, wert }) => (
+              <div key={feld} className={`flex items-center justify-between gap-2 ${feld === 'Last model' ? 'col-span-2' : ''}`}>
+                <span className="t-micro text-gray-500">{feld}</span>
+                <span className="t-mono text-gray-300 truncate" title={wert}>{wert}</span>
+              </div>
+            ))}
+          </div>
+          {ohneZahlenText(nutzung.u) && <div className="t-micro text-gray-600">{ohneZahlenText(nutzung.u)}</div>}
+        </div>
+      )}
 
       <div className="grid grid-cols-2 gap-3">
         <label className="t-micro text-gray-500">

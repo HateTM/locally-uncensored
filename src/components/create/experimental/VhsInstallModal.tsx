@@ -45,7 +45,7 @@ export function VhsInstallModal() {
           >
             Kosinkadink/ComfyUI-VideoHelperSuite
           </a>
-          {' '}(~5 MB) into your <code className="font-mono bg-white/5 px-1 rounded">ComfyUI/custom_nodes/</code> folder, runs <code className="font-mono bg-white/5 px-1 rounded">pip install</code> for its requirements, and restarts ComfyUI. Takes about 30 seconds.
+          {' '}(~5 MB) into your <code className="font-mono bg-white/5 px-1 rounded">ComfyUI/custom_nodes/</code> folder, runs <code className="font-mono bg-white/5 px-1 rounded">pip install</code> for its requirements, and restarts ComfyUI. This can take a few minutes.
         </div>
 
         <div className="flex flex-col gap-2 pt-1">

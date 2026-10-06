@@ -16,7 +16,7 @@ import type {
   ProviderClient, ProviderModel, ProviderConfig, ChatMessage, ChatOptions,
   ChatStreamChunk, ToolCall, ToolDefinition,
 } from './types'
-import { ProviderError } from './types'
+import { ProviderError, type CreditRates } from './types'
 import { RepetitionStop } from '../../lib/repetition-stop'
 import { parseSSEStream } from '../sse'
 import { idleAbortGuard, isStreamIdleTimeout } from '../stream-idle'
@@ -25,6 +25,7 @@ import { repairJson } from '../../lib/tool-call-repair'
 import { signalCreditsExhausted } from '../../lib/credits-exhausted'
 import { parseRetryAfter } from '../../lib/http-status'
 import { localFetch, localFetchStream, isPrivateOrLanHost, isDirectFetchAllowed, hostnameOf, ensureProxyAllowsHost, backendCall } from '../backend'
+import { chatBackendsBack } from '../../lib/chat-backends-gate'
 import { ensureBuiltinEngineAlive, explainDeadEngine, explainEngineTransportMessage, isManagedBuiltinSlot } from '../builtin-ensure'
 import { isLocalTransportFailure, localBackendUnreachableMessage, remoteBackendUnreachableMessage } from '../../lib/local-backend-transport'
 import { applyTemplateContract } from './normalize-system'
@@ -41,6 +42,7 @@ import {
 import type { ResolvedContextWindow } from '../../lib/context-source'
 import { contextWindowKey, storedWindow, capIsDerivable } from '../../lib/context-source'
 import { useSettingsStore } from '../../stores/settingsStore'
+import { log } from '../../lib/logger'
 
 // Transport routing lives in the `useLocalProxy` getter (below) plus the shared
 // host helpers in backend.ts. A direct webview fetch only works for hosts the
@@ -160,6 +162,18 @@ interface OpenAIModelEntry {
   // missing ladder as "keep doing exactly what you did before".
   reasoning_effort_levels?: string[]
   reasoning_effort_default?: string
+  // What the model draws per one million tokens, in credits. LU Cloud sends it
+  // since 3.0.5; absent everywhere else and on an older deployment.
+  credit_rates?: CreditRates
+}
+
+/** The models route's `credit_rates`, or nothing. Both sides must be real
+ *  numbers: half a rate would print as a price list with a hole in it. */
+function parseCreditRates(raw: unknown): CreditRates | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const { input_per_million: i, output_per_million: o } = raw as Record<string, unknown>
+  const ok = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n) && n >= 0
+  return ok(i) && ok(o) ? { inputPerMillion: i, outputPerMillion: o } : undefined
 }
 
 /**
@@ -216,7 +230,13 @@ function toModelEntry(m: Record<string, unknown>): OpenAIModelEntry {
     // becomes, and it already answers this case; a second answer here would be
     // a second place to keep right.
     reasoning_effort_default: asString(m.reasoning_effort_default),
+    credit_rates: parseCreditRates(m.credit_rates),
   }
+}
+
+/** The window a listing stated itself, for the picker's context column. */
+function declaredContextOf(m: OpenAIModelEntry): number | undefined {
+  return m.context_length && m.context_length > 0 ? m.context_length : undefined
 }
 
 /**
@@ -735,6 +755,16 @@ export class OpenAIProvider implements ProviderClient {
     options?: ChatOptions,
   ): Promise<void> {
     const requested = options?.maxTokens && options.maxTokens > 0 ? options.maxTokens : 0
+    // LU Cloud sizes an absent budget itself: it clamps to the room the model
+    // has, and a free Flash request gets its 8192 default. Our own fallback of
+    // up to 32768 read there as an explicit wish, so Flash reserved four times
+    // what the web reserves for the same message and fell over to credits
+    // while the day's free allowance still had room (bug hunt 01.10.2026, H5).
+    // Only the user's own number goes up.
+    if (this.config.id === 'lu-cloud' && (requested === 0 || options?.maxTokensIsDefault)) {
+      delete body.max_tokens
+      return
+    }
     let ctxLen = 0
     let derivable = false
     // Audit: the probe behind this runs on the SEND path. Without the signal a
@@ -844,6 +874,8 @@ export class OpenAIProvider implements ProviderClient {
     // child to free VRAM ("reloads lazily on the next message"), this is that
     // lazy reload. Restart-before-send instead of letting the fetch hit a dead
     // 127.0.0.1:8127 and look like a crashed backend.
+    // A Create render may have moved this backend's model out (vram-handoff).
+    if (this.isLanBackend) await chatBackendsBack()
     if (this.config.managed === true) await ensureBuiltinEngineAlive(model)
 
     if (this.useLocalProxy) await ensureProxyAllowsHost(this.baseUrl)
@@ -909,10 +941,16 @@ export class OpenAIProvider implements ProviderClient {
         // text-only model returns `event: error` with HTTP 200 (2026-06-21).
         const streamErr = chunk.error
         if (streamErr) {
-          throw new Error(
+          // The server's code travels with the error, so the retry ladder can
+          // tell a step it must not repeat (LU Cloud `stalled_runaway`: ten
+          // minutes of output nobody saw) from a dropped line.
+          const serverCode = typeof streamErr === 'string' ? undefined : asString(prop(streamErr, 'code')) || undefined
+          throw new ProviderError(
             typeof streamErr === 'string'
               ? streamErr
               : withContextNumbers(asString(prop(streamErr, 'message')) || 'Streaming error', streamErr),
+            'openai',
+            serverCode,
           )
         }
 
@@ -971,6 +1009,8 @@ export class OpenAIProvider implements ProviderClient {
                 args: tc.function?.arguments || '',
               })
             }
+            const call = toolCallAccum.get(key)
+            if (call?.name) yield { content: '', toolProgress: { name: call.name, argsChars: call.args.length }, done: false }
           }
         }
 
@@ -989,6 +1029,9 @@ export class OpenAIProvider implements ProviderClient {
       // terminal chunk as a clean cut, so the chat layer explains it the same
       // way instead of throwing a raw error at the user.
       if (isStreamIdleTimeout(err)) {
+        // The only trace a silent cut leaves: the chat shows "disconnected",
+        // the support log says which watchdog and after how long.
+        log.warn('provider.stream_idle_timeout', { provider: this.config.id, idleMs: err.idleMs })
         yield doneChunk('disconnect')
         return
       }
@@ -1043,6 +1086,8 @@ export class OpenAIProvider implements ProviderClient {
 
     // Same self-heal as chatStream: agent/tool turns after a Create render
     // must revive the offloaded built-in engine before hitting its port.
+    // A Create render may have moved this backend's model out (vram-handoff).
+    if (this.isLanBackend) await chatBackendsBack()
     if (this.config.managed === true) await ensureBuiltinEngineAlive(model)
 
     if (this.useLocalProxy) await ensureProxyAllowsHost(this.baseUrl)
@@ -1143,6 +1188,8 @@ export class OpenAIProvider implements ProviderClient {
           unfiltered: asUnfiltered(m.unfiltered),
           effortLevels: m.reasoning_effort_levels,
           effortDefault: m.reasoning_effort_default,
+          declaredContext: declaredContextOf(m),
+          creditRates: m.credit_rates,
         }
       }))
     }
@@ -1172,6 +1219,8 @@ export class OpenAIProvider implements ProviderClient {
         // whole effort feature off for this model.
         effortLevels: m.reasoning_effort_levels,
         effortDefault: m.reasoning_effort_default,
+        declaredContext: declaredContextOf(m),
+        creditRates: m.credit_rates,
       }
     })
   }
@@ -1750,6 +1799,9 @@ export class OpenAIProvider implements ProviderClient {
     // honest, user-facing `error` line (already captured as `message`).
     if (serverCode === 'model_no_tools') code = 'tools_unsupported'
     else if (serverCode === 'model_no_vision') code = 'vision_unsupported'
+    // A request without streaming that LU Cloud ended after ten minutes with
+    // nothing to show; lib/http-status treats it as terminal.
+    else if (serverCode === 'stalled_runaway') code = 'stalled_runaway'
     else if (serverCode === 'credits_exhausted') {
       // Out of credits, top-up wallet empty (HTTP 429). Raise the global
       // signal so the "Load up your credits" dialog opens on top of the

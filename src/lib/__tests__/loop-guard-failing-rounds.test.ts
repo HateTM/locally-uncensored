@@ -195,17 +195,19 @@ describe('G36: variants of the same failing executable', () => {
 
   it('the hooks hand the dispatched args through', () => {
     for (const f of ['../../hooks/useCodex.ts', '../../hooks/useAgentChat.ts']) {
-      expect(read(f)).toMatch(/error: r\.error, args: r\.dispatchedArgs/)
+      expect(read(f)).toMatch(/error: r\.error \?\? [^\n]*, args: r\.dispatchedArgs/)
     }
   })
 })
 
 describe('both agent loops feed it', () => {
   for (const f of ['../../hooks/useCodex.ts', '../../hooks/useAgentChat.ts']) {
+    // The real status includes a failure the tool reported as text
+    // (resultFailed, bug hunt 01.10.2026; loop-guard-sees-text-failures.test.ts).
     it(`${f.split('/').pop()} calls recordResults with the real statuses`, () => {
       const src = read(f)
       expect(src).toMatch(/loopGuard\.recordResults\(/)
-      expect(src).toMatch(/failed: r\.status === 'failed'/)
+      expect(src).toMatch(/failed: resultFailed\(r\)/)
       expect(src).toMatch(/failVerdict\.action === 'halt'/)
       expect(src).toMatch(/failVerdict\.action === 'steer'/)
     })

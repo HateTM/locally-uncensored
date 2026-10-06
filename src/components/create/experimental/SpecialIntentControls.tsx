@@ -7,6 +7,7 @@
 // genuinely differ (extend's source pick, the cloud voice maker).
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { usePopoverPlatz } from '../../../hooks/usePopoverPlatz'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
   AudioLines, Download, Film, ImagePlus, Info, Mic, Music2, Trash2, Upload, Wand2, X,
@@ -18,11 +19,12 @@ import {
   characterTrainerStatus, installCharacterTrainer, parseLocalCharacterLora,
   TRAINER_BASE_FILES, baseDownloadRunning, baseDownloadPercent, type TrainerStatus,
 } from '../../../api/trainer'
-import { startModelDownload, getDownloadProgress } from '../../../api/discover'
+import { startModelDownload, getDownloadProgress, catalogDigestFor } from '../../../api/discover'
 import { useDownloadStore } from '../../../stores/downloadStore'
 import { getLoraModels } from '../../../api/comfyui'
 import { isWindows, isMacOS } from '../../../api/backend'
-import { musicTakesLyrics, musicHowtoLines } from '../../../lib/render/music-ui'
+import { LOCAL_MUSIC_TEXT, SECONDS_LENGTH, musicHowtoLines, musicLength, musicText } from '../../../lib/render/music-ui'
+import { createRunModel, studioShownValue } from '../../../lib/render/create-studio'
 import { galleryLabelShort } from '../../../lib/render/gallery-label'
 import { TRAIN_PRESETS, trainStepsNote } from '../../../lib/trainer-presets'
 import { trainerPathPlaceholder } from '../../../lib/trainer-path-placeholder'
@@ -37,6 +39,7 @@ import { Slider } from '../ui/Slider'
 import { cn } from '../ui/cn'
 import { useClickAway } from '../ui/useClickAway'
 import { Modal } from '../../ui/Modal'
+import { MIN_TRAIN_IMAGES, maxTrainImages } from '../../../lib/train-image-cap'
 
 export function SpecialControls({ intent }: { intent: CreateIntent }) {
   switch (intent) {
@@ -198,7 +201,7 @@ function CharacterPanel() {
             className="t-control w-44 px-2.5 h-[var(--control-h-sm)] rounded-md bg-white/[0.03] border border-white/[0.06] text-gray-200 placeholder-gray-600 focus:outline-none focus:border-white/15"
           />
           <span className="t-label text-gray-600">
-            {trainImages.length}/30 photos added{trainImages.length < 4 ? ', need at least 4' : ''}
+            {trainImages.length}/{maxTrainImages(backend)} photos added{trainImages.length < MIN_TRAIN_IMAGES ? `, need at least ${MIN_TRAIN_IMAGES}` : ''}
           </span>
         </div>
       ) : (
@@ -505,7 +508,7 @@ function LocalTrainControls() {
     if (missing.length > 1) dl.setBundleGroup('Character Studio base models', missing.map((f) => f.filename))
     for (const f of missing) {
       dl.setMeta(f.filename, f.url, f.subfolder)
-      try { await startModelDownload(f.url, f.subfolder, f.filename) } catch (e) {
+      try { const d = catalogDigestFor(f.filename, f.url); await startModelDownload(f.url, f.subfolder, f.filename, d.expectedBytes, d.sha256) } catch (e) {
         setNote(e instanceof Error ? e.message : `Could not start ${f.filename}.`)
       }
       dl.startPolling()
@@ -571,7 +574,7 @@ function LocalTrainControls() {
           options={TRAIN_PRESETS.map((p) => ({ value: String(p.steps), label: p.label }))}
         />
         <span className="t-label text-gray-600">
-          {trainImages.length}/30 photos{trainImages.length < 4 ? ', need at least 4' : ''}
+          {trainImages.length}/{maxTrainImages('local')} photos{trainImages.length < MIN_TRAIN_IMAGES ? `, need at least ${MIN_TRAIN_IMAGES}` : ''}
         </span>
       </div>
       {!isGenerating && (
@@ -735,6 +738,8 @@ function VoiceChip({
   const inputRef = useRef<HTMLInputElement>(null)
   const ref = useRef<HTMLDivElement>(null)
   useClickAway(ref, () => { setOpen(false); setMakerOpen(false) }, open || makerOpen)
+  const panelRef = useRef<HTMLDivElement>(null)
+  const panel = usePopoverPlatz(panelRef, open, { bevorzugt: 'oben', abstand: 6 })
   const { makeVoice } = useCreateExp()
   const isGenerating = useCreateStore((s) => s.isGenerating)
   // The AI voice maker + "your generated audio" picks are cloud runs (hosted
@@ -777,11 +782,13 @@ function VoiceChip({
       <AnimatePresence>
         {open && (
           <motion.div
-            initial={{ opacity: 0, y: 4 }}
+            ref={panelRef}
+            style={panel.style}
+            initial={{ opacity: 0, y: panel.nachOben ? 4 : -4 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 4 }}
+            exit={{ opacity: 0, y: panel.nachOben ? 4 : -4 }}
             transition={{ duration: 0.12 }}
-            className="lu-elevated absolute bottom-full mb-1.5 left-0 z-50 w-72 rounded-lg p-1.5 space-y-1"
+            className={cn('lu-elevated absolute left-0 z-50 w-72 rounded-lg p-1.5 space-y-1 overflow-y-auto scrollbar-thin', panel.nachOben ? 'bottom-full mb-1.5' : 'top-full mt-1.5')}
           >
             {!makerOpen ? (
               <>
@@ -890,53 +897,79 @@ function MusicControls() {
   const setMusicLyrics = useCreateStore((s) => s.setMusicLyrics)
   const cloudOpModel = useCreateStore((s) => s.cloudOpModel)
   const isCloud = useCreateStore((s) => s.backend) === 'cloud'
-  // Cloud: only ace-step-1.5 has a lyrics input on the wire (catalog `lyrics`
-  // flag); the other music endpoints write their own lyrics from the prompt,
-  // so offering the box there would be a lie.
-  // Local: every music checkpoint runs through buildMusicWorkflow, which feeds
-  // `lyrics` straight into the ACE-Step encoder. Asking the CLOUD catalog about
-  // a local checkpoint returns undefined, which is how the local tab ended up
-  // hiding the lyrics box and claiming the model writes its own, while sitting
-  // on the one model that sings yours (#108, ElBiggus).
-  const canLyrics = musicTakesLyrics(
-    isCloud ? 'cloud' : 'local',
-    cloudModelById(modelForOp('audio', 'music', cloudOpModel))?.lyrics === true,
-  )
-  const howtoLines = musicHowtoLines(isCloud ? 'cloud' : 'local')
   const musicHowtoSeen = useCreateStore((s) => s.musicHowtoSeen)
   const setMusicHowtoSeen = useCreateStore((s) => s.setMusicHowtoSeen)
-  const [lyricsOpen, setLyricsOpen] = useState(musicLyrics.length > 0)
   const [howtoOpen, setHowtoOpen] = useState(false)
+  // The catalog decides which models the picker holds, so this surface redraws
+  // when it arrives.
+  useCloudCatalogStore((s) => s.models)
+  const model = createRunModel('music', { image: '', video: '', op: cloudOpModel })
+  const studioOptions = useCreateStore((s) => s.cloudStudioOptions)
+  const setStudioOptions = useCreateStore((s) => s.setCloudStudioOptions)
+  // Cloud: which text goes where is the model's own business. For most the
+  // prompt is the style and a few take lyrics next to it, for Mureka Song the
+  // prompt IS the lyrics and the style sits next to it. The second text is
+  // offered wherever the model reads one, under its real name.
+  // Local: every music checkpoint runs through buildMusicWorkflow, which feeds
+  // the lyrics box straight into the encoder. Asking the CLOUD catalog about a
+  // local checkpoint is how the local tab once hid the box while sitting on
+  // the one model that sings yours (#108, ElBiggus).
+  const text = isCloud ? musicText(model) : LOCAL_MUSIC_TEXT
+  const second = text.second
+  const secondValue = !second ? '' : second.option
+    ? String(studioShownValue(model, studioOptions, second.option) ?? '')
+    : musicLyrics
+  const setSecondValue = (v: string) => {
+    if (!second) return
+    if (second.option) setStudioOptions({ ...studioOptions, [second.option]: v === '' ? undefined : v })
+    else setMusicLyrics(v)
+  }
+  const [secondOpen, setSecondOpen] = useState(musicLyrics.length > 0)
+  // The length slider stands only where the run reads a length, and sets the
+  // field the run sends: the store's seconds for a local or a classic cloud
+  // model, the model's own option for a Studio one (the same option the price
+  // is computed from).
+  const length = isCloud ? musicLength(model) : SECONDS_LENGTH
+  const lengthOption = length?.option
+  const seconds = length && lengthOption
+    ? Math.round(Number(studioShownValue(model, studioOptions, lengthOption)) / length.perSecond)
+    : musicDuration
+  const howtoLines = musicHowtoLines(isCloud ? 'cloud' : 'local', { text, length })
 
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-center gap-3">
-        <div className="w-56">
-          <Slider
-            label="Length"
-            min={5}
-            max={240}
-            step={5}
-            value={musicDuration}
-            onChange={setMusicDuration}
-            format={(v) => `${Math.floor(v / 60)}:${String(v % 60).padStart(2, '0')}`}
-          />
-        </div>
-        {canLyrics ? (
+        {length && (
+          <div className="w-56">
+            <Slider
+              label="Length"
+              min={length.min}
+              max={length.max}
+              step={length.step}
+              value={Math.max(length.min, Math.min(length.max, seconds))}
+              onChange={(v) => (lengthOption
+                ? setStudioOptions({ ...studioOptions, [lengthOption]: v * length.perSecond })
+                : setMusicDuration(v))}
+              format={(v) => `${Math.floor(v / 60)}:${String(v % 60).padStart(2, '0')}`}
+            />
+          </div>
+        )}
+        {second ? (
           <button
-            onClick={() => setLyricsOpen((o) => !o)}
+            onClick={() => setSecondOpen((o) => !o)}
+            aria-expanded={secondOpen}
             className={cn(
               't-control flex items-center gap-1.5 px-2.5 h-[var(--control-h-sm)] rounded-md border transition-colors',
-              lyricsOpen
+              secondOpen
                 ? 'bg-white/[0.06] border-white/10 text-gray-200'
                 : 'bg-white/[0.03] border-white/[0.06] text-gray-400 hover:text-gray-200',
             )}
           >
-            <Music2 size={12} /> Lyrics
+            <Music2 size={12} /> {second.is === 'lyrics' ? 'Lyrics' : 'Style'}
           </button>
         ) : (
           <span className="t-control text-gray-500">
-            This model writes its own lyrics from the prompt. Pick ACE-Step 1.5 to sing yours.
+            {text.main === 'lyrics' ? 'This model sings the lyrics you write.' : 'This model writes its own lyrics from the prompt.'}
           </span>
         )}
         <div className="relative">
@@ -970,7 +1003,8 @@ function MusicControls() {
             <div className="t-control px-3 py-2 rounded-md bg-white/[0.03] border border-white/[0.06] text-gray-400 space-y-1 text-left">
               {/* Copy lives in music-ui.ts so the claims are asserted, not
                   eyeballed. The local panel used to promise other downloadable
-                  models and per-second billing (#108). */}
+                  models and per-second billing (#108), the cloud panel follows
+                  the model on screen. */}
               {howtoLines.map((line, i) => (
                 <p key={i} className={i === 0 ? 'text-gray-200' : undefined}>{line}</p>
               ))}
@@ -979,7 +1013,7 @@ function MusicControls() {
         )}
       </AnimatePresence>
       <AnimatePresence>
-        {canLyrics && lyricsOpen && (
+        {second && secondOpen && (
           <motion.div
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: 'auto', opacity: 1 }}
@@ -987,10 +1021,13 @@ function MusicControls() {
             className="overflow-hidden"
           >
             <textarea
-              value={musicLyrics}
-              onChange={(e) => setMusicLyrics(e.target.value)}
-              placeholder="Your lyrics. [Verse] and [Chorus] markers make them sing best…"
-              rows={3}
+              value={secondValue}
+              onChange={(e) => setSecondValue(e.target.value)}
+              aria-label={second.is === 'lyrics' ? 'Lyrics' : 'Style'}
+              placeholder={second.is === 'lyrics'
+                ? 'Your lyrics. [Verse] and [Chorus] markers make them sing best…'
+                : 'Genre, mood, tempo, voice…'}
+              rows={second.is === 'lyrics' ? 3 : 1}
               className="w-full t-control px-2.5 py-1.5 rounded-md bg-white/[0.03] border border-white/[0.06] text-gray-200 placeholder-gray-600 focus:outline-none focus:border-white/15 resize-none"
             />
           </motion.div>
@@ -1048,6 +1085,8 @@ function LocalExtendControls() {
   const inputRef = useRef<HTMLInputElement>(null)
   const ref = useRef<HTMLDivElement>(null)
   useClickAway(ref, () => setOpen(false), open)
+  const panelRef = useRef<HTMLDivElement>(null)
+  const panel = usePopoverPlatz(panelRef, open, { bevorzugt: 'oben', abstand: 6, deckel: 256 })
 
   const adopt = async (getUrl: () => Promise<{ url: string; revoke?: () => void }>, label: string) => {
     setBusy(true)
@@ -1123,11 +1162,13 @@ function LocalExtendControls() {
         <AnimatePresence>
           {open && (
             <motion.div
-              initial={{ opacity: 0, y: 4 }}
+              ref={panelRef}
+              style={panel.style}
+              initial={{ opacity: 0, y: panel.nachOben ? 4 : -4 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 4 }}
+              exit={{ opacity: 0, y: panel.nachOben ? 4 : -4 }}
               transition={{ duration: 0.12 }}
-              className="lu-elevated absolute bottom-full mb-1.5 left-1/2 -translate-x-1/2 z-50 w-72 rounded-lg p-1 max-h-64 overflow-y-auto scrollbar-thin"
+              className={cn('lu-elevated absolute left-1/2 -translate-x-1/2 z-50 w-72 rounded-lg p-1 overflow-y-auto scrollbar-thin', panel.nachOben ? 'bottom-full mb-1.5' : 'top-full mt-1.5')}
             >
               <button
                 onClick={() => inputRef.current?.click()}
@@ -1161,6 +1202,8 @@ function CloudExtendControls() {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   useClickAway(ref, () => setOpen(false), open)
+  const panelRef = useRef<HTMLDivElement>(null)
+  const panel = usePopoverPlatz(panelRef, open, { bevorzugt: 'oben', abstand: 6, deckel: 256 })
 
   return (
     <div className="flex items-center justify-center">
@@ -1187,11 +1230,13 @@ function CloudExtendControls() {
         <AnimatePresence>
           {open && (
             <motion.div
-              initial={{ opacity: 0, y: 4 }}
+              ref={panelRef}
+              style={panel.style}
+              initial={{ opacity: 0, y: panel.nachOben ? 4 : -4 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 4 }}
+              exit={{ opacity: 0, y: panel.nachOben ? 4 : -4 }}
               transition={{ duration: 0.12 }}
-              className="lu-elevated absolute bottom-full mb-1.5 left-1/2 -translate-x-1/2 z-50 w-72 rounded-lg p-1 max-h-64 overflow-y-auto scrollbar-thin"
+              className={cn('lu-elevated absolute left-1/2 -translate-x-1/2 z-50 w-72 rounded-lg p-1 overflow-y-auto scrollbar-thin', panel.nachOben ? 'bottom-full mb-1.5' : 'top-full mt-1.5')}
             >
               {clips.length === 0 && (
                 <div className="t-control text-gray-500 px-2.5 py-2">

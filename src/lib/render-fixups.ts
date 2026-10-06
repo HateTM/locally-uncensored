@@ -22,7 +22,7 @@ export interface FixupDeps {
   ask: (prompt: FixupPrompt) => Promise<boolean>
   /** Download these files and wait until ComfyUI lists them. */
   download: (files: Array<ComponentSpec & { downloadUrl: string; subfolder: string }>) => Promise<void>
-  /** Update ComfyUI, start it again, and wait until it answers. */
+  /** Update ComfyUI (the update starts it again) and wait until it answers. */
   updateComfy: () => Promise<void>
   /** Drop the cached node catalogue so the next build reads the new state. */
   refresh: () => Promise<void>
@@ -85,10 +85,27 @@ export function remoteUpdateMessage(remote: RemoteComfy): string {
   return `This model needs a newer ComfyUI than the one on ${remote.host}. Update ComfyUI on that machine, restart it, then hit Create again.`
 }
 
+/** What the stage says while a dialog waits for the user. The box,
+ *  03.10.2026: "Building workflow..." stood there for ten minutes while the
+ *  MP4 question was open, and it read as a hang. */
+export const WAITING_FOR_ANSWER = 'Waiting for your answer in the dialog…'
+
 export const UPDATE_PROMPT: FixupPrompt = {
   title: 'ComfyUI needs an update',
   detail: 'This model needs a newer ComfyUI than the one installed. LU updates it (git pull plus its Python packages), restarts it, then starts the render. Takes a few minutes.',
   confirm: 'Update ComfyUI and render',
+}
+
+/** The original reason, marked as the user's own no, so Create can say
+ *  "Not started" instead of "Generation failed" (3.0.4 Gegenprobe 8: a
+ *  deliberate Cancel in the download question read as a failure). */
+function declined(err: unknown): unknown {
+  if (err instanceof Error) Object.assign(err, { declined: true })
+  return err
+}
+
+export function wasDeclined(err: unknown): boolean {
+  return err instanceof Error && (err as { declined?: boolean }).declined === true
 }
 
 /** A build that can be retried after its missing pieces are fixed. The same
@@ -106,7 +123,7 @@ export async function buildWithFixups<T>(build: () => Promise<T>, deps: FixupDep
         if (remote) throw new Error(remoteUpdateMessage(remote))
         if (done.has('update')) throw err
         done.add('update')
-        if (!(await deps.ask(UPDATE_PROMPT))) throw err
+        if (!(await deps.ask(UPDATE_PROMPT))) throw declined(err)
         await deps.updateComfy()
       } else {
         const files = (e.missing ?? []).filter(
@@ -115,7 +132,7 @@ export async function buildWithFixups<T>(build: () => Promise<T>, deps: FixupDep
         const key = files.map((f) => f.downloadFilename).sort().join('|')
         if (done.has(key)) throw err
         done.add(key)
-        if (!(await deps.ask(remote ? remoteDownloadPrompt(files, remote) : downloadPrompt(files)))) throw err
+        if (!(await deps.ask(remote ? remoteDownloadPrompt(files, remote) : downloadPrompt(files)))) throw declined(err)
         await deps.download(files)
         // On another machine nothing can render with them until they are
         // copied over, so the run ends here and says what to copy where.

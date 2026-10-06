@@ -51,6 +51,13 @@ export interface CloudScenario {
    * (both collapse to the identical client-side message).
    */
   studioQuoteStatus?: 200 | 404 | 'unreachable'
+  /**
+   * 02.10.2026: the catalog of a server that ships `tier` and `weights` on
+   * every entry plus a Studio image model (Nucleus). Leaving it unset
+   * reproduces the server of today: no entry carries either field, and the
+   * pickers must stand there neutral (no mark, no "Older models" row).
+   */
+  tierCatalog?: boolean
 }
 
 // P9: one Studio model, shaped like a real /api/jobs/catalog entry once P0's
@@ -165,8 +172,8 @@ export async function routeCloud(page: Page, scenario: CloudScenario): Promise<v
       return route.fulfill(
         json(200, {
           models: [
-            { id: 'flux-schnell', label: 'Flux Schnell (fast)', kind: 'image', edit: false, cfg: true, negative_prompt: false, credits: { base: 300 } },
-            { id: 'flux-dev', label: 'Flux Dev (quality)', kind: 'image', edit: true, cfg: true, negative_prompt: false, credits: { base: 1200 } },
+            { id: 'flux-schnell', label: 'Flux Schnell (fast)', kind: 'image', edit: false, cfg: true, negative_prompt: false, credits: { base: 300 }, ...(scenario.tierCatalog ? { tier: 'older', weights: 'open' } : {}) },
+            { id: 'flux-dev', label: 'Flux Dev (quality)', kind: 'image', edit: true, cfg: true, negative_prompt: false, credits: { base: 1200 }, ...(scenario.tierCatalog ? { tier: 'older', weights: 'open' } : {}) },
             {
               id: 'wan-2.2-720p', label: 'Wan 2.2 720p', kind: 'video', edit: false, cfg: false, negative_prompt: true,
               // dd29f359: clip.durations/credits.by_duration let a model book
@@ -188,6 +195,10 @@ export async function routeCloud(page: Page, scenario: CloudScenario): Promise<v
             { id: 'wan-2.2-spicy-extend', label: 'Wan 2.2 Spicy Extend', kind: 'video', ops: ['extend'], t2v: false, i2v: false, adult: true, credits: { base: 15000 } },
             { id: 'wan-2.2-animate', label: 'Wan 2.2 Animate', kind: 'video', ops: ['motion'], t2v: false, i2v: false, credits: { base: 12000 } },
             ...(scenario.studioCatalog ? [STUDIO_CATALOG_MODEL] : []),
+            ...(scenario.tierCatalog
+              ? [{ id: 'z-image-turbo', label: 'Z-Image Turbo (fast)', kind: 'image' as const, edit: false, cfg: false, negative_prompt: false, credits: { base: 300 }, tier: 'best', weights: 'open' },
+                 { id: 'nucleus-image', label: 'Nucleus', kind: 'image' as const, adult: true, ops: ['studio'], quote_required: true, tier: 'standard', weights: 'open-family' }]
+              : []),
           ],
           ops: { removebg: 1000, eraser: 2500, upscale_image: 1000, upscale_video_per_s: 500, upscale_video_min: 2500 },
           voice: { stt: 600, tts_per_1k_chars: 8000 },

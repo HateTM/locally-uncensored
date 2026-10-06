@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { useChatStore } from '../../stores/chatStore'
+import { useSettingsStore } from '../../stores/settingsStore'
+import { groupSpeakers } from '../../lib/group-chat'
 import { useAutoScroll } from '../../hooks/useAutoScroll'
 import { MessageBubble } from './MessageBubble'
 import { WorkingAnchor } from './WorkingAnchor'
@@ -8,6 +10,8 @@ import { CompactBlock } from './CompactBlock'
 import { compactionAnchors } from '../../lib/compact-summary'
 import { Hinweis } from '../ui/Hinweis'
 import { TRANSCRIPT_MAX_PX } from './composer-width'
+import { useAgentModeStore } from '../../stores/agentModeStore'
+import { latestRefusalId, refusalNoticeApplies } from '../../lib/refusal-detect'
 
 /**
  * Above this many visible messages the transcript stops paying full layout +
@@ -72,6 +76,22 @@ export function MessageList({ isGenerating, isThisChatGenerating, isLoadingModel
     return s.conversations.find((c) => c.id === s.activeConversationId)
   })
 
+  // Group chat: who speaks as which persona (3.0.5). Resolved once for the
+  // list, so each bubble gets a plain string and stays memoised.
+  const personas = useSettingsStore((s) => s.personas)
+  const groupModels = conversation?.groupModels
+  const groupPersonas = conversation?.groupPersonas
+  const speakers = useMemo(
+    () => groupSpeakers(groupModels ?? [], groupPersonas, personas),
+    [groupModels, groupPersonas, personas],
+  )
+
+  // Agent mode of THIS chat: a short "I can't ..." there is usually about a
+  // file or a command, so the refusal notice stays out (lib/refusal-detect).
+  const agentModeActive = useAgentModeStore((s) =>
+    conversation ? s.agentModeActive[conversation.id] ?? false : false,
+  )
+
   const lastMessage = conversation?.messages[conversation.messages.length - 1]
   // The approval id is part of the scroll trigger (G31): a run waiting for a
   // decision often adds NO content, so the list stood still while the inline
@@ -124,6 +144,13 @@ export function MessageList({ isGenerating, isThisChatGenerating, isLoadingModel
     (m) => (m.role !== 'system' || !!m.notice) && !m.hidden,
   )
   const lastVisibleId = visibleMessages[visibleMessages.length - 1]?.id
+  // The one answer that carries the refusal notice, if any. The answer that
+  // is still being written is never judged: every long answer is a short one
+  // for a moment.
+  const streamingId = showTyping && lastMessage?.role === 'assistant' ? lastMessage.id : null
+  const declinedId = refusalNoticeApplies(conversation, agentModeActive)
+    ? latestRefusalId(visibleMessages, streamingId)
+    : null
 
   if (skipGate.id !== conversation.id) {
     setSkipGate({
@@ -204,6 +231,10 @@ export function MessageList({ isGenerating, isThisChatGenerating, isLoadingModel
                 pendingApprovalId={pendingApprovalId}
                 onApprove={onApprove}
                 onReject={onReject}
+                declined={message.id === declinedId}
+                speakerName={message.modelId && speakers[message.modelId]?.personaPrompt !== undefined
+                  ? speakers[message.modelId].name
+                  : undefined}
               />
               )}
               {compactAt.get(message.id)?.map((record) => (
@@ -216,7 +247,13 @@ export function MessageList({ isGenerating, isThisChatGenerating, isLoadingModel
             streams. G14-6: one shimmering "Working" with the clock beside it,
             instead of three dots here and a floating counter elsewhere. */}
         {showTyping && lastMessage?.role === 'assistant' && (
-          <WorkingAnchor isRunning label={isLoadingModel ? 'Loading model' : undefined} />
+          <WorkingAnchor
+            isRunning
+            conversationId={conversation?.id}
+            // A run waiting on the user is not working: same words as the Code
+            // tab (G15b), Gegenprobe 01.10.2026 read "Working 49s" here.
+            label={isLoadingModel ? 'Loading model' : pendingApprovalId ? 'Waiting for your approval' : undefined}
+          />
         )}
       </div>
     </div>

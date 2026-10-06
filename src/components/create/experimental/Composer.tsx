@@ -1,26 +1,27 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Sparkles, X, SlidersHorizontal, Square, Workflow } from 'lucide-react'
-import { useCreateStore, MODEL_TYPE_DEFAULTS, EDIT_MAX_DENOISE } from '../../../stores/createStore'
+import { useCreateStore, MODEL_TYPE_DEFAULTS, EDIT_MAX_DENOISE, imageQualityLadder, type ImageQuality } from '../../../stores/createStore'
 import { classifyModel } from '../../../api/comfyui'
 import { useCreateExp } from './CreateContext'
 import { intentToJob } from '../../../lib/render/cloud-jobs'
 import { meterState } from '../../../lib/render/credits-meter'
+import { runImageCount } from '../../../lib/render/image-count'
 import {
+  useCloudCatalogStore,
   cloudModelById,
   defaultCloudModel,
-  defaultEditModel,
-  isEditCapable,
+  editNeedsMask,
   modelForOp,
   runCredits,
 } from '../../../stores/cloudCatalogStore'
-import { intentRequiredInputs, intentRoles, isStudioModel, resolveIntentPick } from '../../../lib/render/create-studio'
+import { createRunModel, intentRequiredInputs, isStudioModel } from '../../../lib/render/create-studio'
 import { STUDIO_MODELS } from '../../../lib/render/studio-contract'
 import { effectiveVideoDurations, snapToVideoDuration } from '../../../lib/render/video-duration'
 import { mediaSeconds, useStudioPrice } from './useStudioPrice'
 import { getJob } from '../../../api/cloud/jobs'
-import { resolveCharacterModel } from '../../../hooks/useCloudCreate'
-import { INTENT_MAP } from './intents'
+import { INTENT_MAP, intentTakesPrompt } from './intents'
+import { MUSIC_PLACEHOLDER, musicText } from '../../../lib/render/music-ui'
 import { subscribeInstallRuns, getInstallRun } from '../../../lib/model-install-runs'
 import { useWorkflowStore, shouldShowManagerNotice } from '../../../stores/workflowStore'
 import { noPromptHint, shouldShowLaneHint } from './laneHint'
@@ -53,7 +54,9 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
   const toggleNegative = useCreateStore((s) => s.toggleNegative)
   const source = useCreateStore((s) => s.source)
   const mask = useCreateStore((s) => s.mask)
-  const isGenerating = useCreateStore((s) => s.isGenerating)
+  // A batch over several source images counts as one run in flight, also in
+  // the short gap between two of its images: the button stays Cancel.
+  const isGenerating = useCreateStore((s) => s.isGenerating || s.batchRun !== null)
   const backend = useCreateStore((s) => s.backend)
   const targetResolution = useCreateStore((s) => s.targetResolution)
   const setTargetResolution = useCreateStore((s) => s.setTargetResolution)
@@ -74,6 +77,10 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
   const musicDuration = useCreateStore((s) => s.musicDuration)
   const managerNoticeSeen = useWorkflowStore((s) => s.managerNoticeSeen)
   const { generate, cancel, quota } = useCreateExp()
+  // Der Katalog kommt vom Server und kann nach dem ersten Zeichnen eintreffen:
+  // die Waehler und die Studio-Wahl unten lesen ihn, also zeichnet dieser
+  // Abonnent den Composer neu, sobald er sich aendert.
+  useCloudCatalogStore((s) => s.models)
 
   // The Create button turns into Cancel in place — a double-click's second
   // press would instantly cancel the run it just started. Ignore cancel
@@ -104,36 +111,35 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
   }
   // The prompt field shows wherever the run consumes one — that's the meta
   // flag, plus Character-Studio's use-surface (train has no prompt).
-  const needPrompt = meta.needsPrompt || characterUse
+  const needPrompt = intentTakesPrompt(intent, characterUse)
   // Gate on the exact run's cost (model + op + clip length), the same figure
   // the CreditsMeter shows — quota.costs[kind] is only the tier's
   // representative per-kind number and would mis-gate utility ops / pricier
   // models.
   // Studio-Spur (Portplan Abschnitt 3d): ein DRITTER Zweig, strikt hinter
-  // `backend === 'cloud'`. Nur die vier Rollen-Absichten (lipsync/music/
-  // extend/motion, intentRoles(intent), P2) koennen ueberhaupt ein
-  // Studio-Modell fahren; character-use bleibt bei seiner festen
-  // -lora-Familie (resolveCharacterModel) und ruehrt Studio nie an. Auf der
-  // lokalen Spur ist `studioPick` immer undefined, und ausschliesslich das
-  // haelt useStudioPrice unten von jedem Netzabruf ab.
-  const roleIntent = backend === 'cloud' && !characterUse && intentRoles(intent).length > 0
-  const rolePick = roleIntent ? resolveIntentPick(intent, cloudOpModel) : undefined
-  const studioPick = rolePick && isStudioModel(rolePick) ? rolePick : undefined
-  const pickedModel = characterUse
-    ? (resolveCharacterModel(selectedCharacter?.family ?? '', cloudOpModel) ?? '')
-    : roleIntent
-      ? (rolePick ?? '')
-      : special
-        ? cloudOpModel
-        : (intentKind === 'video' ? cloudVideoModel : cloudImageModel) ||
-          defaultCloudModel(intentKind)?.id || ''
+  // `backend === 'cloud'`. Die Rollen-Absichten (lipsync/music/extend/motion/
+  // video_upscale, intentRoles(intent)) fahren ein Studio-Modell aus ihrer Rolle;
+  // seit 02.10.2026 koennen auch Image, Edit, Video und Animate eines fahren
+  // (Web-Paritaet), die Wahl kommt dort durch modelForOp. character-use bleibt
+  // bei seiner festen -lora-Familie (resolveCharacterModel) und ruehrt Studio
+  // nie an. Auf der lokalen Spur ist `studioPick` immer undefined, und
+  // ausschliesslich das haelt useStudioPrice unten von jedem Netzabruf ab.
+  // Dieselbe Aufloesung wie Zaehler, Speicher und Start (createRunModel): eine
+  // Wahl, die die Unterkategorie nicht fahren kann, rechnet hier als das Modell,
+  // das wirklich laeuft. Rollen-Absichten behalten ihre Wahl.
+  const runModel = createRunModel(
+    intent,
+    { image: cloudImageModel, video: cloudVideoModel, op: cloudOpModel },
+    characterUse ? selectedCharacter?.family ?? '' : undefined,
+  )
   // A Studio pick runs on its own schema-driven endpoint (studioBaseCredits /
   // studioQuote), not on the classic per-kind picker's kind.
+  const studioPick = backend === 'cloud' && !characterUse && isStudioModel(runModel) ? runModel : undefined
   const runKind = studioPick ? STUDIO_MODELS[studioPick].kind : intentKind
   const runSeconds =
     intentOp === 'music'
       ? musicDuration
-      : runKind === 'video' && (intentOp === 'generate' || intentOp === 'animate') && fps > 0
+      : runKind === 'video' && !studioPick && (intentOp === 'generate' || intentOp === 'animate') && fps > 0
         ? frames / fps
         : undefined
   // Die im Browser gemessene Laenge einer angehaengten Datei, gebraucht nur von den
@@ -185,7 +191,14 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
   const inputSeconds =
     (measured && measured.url === mediaUrl ? measured.seconds : undefined) ??
     (measuredVoice && measuredVoice.jobId === voiceJobId ? measuredVoice.seconds : undefined)
-  const studioPrice = useStudioPrice(studioPick, cloudStudioOptions, prompt, runSeconds ?? inputSeconds)
+  // Fotos der Referenzleiste und Bilder pro Lauf gehen in den Preis ein: die
+  // Fotos in den Preis EINES Bildes (der Anbieter rechnet sie je Bild), die
+  // Anzahl als Faktor darueber.
+  const references = useCreateStore((s) => s.references)
+  const cloudImageCount = useCreateStore((s) => s.cloudImageCount)
+  const extraPhotos = intent === 'edit' || intent === 'animate' ? references.length : 0
+  const imageCount = backend === 'cloud' ? runImageCount(intent, cloudImageCount, characterUse) : 1
+  const studioPrice = useStudioPrice(studioPick, cloudStudioOptions, prompt, runSeconds ?? inputSeconds, extraPhotos)
   const setCloudStudioCredits = useCreateStore((s) => s.setCloudStudioCredits)
   useEffect(() => {
     setCloudStudioCredits(studioPrice?.credits ?? null)
@@ -203,20 +216,16 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
       !(studioPick && studioPrice?.error) &&
       meterState(
         quota,
-        studioPick ? (studioPrice?.credits ?? costFallback) : runCredits(intentKind, intentOp, pickedModel, runSeconds, costFallback, targetResolution),
+        imageCount * (studioPick ? (studioPrice?.credits ?? costFallback) : runCredits(intentKind, intentOp, runModel, runSeconds, costFallback, targetResolution)),
         runKind,
         intentOp,
       ).kind === 'ok')
-  // Match useCloudCreate's submit-time edit fallback so the Neg gate reflects
-  // the model the run actually uses, not a t2i model still in the picker.
-  const runModel =
-    intentOp === 'edit' && !isEditCapable(pickedModel) ? (defaultEditModel()?.id ?? pickedModel) : pickedModel
   // The hosted endpoints only honour negative_prompt for a few families —
   // hide the toggle (and the collapsed field) where it would be silently
   // dropped, like the other dead knobs on cloud.
   const negSupported = backend !== 'cloud' || cloudModelById(runModel)?.negative_prompt === true
   // R5-66: see maskGate.ts for the full rule and why 'edit' differs from Web.
-  const needsMask = needsMaskFor(intent, backend, cloudModelById(runModel)?.maskless)
+  const needsMask = needsMaskFor(intent, backend, !editNeedsMask(runModel))
   // Per-intent readiness for the 2.5.8 categories (mirrors the submit-time
   // checks of BOTH lanes so the button never invites a doomed run). The
   // local lanes always speak from a portrait (no hosted resync endpoints)
@@ -295,7 +304,11 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
                     // cloud model requires a mask.
                     : (intent === 'edit' && needsMask
                       ? 'Describe the new look. Paint an area first to tell it what to change…'
-                      : meta.placeholder)
+                      // Cloud music: the field asks for what the model does
+                      // with it, a description or the lyrics it sings.
+                      : intent === 'music' && backend === 'cloud'
+                        ? MUSIC_PLACEHOLDER[musicText(runModel).main]
+                        : meta.placeholder)
                 }
                 onSubmit={() => canGenerate && !isGenerating && guardedGenerate()}
               />
@@ -349,7 +362,7 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
               background"). */}
           {showNoPromptHint && !needsMask && (
             <div className="px-3.5 py-3 t-body text-gray-500">
-              {noPromptHint(meta.id)}
+              {noPromptHint(meta.id, backend)}
             </div>
           )}
           {needsMask && !needPrompt && !isGenerating && (
@@ -487,6 +500,8 @@ function LaneControls() {
   const denoise = useCreateStore((s) => s.denoise)
   const setDenoise = useCreateStore((s) => s.setDenoise)
   const imageModelType = useCreateStore((s) => s.imageModelType)
+  const imageModel = useCreateStore((s) => s.imageModel)
+  const setImageQuality = useCreateStore((s) => s.setImageQuality)
   const width = useCreateStore((s) => s.width)
   const height = useCreateStore((s) => s.height)
   const setSize = useCreateStore((s) => s.setSize)
@@ -506,10 +521,12 @@ function LaneControls() {
   const setCloudFps = useCreateStore((s) => s.setCloudFps)
   const videoModel = useCreateStore((s) => s.videoModel)
   const cloudVideoModel = useCreateStore((s) => s.cloudVideoModel)
+  const cloudImageModel = useCreateStore((s) => s.cloudImageModel)
 
   const base = MODEL_TYPE_DEFAULTS[imageModelType]?.steps ?? 25
-  const qSteps = { Draft: Math.round(base * 0.6), Standard: base, High: Math.round(base * 1.5) }
-  const activeQ = nearestKey(qSteps, steps)
+  // The button shown as picked is the one whose step count is nearest to the
+  // current one, measured on the ladder of the picked model.
+  const activeQ = nearestKey(imageQualityLadder({ backend, imageModel, imageModelType }).steps, steps)
 
   // Character-Studio forks: the Train surface owns its own step control
   // (trainSteps in SpecialControls); Use is a plain image generate with the
@@ -554,6 +571,13 @@ function LaneControls() {
     }
   }, [backend, kind, specialOp, cloudVideoSeconds, cloudFrames, cloudFps, setCloudFrames, setCloudFps])
 
+  // Ein Studio-Modell bringt Format, Laenge und Qualitaet in seinem eigenen
+  // Schema mit (die Schublade mit den Einstellungen). Die Regler hier schickten
+  // Werte, die sein Endpunkt nicht liest, also stehen sie dort nicht.
+  const laneKind = meta.isVideo ? 'video' : 'image'
+  const lanePicked = (laneKind === 'video' ? cloudVideoModel : cloudImageModel) || defaultCloudModel(laneKind)?.id || ''
+  if (backend === 'cloud' && !characterUse && !specialOp && isStudioModel(modelForOp(laneKind, cloudVideoOp, lanePicked))) return null
+
   if (characterTrain) return null
 
   // ── Image lanes: quality + aspect (+ edit strength) ──
@@ -573,7 +597,7 @@ function LaneControls() {
               size="sm"
               layoutId="quality"
               value={activeQ}
-              onChange={(k) => setSteps(qSteps[k as keyof typeof qSteps])}
+              onChange={(k) => setImageQuality(k as ImageQuality)}
               options={[{ value: 'Draft', label: 'Draft' }, { value: 'Standard', label: 'Standard' }, { value: 'High', label: 'High' }]}
             />
           </LabeledControl>

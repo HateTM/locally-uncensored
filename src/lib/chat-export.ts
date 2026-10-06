@@ -19,7 +19,11 @@ export function exportAsMarkdown(conversation: Conversation): string {
   // that produced none of the text below it (Meldung 4, R5 re-measure
   // 2026-08-30). Old chats whose answers carry no model fall back to the
   // field, which is all that was ever known about them.
-  lines.push(`_Model: ${conversationModelOf(conversation)} | ${new Date(conversation.createdAt).toLocaleString()}_`)
+  // A chat that never had a model names none: "Model:" with nothing behind it
+  // is not an answer.
+  const model = conversationModelOf(conversation)
+  const created = new Date(conversation.createdAt).toLocaleString()
+  lines.push(model ? `_Model: ${model} | ${created}_` : `_${created}_`)
   lines.push('')
 
   if (conversation.systemPrompt) {
@@ -69,7 +73,10 @@ export function exportAsMarkdown(conversation: Conversation): string {
 }
 
 export function exportAsJSON(conversation: Conversation): string {
-  return JSON.stringify(conversation, null, 2)
+  // Same rule as the Markdown header: no model, no model field.
+  if (conversation.model?.trim()) return JSON.stringify(conversation, null, 2)
+  const { model: _none, ...withoutModel } = conversation
+  return JSON.stringify(withoutModel, null, 2)
 }
 
 export function downloadFile(content: string, filename: string, type: string) {

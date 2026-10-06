@@ -37,6 +37,7 @@ import { LocalApiSettings } from './LocalApiSettings'
 import { RemoteAccessSettings } from './RemoteAccessSettings'
 import { RemoteAccessDocs } from './RemoteAccessDocs'
 import { HardwareSettings } from './HardwareSettings'
+import { DownloadLimitSetting } from './DownloadLimitSetting'
 import { ChatbotImporter } from '../import/ChatbotImporter'
 import { ProviderSettings } from './ProviderConfig'
 import { BuiltinEngineSettings } from './BuiltinEngineSettings'
@@ -48,6 +49,8 @@ import { MCPServerSettings } from './MCPServerSettings'
 import { WorkflowList } from '../agents/WorkflowList'
 import { WorkflowBuilder } from '../agents/WorkflowBuilder'
 import { useUpdateStore, isNewerVersion } from '../../stores/updateStore'
+import { useReleaseNotesStore } from '../../stores/releaseNotesStore'
+import { releaseNoteFor } from '../../lib/release-notes'
 import { timeAgo } from '../../lib/time-ago'
 import { backendCall, isTauri, isMacOS, isWindows, openExternal } from '../../api/backend'
 import { comfyPathPlaceholder } from '../../lib/comfy-path-placeholder'
@@ -769,7 +772,7 @@ function ComfyUpdateConfirmModal({
     <Modal open={open} onClose={onClose} title="Update ComfyUI?">
       <div className="space-y-4 text-sm text-gray-200">
         <p className="t-body leading-relaxed text-gray-300">
-          This pulls the latest ComfyUI and reinstalls its Python packages. It can take a few minutes. If ComfyUI is running and this app started it, it will be stopped first; a ComfyUI this app did not start blocks the update instead.
+          This pulls the latest ComfyUI and reinstalls its Python packages. It can take a few minutes. If ComfyUI is running and this app started it, it will be stopped first; a ComfyUI this app did not start blocks the update instead. ComfyUI starts again when the update is done.
         </p>
         {path && <p className="t-label text-gray-500 text-center">ComfyUI folder: {path}</p>}
         <div className="flex flex-col gap-2 pt-1">
@@ -1469,18 +1472,14 @@ function CodexAgentSettings() {
 
       {/* Stage + Review */}
       <div className="pt-1.5 border-t border-white/[0.04]" />
+      {/* Staging is the mode's call (Ask stages file edits for review). The
+          switch that used to sit here no longer decided anything and only
+          hid this one, bug hunt 01.10.2026 (C5). */}
       <InlineToggle
-        label="Stage file_write changes (review before apply)"
-        enabled={settings.codexStageMode}
-        onChange={() => updateSettings({ codexStageMode: !settings.codexStageMode })}
+        label="Auto-apply changes staged in Ask mode when the run finishes (no per-file clicking)"
+        enabled={settings.codexAutoApply}
+        onChange={() => updateSettings({ codexAutoApply: !settings.codexAutoApply })}
       />
-      {settings.codexStageMode && (
-        <InlineToggle
-          label="Auto-apply staged changes when the run finishes (no per-file clicking)"
-          enabled={settings.codexAutoApply}
-          onChange={() => updateSettings({ codexAutoApply: !settings.codexAutoApply })}
-        />
-      )}
       <InlineToggle
         label="Code-Review mode (read-only)"
         enabled={settings.codexReviewMode}
@@ -1847,8 +1846,9 @@ export function SettingsPage() {
           <Section title="LU Cloud Account" defaultOpen>
             <AccountPanel />
             {/* Local-mode discovery layer (2.5.8): the locked Create tabs +
-                hosted-model rows. The teaser sheet's "Hide Cloud features"
-                link flips this off; this is the way back on. */}
+                hosted-model rows. The teaser sheet's "Don't show Cloud
+                features in Local mode" link flips this off, and nothing else
+                on that sheet does; this is the way back on. */}
             <div className="flex items-center justify-between pt-1">
               <div className="min-w-0 pr-3">
                 <span className="text-[0.7rem] text-gray-700 dark:text-gray-400">Show Cloud features in Local mode</span>
@@ -2149,6 +2149,7 @@ export function SettingsPage() {
 
           <Section title="Model Storage">
             <HfDownloadPathSetting />
+            <DownloadLimitSetting />
             <LmStudioFolderSetting />
             <ImportLocalModels />
           </Section>
@@ -2400,6 +2401,7 @@ export function UpdateSection() {
   const latestIsActuallyNewer = !!(latestVersion && isNewerVersion(latestVersion, currentVersion))
   const displayLatestVersion = latestIsActuallyNewer ? latestVersion : null
   const showUpdate = updateAvailable && latestIsActuallyNewer
+  const reopenReleaseNotes = useReleaseNotesStore((s) => s.reopen)
 
   return (
     <Section title="Updates">
@@ -2407,7 +2409,15 @@ export function UpdateSection() {
         {/* Current version */}
         <div className="flex items-center justify-between">
           <span className="text-[0.65rem] text-gray-500">Current Version</span>
-          <span className="text-[0.65rem] text-gray-300 font-mono">v{currentVersion}</span>
+          <span className="flex items-center gap-2">
+            {/* The sheet shows once after an update; this brings it back. */}
+            {releaseNoteFor(currentVersion) && (
+              <button onClick={reopenReleaseNotes} className="t-micro text-lu-accent hover:text-lu-accent-hover transition-colors">
+                What's new
+              </button>
+            )}
+            <span className="text-[0.65rem] text-gray-300 font-mono">v{currentVersion}</span>
+          </span>
         </div>
 
         {/* Latest version, only show if it's actually newer than current */}

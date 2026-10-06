@@ -8,6 +8,7 @@ import {
   getAudioModels,
   getLipsyncModels,
   getMotionModels,
+  getCLIPModels,
   resolveLocalOpPick,
   uploadMediaFile,
   uploadImage,
@@ -20,6 +21,8 @@ import {
   isPromptQueued,
   buildTxt2ImgWorkflow,
   buildTxt2VidWorkflow,
+  legacyBuilderFits,
+  listedLoras,
   canRunVideoIntent,
   classifyModel,
   isI2VModel,
@@ -38,6 +41,7 @@ import {
   evictChatBackendsForRender,
   restoreChatBackendsAfterRender,
   type RenderEviction,
+  type RenderEvictionPhase,
 } from '../api/vram-handoff'
 import { cpuCauseSuffix } from '../lib/render-budget'
 import { backendCall } from '../api/backend'
@@ -51,15 +55,24 @@ import {
 import { phaseForExecutingNode, phaseForProgressStep } from '../lib/render-phase-labels'
 import { buildDynamicWorkflow, buildLocalOpWorkflow, checkVideoOutputCapability } from '../api/dynamic-workflow'
 import { getAllNodeInfo, clearNodeCache } from '../api/comfyui-nodes'
+import { cutoutModelOf, cutoutDownloadLine } from '../api/cutout-model'
 import { apiNodes, type ComfyApiGraph, type ComfyExecutionMessage, type ComfyHistoryEntry } from '../types/comfy-graph'
 import { restartComfyForNewNodes } from '../api/comfy-restart'
-import { installCustomNodes, startModelDownload, getDownloadProgress, modelsNotVisibleInComfy, comfyModelTarget } from '../api/discover'
-import { downloadBundleFiles, waitForModelsVisible } from '../lib/bundle-install'
-import { buildWithFixups, type FixupDeps } from '../lib/render-fixups'
-import { useDownloadStore } from '../stores/downloadStore'
-import { useComfyInstallStore } from '../stores/comfyInstallStore'
+import { installCustomNodes } from '../api/discover'
+import { buildWithFixups, wasDeclined, WAITING_FOR_ANSWER } from '../lib/render-fixups'
+import { renderFixupDeps } from '../api/render-fixup-deps'
 import { checkPromptSafety, SAFETY_BLOCK_MESSAGE } from '../lib/render/safety'
 import { applyLoraPrompts, loraMismatchNote } from '../stores/loraInfoStore'
+import { wantsTransparent } from '../lib/transparent-image'
+import { scenePromptFor } from '../lib/ltx-multishot'
+import { intentTakesPrompt } from '../components/create/experimental/intents'
+import { improveKindForIntent, IMPROVING_PROMPT, type ImproveOutcome } from '../lib/render/improve-prompt'
+import { elapsedLine } from '../lib/elapsed-line'
+import { improvePrompt } from '../lib/render/improve-prompt-run'
+import { currentHelperModel } from '../lib/cloud-helper-model'
+import { pickQwenEnhancer, rewrittenByName, type ImproveWriter } from '../lib/render/qwen-enhancer'
+import { buildQwenEnhancerWorkflow, runQwenEnhancer } from '../api/qwen-enhancer'
+import { extraReferenceSlots } from '../lib/edit-references'
 import { resolveRunSeed } from '../lib/run-seed'
 import {
   clearTrainingSet, stageTrainingImage, startCharacterTraining,
@@ -70,6 +83,7 @@ import { dataUrlToBlob } from '../lib/data-url'
 import { useWorkflowStore } from '../stores/workflowStore'
 import { injectParameters } from '../api/workflows'
 import { applyNativeHiresFix } from '../api/hires-fix'
+import { lorasForRun, skippedLorasLine } from '../lib/lora-stack'
 import {
   generateMlxImageDataUrl, isMlxImageHost, isMlxImageModel,
   mlxStatus, listMlxImageModels, buildMlxImageModels, mergeImageModels, mlxModelIdFor,
@@ -78,6 +92,13 @@ import {
   getVideoStatus, listVideoModels, generateVideo, getVideoProgress, cancelVideo,
   buildMlxVideoModels, mlxVideoModelIdFor, readVideoAsBlobUrl,
 } from '../api/mlx-video'
+
+/** What the stage says while the graphics card is handed to the render
+ *  (api/vram-handoff, RenderEvictionPhase). */
+const HANDOFF_LINE: Record<RenderEvictionPhase, string> = {
+  'waiting-for-chat-model': 'Waiting for the chat model to finish loading...',
+  freeing: 'Freeing graphics memory...',
+}
 
 /**
  * The `[event, payload]` pairs of a `/history` status entry.
@@ -112,70 +133,6 @@ async function stageForLocal(ref: ImageRef, name: string): Promise<string> {
 function historyMessages(entry: ComfyHistoryEntry | null): [string, ComfyExecutionMessage][] {
   const raw = entry?.status?.messages
   return Array.isArray(raw) ? raw : []
-}
-
-/** The side effects lib/render-fixups.ts needs, wired to the app. */
-function renderFixupDeps(onStatus: (line: string) => void, signal?: AbortSignal): FixupDeps {
-  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
-  const refreshLists = async () => {
-    await refreshComfyModels().catch(() => false)
-    clearNodeCache()
-  }
-  return {
-    ask: (prompt) => new Promise<boolean>((resolve) => {
-      useCreateStore.getState().setFixupPrompt({
-        ...prompt,
-        resolve: (go) => { useCreateStore.getState().setFixupPrompt(null); resolve(go) },
-      })
-    }),
-    download: async (files) => {
-      const dl = useDownloadStore.getState()
-      for (const f of files) dl.setMeta(f.downloadFilename, f.downloadUrl, f.subfolder)
-      dl.startPolling()
-      await downloadBundleFiles(
-        files.map((f) => ({ filename: f.downloadFilename, subfolder: f.subfolder, downloadUrl: f.downloadUrl, sizeGB: f.sizeGB })),
-        {
-          start: startModelDownload,
-          progress: getDownloadProgress,
-          onStatus,
-          keepTrayLive: () => useDownloadStore.getState().startPolling(),
-          stop: (filename) => { void useDownloadStore.getState().cancel(filename) },
-          signal,
-        },
-      )
-      // A ComfyUI on another machine cannot list them before they are copied
-      // over; buildWithFixups says so (GH #143).
-      if ((await comfyModelTarget()).remote) return
-      const wanted = files.map((f) => f.downloadFilename)
-      const left = await waitForModelsVisible({ missing: () => modelsNotVisibleInComfy(wanted), refresh: refreshLists, onStatus, signal })
-      if (left.length > 0) throw new Error(`Downloaded ${left.join(', ')}, but ComfyUI does not list ${left.length === 1 ? 'it' : 'them'} yet. Restart ComfyUI and hit Create again.`)
-    },
-    remote: async () => {
-      const t = await comfyModelTarget()
-      return t.remote && t.host && t.root ? { host: t.host, root: t.root } : null
-    },
-    updateComfy: async () => {
-      onStatus('Updating ComfyUI…')
-      await useComfyInstallStore.getState().runUpdate()
-      for (;;) {
-        await sleep(2000)
-        const st = useComfyInstallStore.getState()
-        if (st.phase === 'error') throw new Error(st.error || 'Updating ComfyUI did not finish.')
-        if (st.phase === 'idle') break
-        const last = st.logs[st.logs.length - 1]
-        if (last) onStatus(String(last))
-      }
-      onStatus('Starting the updated ComfyUI…')
-      await backendCall('start_comfyui').catch(() => undefined)
-      for (let i = 0; i < 90; i++) {
-        if (await checkComfyConnection()) return
-        onStatus(`Starting the updated ComfyUI… ${i * 2}s`)
-        await sleep(2000)
-      }
-      throw new Error('ComfyUI was updated but did not come back up. Start it from Settings and hit Create again.')
-    },
-    refresh: refreshLists,
-  }
 }
 
 export function useCreate() {
@@ -313,6 +270,9 @@ export function useCreate() {
         getLipsyncModels().catch(() => [] as ClassifiedModel[]),
         getMotionModels().catch(() => [] as ClassifiedModel[]),
       ])
+      // The text encoder files, for the prompt enhancers among them
+      // ("Improve my prompt" on local Qwen-Image 2.1). Best effort.
+      const textEncoders = await getCLIPModels().catch(() => [] as string[])
       // MLX entries go first so one is the default on a fresh Apple-Silicon box.
       const imgModels = mlxImageModels.length
         ? mergeImageModels(comfyImgModels, mlxImageModels)
@@ -337,6 +297,7 @@ export function useCreate() {
       st.setAudioModelList(audModels)
       st.setLipsyncModelList(lipModels)
       st.setMotionModelList(motModels)
+      st.setTextEncoderList(textEncoders)
 
       // If ComfyUI is connected but returns 0 models, do NOT set modelsLoaded — keep retrying.
       // ComfyUI may still be scanning directories (race condition on startup).
@@ -587,12 +548,22 @@ export function useCreate() {
     // lines below. Every field that carries user text to a render is gated on
     // both paths, and the two lists have to stay identical (review
     // 2026-08-14).
+    //
+    // The prompt of this run. A view without a prompt field (Talking Character,
+    // Motion Control, Remove Background, training) sends none: the store holds
+    // one prompt for every tab, and the text left from another tab would steer
+    // the run unseen or fail this check for words nobody sees here.
+    const typedPrompt = intentTakesPrompt(state.intent(), state.cloudOp === 'character' && state.characterTab === 'use')
+      ? state.prompt
+      : ''
     {
       const verdict = checkPromptSafety(
-        `${state.prompt} ${state.negativePrompt} ${state.musicLyrics} ${state.triggerWord}`,
+        `${typedPrompt} ${state.negativePrompt} ${state.musicLyrics} ${state.triggerWord} ${state.videoShots.join(' ')}`,
       )
-      // The saved LoRA prompts are part of what renders, so they are checked too.
-      const withLoras = applyLoraPrompts(state.prompt, state.negativePrompt, state.selectedLoras.map((l) => l.name))
+      // The saved LoRA prompts are part of what renders, so they are checked
+      // too — on the TYPED prompt: a view without a prompt field sends none,
+      // and text left over from another tab must not stop this run.
+      const withLoras = applyLoraPrompts(typedPrompt, state.negativePrompt, state.selectedLoras.map((l) => l.name))
       if (verdict.blocked || checkPromptSafety(withLoras.prompt + ' ' + withLoras.negative).blocked) {
         state.setError(SAFETY_BLOCK_MESSAGE)
         return
@@ -606,10 +577,10 @@ export function useCreate() {
       return
     }
     const {
-      mode, prompt, negativePrompt, imageModel, videoModel,
+      mode, negativePrompt, imageModel, videoModel,
       sampler, scheduler, steps, cfgScale, width, height, seed, batchSize, frames, fps, denoise,
       hiresFixEnabled, hiresScale, hiresDenoise, hiresSteps, hiresUpscaleMethod, i2iImage, i2vImage,
-      source, mask, growMaskBy, removebg, selectedLoras, selectedVae, clipSkip,
+      source, references, mask, growMaskBy, removebg, selectedLoras, selectedVae, clipSkip,
       setIsGenerating, setProgress, setCurrentPromptId, setError, addToGallery, addToPromptHistory,
     } = state
 
@@ -662,6 +633,71 @@ export function useCreate() {
         ? imageModel
         : (state.imageModelList[0]?.name ?? imageModel)
 
+    // LTX 2.5 multishot: the prompt field is shot 1, the shots from the advanced
+    // settings follow, each cut written out in plain words (lib/ltx-multishot).
+    // The rewrite below sees the whole scene, so it keeps the cuts.
+    // The model the run really uses: the picker shows the first capable one when
+    // the stored pick cannot run the intent, and so does the submit below.
+    const capableVideo = !localOp && mode === 'video' && state.videoModelList.length > 0 ? videoLaneModels(state.videoModelList, intent) : []
+    const effVideoModel = capableVideo.length > 0 && !capableVideo.some((m) => m.name === videoModel) ? capableVideo[0].name : videoModel
+    const scenePrompt = scenePromptFor({
+      prompt: typedPrompt, shots: state.videoShots, mode, intent, onMlxHost: isMlxImageHost(),
+      modelType: state.videoModelList.find((m) => m.name === effVideoModel)?.type ?? classifyModel(effVideoModel),
+    })
+    // "Improve my prompt": the chat model the user picked rewrites the prompt
+    // for this model before the run. Local chat models run on this machine,
+    // LU Cloud ones are billed like chat. The field itself is never touched:
+    // the run uses `prompt`, the gallery keeps both. A rewrite that fails never
+    // stops the run, it goes on with the user's own prompt.
+    let prompt = scenePrompt
+    let improveFields: { promptOriginal?: string; rewrittenBy?: string; improveFailed?: true } = {}
+    // The safety check covers the rewrite too: the user wrote an allowed
+    // prompt, the model must not turn it into a refusal.
+    const takeRewrite = (out: ImproveOutcome, writer: ImproveWriter['id']) => {
+      if (out.status === 'improved' && !checkPromptSafety(out.prompt).blocked) {
+        prompt = out.prompt
+        improveFields = { promptOriginal: scenePrompt, rewrittenBy: rewrittenByName(writer, currentHelperModel()) }
+      } else if (out.status !== 'unchanged') {
+        improveFields = { improveFailed: true }
+      }
+    }
+    // A local Qwen-Image 2.1 run with a prompt enhancer installed: the
+    // enhancer writes instead of the chat model (GH #148), for a new picture
+    // and for an edit. It is a ComfyUI job, so it runs further down, once
+    // ComfyUI is up and the chat model is off the card.
+    const qwenEnhancer = state.improvePrompt && !localOp && scenePrompt.trim()
+      ? pickQwenEnhancer({
+          local: !isMlxImageHost(),
+          intent,
+          modelType: state.imageModelList.find((m) => m.name === effImageModel)?.type ?? classifyModel(effImageModel),
+          textEncoders: state.textEncoderList,
+        }, state.improveWith)
+      : null
+    const improveKind = state.improvePrompt && !qwenEnhancer ? improveKindForIntent(intent) : null
+    if (improveKind && scenePrompt.trim()) {
+      const own = new AbortController()
+      abortRef.current = own
+      setIsGenerating(true)
+      const improving = elapsedLine((text) => setProgress(3, text), IMPROVING_PROMPT)
+      const runModel = improveKind === 'music' ? state.localOpModel : improveKind === 'video' ? effVideoModel : effImageModel
+      let out: ImproveOutcome = { status: 'failed' }
+      try {
+        out = await improvePrompt(scenePrompt, {
+          kind: improveKind,
+          modelLabel: runModel || undefined,
+          tags: improveKind === 'image' && ['sd15', 'sdxl'].includes(state.imageModelList.find((m) => m.name === runModel)?.type ?? classifyModel(runModel)),
+        }, own.signal)
+      } finally {
+        improving.stop()
+        if (abortRef.current === own) abortRef.current = null
+        setIsGenerating(false)
+        setProgress(0)
+      }
+      // Cancel pressed while the chat model was writing: the run does not start.
+      if (own.signal.aborted) return
+      takeRewrite(out, 'chat')
+    }
+
     // ── MLX image pipeline (Apple Silicon) — hard rule: Mac local image is the
     // in-process MLX path, never ComfyUI. Gated on the derived `image` intent
     // (which already means: no cloudOp, no utilityOp, no removebg, text2img)
@@ -675,7 +711,7 @@ export function useCreate() {
       setIsGenerating(true)
       state.setProgressPhase('loading-model')
       setProgress(10, 'Starting MLX image generation...')
-      addToPromptHistory(prompt)
+      addToPromptHistory(typedPrompt)
       const startTime = Date.now()
       try {
         state.setProgressPhase('sampling')
@@ -693,7 +729,7 @@ export function useCreate() {
           id: uuid(), type: 'image', filename: `mlx-${Date.now()}.png`, subfolder: '',
           // localPath is what survives the restart: partialize strips dataUrl,
           // and there is no ComfyUI /view to fall back to on a Mac.
-          dataUrl, localPath, prompt, negativePrompt, model: imageModel, modelType: 'unknown',
+          dataUrl, localPath, prompt, ...improveFields, negativePrompt, model: imageModel, modelType: 'unknown',
           seed: runSeed, steps, cfgScale, sampler, scheduler,
           width: outW || width, height: outH || height, batchSize: 1,
           createdAt: Date.now(), builderUsed: 'dynamic', intent,
@@ -736,7 +772,7 @@ export function useCreate() {
       setIsGenerating(true)
       state.setProgressPhase('loading-model')
       setProgress(0, 'Starting MLX video generation...')
-      addToPromptHistory(prompt)
+      addToPromptHistory(typedPrompt)
       const startTime = Date.now()
       abortRef.current = new AbortController()
       let result: Awaited<ReturnType<typeof generateVideo>>
@@ -799,7 +835,7 @@ export function useCreate() {
                   // Keep the real on-disk path too, for a future
                   // download-to-disk path that wants to reference it directly.
                   localPath: result.output,
-                  prompt, negativePrompt, model: videoModel, modelType: 'wan',
+                  prompt, ...improveFields, negativePrompt, model: videoModel, modelType: 'wan',
                   seed: runSeed, steps, cfgScale, sampler, scheduler,
                   width, height, batchSize: 1,
                   createdAt: Date.now(), builderUsed: 'dynamic', intent,
@@ -983,7 +1019,6 @@ export function useCreate() {
       return
     }
 
-    setProgress(0, 'Preparing workflow...')
     abortRef.current = new AbortController()
 
     // Make VRAM room for the render. On a single local GPU a resident chat LLM
@@ -993,14 +1028,64 @@ export function useCreate() {
     // that killed both llama processes with no KV save and no reload, costing
     // the next chat turn a 62 s cold start. The hand-off helper captures what
     // is resident, saves the built-in engine's KV slot, then evicts; the
-    // finally below brings everything back. exclusiveVramMode 'never' skips
-    // the eviction. Best-effort, never blocks a render.
+    // finally below hands the haul back, and the chat backends return when a
+    // chat needs them, Create is left, or nobody asked for a while (see
+    // restoreChatBackendsAfterRender). exclusiveVramMode 'never' skips the
+    // eviction. Best-effort, never blocks a render.
+    //
+    // The box, 03.10.2026: this wait stood for 25 to 30 s under "Preparing
+    // workflow..." with no counter. No workflow is prepared in it: the card is
+    // handed over, and most of the time goes into waiting for the previous
+    // render's restore to finish reading the chat model back in. The line
+    // says which it is and counts like every other waiting line.
     let renderEviction: RenderEviction | null = null
+    const handoff = elapsedLine((text) => setProgress(0, text), HANDOFF_LINE.freeing)
     try {
-      renderEviction = await evictChatBackendsForRender()
-    } catch { /* VRAM housekeeping is best-effort */ }
+      renderEviction = await evictChatBackendsForRender((phase) => handoff.setLabel(HANDOFF_LINE[phase]))
+    } catch { /* VRAM housekeeping is best-effort */ } finally {
+      handoff.stop()
+    }
+    setProgress(0, 'Preparing workflow...')
 
     try {
+      // The Qwen prompt enhancer writes now: the chat model has left the card,
+      // and the enhancer leaves it again before the picture's models load
+      // (runQwenEnhancer unloads it). An edit shows it the same pictures, in
+      // the same order, that the picture's graph numbers as image 1, 2, 3.
+      // A ComfyUI too old for it is offered the update, like the model itself.
+      if (qwenEnhancer) {
+        setProgress(3, IMPROVING_PROMPT)
+        const signal = abortRef.current?.signal
+        const images = qwenEnhancer.mode === 'i2i' && effInputImage
+          ? [effInputImage, ...references.map((r) => r.filename).filter(Boolean).slice(0, extraReferenceSlots(imageModelType, activeModel))]
+          : []
+        const enhancerGraph = await buildWithFixups(
+          () => buildQwenEnhancerWorkflow({ file: qwenEnhancer.file, mode: qwenEnhancer.mode, prompt: scenePrompt, images, seed: runSeed }),
+          renderFixupDeps((line) => setProgress(3, line), signal),
+        )
+        // The rewrite is the long wait (70 to 175 s on a 12 GB card), so the
+        // line counts from here; the build above has its own status lines.
+        const improving = elapsedLine((text) => setProgress(3, text), IMPROVING_PROMPT)
+        const out = await runQwenEnhancer(enhancerGraph, scenePrompt, { clientId: CLIENT_ID, signal }).finally(improving.stop)
+        if (signal?.aborted) throw new Error('Cancelled')
+        takeRewrite(out, qwenEnhancer.variant)
+      }
+      // GH #146: the stack is checked against what ComfyUI lists right now.
+      // A deleted file or a Z-Image character on another model is left out
+      // with a line, instead of ComfyUI refusing the whole graph.
+      let runLoras = selectedLoras
+      // The progress line is gone a second later, so the result keeps it
+      // too (3.0.4 Gegenprobe 8: a deleted LoRA was left out "silently").
+      let skippedNote: string | undefined
+      if (selectedLoras.length) {
+        const listed = await listedLoras().catch(() => null)
+        const pick = lorasForRun(selectedLoras, listed, imageModelType)
+        if (listed && pick.missing.length) useCreateStore.getState().keepListedLoras(listed)
+        const line = skippedLorasLine(pick.missing, pick.otherModel)
+        if (line) setProgress(0, line)
+        skippedNote = line ?? undefined
+        runLoras = pick.use
+      }
       let outputWidth = width
       let outputHeight = height
       // Each selected LoRA's saved prompt / learned trigger words go in front of
@@ -1016,26 +1101,42 @@ export function useCreate() {
         console.warn('[useCreate] LoRA family mismatch', { model: activeModel, mismatched: loraPrompts.mismatched })
         setProgress(0, loraNote)
       }
+      // Local Qwen-Image 2.1 text-to-image with "Transparent background": the
+      // builder wraps the prompt, SaveImage keeps the alpha channel. Only the
+      // dynamic builder knows the switch, so a custom workflow or a fallback
+      // graph runs as written and the entry is not marked transparent.
+      const transparentRequested = wantsTransparent({
+        enabled: state.transparentBackground, intent, isImageToImage: isI2I, isSpecializedLane: !!localOp, modelType: imageModelType,
+      })
+      const transparentFields = () => (transparentRequested && builderUsed === 'dynamic' ? { transparent: true as const } : {})
       const baseParams = {
         prompt: loraPrompts.prompt, negativePrompt: loraPrompts.negative,
-        model: activeModel, sampler, scheduler, steps, cfgScale, width, height, seed: runSeed, batchSize,
+        ...(transparentRequested ? { transparent: true } : {}), model: activeModel, sampler, scheduler, steps, cfgScale, width, height, seed: runSeed, batchSize,
         ...(isRemoveBg && effInputImage ? { removebg: true, inputImage: effInputImage } : {}),
         // Discord 2026-09-25 (tbjdrw: "a house becomes a tennis court"): at
         // strength 1.00 the builder read denoise >= 1 as "no img2img" and
         // dropped the source without a word. Edit always keeps the source;
         // 0.95 is the most it repaints (the slider tops out there too).
         ...(isI2I && !isRemoveBg && effInputImage ? { inputImage: effInputImage, denoise: Math.min(denoise, EDIT_MAX_DENOISE) } : {}),
+        // GH #144: further references ride along; the builder keeps only as
+        // many as the model's family takes (lib/edit-references).
+        ...(isI2I && !isRemoveBg && effInputImage && references.some((r) => r.filename)
+          ? { referenceImages: references.map((r) => r.filename).filter(Boolean) }
+          : {}),
         ...(!isRemoveBg && maskFilename ? { maskImage: maskFilename, growMaskBy } : {}),
         // Advanced adjustments. LoRA feeds the builder's `lora`/`loraStrength`
         // contract (string[] + number[]); the old `loras` key was read by nobody,
         // so LoRA selection was a silent no-op for image too (D#80). VAE/clip-skip
         // stay image-only (the builder ignores them for video).
-        ...(selectedLoras.length
-          ? { lora: selectedLoras.map((l) => l.name), loraStrength: selectedLoras.map((l) => l.strength) }
+        ...(runLoras.length
+          ? { lora: runLoras.map((l) => l.name), loraStrength: runLoras.map((l) => l.strength) }
           : {}),
         ...(selectedVae && selectedVae !== 'auto' ? { vae: selectedVae } : {}),
         ...(clipSkip > 0 ? { clipSkip } : {}),
         ...(listedModel?.parts ? { modelParts: listedModel.parts } : {}),
+        // Qwen-Image 2.1: the text encoder picked in the advanced settings.
+        // The builder reads it for that family only.
+        ...(state.qwenTextEncoder !== 'auto' ? { qwenTextEncoder: state.qwenTextEncoder } : {}),
       }
 
       let workflow: ComfyApiGraph = {}
@@ -1074,7 +1175,11 @@ export function useCreate() {
         }
         setProgress(5, 'Building workflow...')
         const laneDefaults = COMFY_MODEL_DEFAULTS[imageModelType] ?? COMFY_MODEL_DEFAULTS.unknown
-        workflow = await buildLocalOpWorkflow({
+        // The lanes carry the same version gate as a picture (YuE2, S2V,
+        // Animate): a too-old ComfyUI is offered the update, then the build
+        // runs again. The box, 03.10.2026: Music failed with the update
+        // sentence because this build never went through the question.
+        const laneParams = {
           op: localOp,
           model: activeModel,
           prompt,
@@ -1092,7 +1197,11 @@ export function useCreate() {
           audioFile,
           refImage: (source ? effInputImage : '') || undefined,
           drivingVideo,
-        })
+        }
+        workflow = await buildWithFixups(
+          () => buildLocalOpWorkflow(laneParams),
+          renderFixupDeps((line) => setProgress(5, line), abortRef.current?.signal),
+        )
         builderUsed = 'dynamic'
       }
 
@@ -1147,6 +1256,7 @@ export function useCreate() {
           if (dynErr instanceof Error && dynErr.name === 'WorkflowUnavailableError') {
             throw dynErr
           }
+          if (!legacyBuilderFits(imageModelType, mode === 'video')) throw dynErr
           // The legacy builders are text-to-image / text-to-video only: they
           // carry no source image and no mask. Falling back for an Edit or an
           // Animate rendered a new picture from the prompt alone, while the UI
@@ -1175,6 +1285,7 @@ export function useCreate() {
           try {
             const caps = await checkVideoOutputCapability()
             if (caps.webpOnly) {
+              setProgress(5, WAITING_FOR_ANSWER)
               const choice = await new Promise<'install' | 'webp' | 'cancel'>((resolve) => {
                 useCreateStore.getState().setVhsInstallPrompt(resolve)
               })
@@ -1290,6 +1401,12 @@ export function useCreate() {
         console.warn('[useCreate] WebSocket unavailable, using polling fallback')
       }
 
+      // A cutout runs on the node's own model, which the node fetches inside
+      // its first run. Asked before the submit, so the wait can say so.
+      const cutoutModel = isRemoveBg ? cutoutModelOf(workflow) : undefined
+      const cutoutDownload = cutoutModel ? await cutoutDownloadLine(cutoutModel) : null
+      const toolFields = cutoutModel ? { toolModel: cutoutModel } : {}
+
       setProgress(10, 'Submitting to ComfyUI...')
       let promptId: string
       try {
@@ -1300,7 +1417,7 @@ export function useCreate() {
         return
       }
       setCurrentPromptId(promptId)
-      addToPromptHistory(prompt)
+      addToPromptHistory(typedPrompt)
 
       // Build node ID → class_type map from workflow for phase detection
       const nodeClassMap = new Map<string, string>()
@@ -1320,7 +1437,6 @@ export function useCreate() {
       if (useWS) {
         // ── WebSocket-driven progress ──
         await new Promise<void>((resolve, reject) => {
-          const startTime = Date.now()
           const store = useCreateStore.getState()
           // The bar and its seconds used to repaint only when ComfyUI sent an
           // event. Long silent stretches are normal here (a 14B sampling step
@@ -1330,19 +1446,12 @@ export function useCreate() {
           // only change phase and percent; a ticker repaints the elapsed time
           // every second so a working render never looks hung.
           let phasePct = 10
-          let phaseLabel = 'Queued...'
-          const paint = () => {
-            const elapsed = Math.round((Date.now() - startTime) / 1000)
-            setProgress(phasePct, `${phaseLabel} ${elapsed}s`)
-          }
+          store.setProgressPhase('queued')
+          const line = elapsedLine((text) => setProgress(phasePct, text), 'Queued...')
           const setPhase = (pct: number, label: string) => {
             phasePct = pct
-            phaseLabel = label
-            paint()
+            line.setLabel(label)
           }
-          store.setProgressPhase('queued')
-          setPhase(10, 'Queued...')
-          const ticker = setInterval(paint, 1000)
 
           // Activity watchdog (2.5.8): the old hard wall-clock cap killed a
           // REAL render at exactly 60 minutes while ComfyUI was still
@@ -1404,11 +1513,11 @@ export function useCreate() {
                     addToGallery({
                       id: uuid(), type: galleryTypeForFile(file.filename, mode),
                       filename: file.filename, subfolder: file.subfolder ?? '', comfyType: file.type ?? 'output',
-                      prompt, negativePrompt, model: activeModel,
+                      prompt, ...improveFields, ...transparentFields(), negativePrompt, model: activeModel,
                       modelType: mode === 'image' ? imageModelType : (videoModelsList.find(m => m.name === activeModel)?.type ?? 'wan'),
                       seed: runSeed,
                       steps, cfgScale, sampler, scheduler, width: outputWidth, height: outputHeight, batchSize,
-                      createdAt: Date.now(), builderUsed, intent,
+                      createdAt: Date.now(), builderUsed, intent, ...toolFields, ...(skippedNote ? { runNote: skippedNote } : {}),
                     })
                   }
                 }
@@ -1429,7 +1538,7 @@ export function useCreate() {
           let abortCheck: ReturnType<typeof setInterval> | null = null
 
           const cleanup = () => {
-            clearInterval(ticker)
+            line.stop()
             clearInterval(timeoutTimer)
             clearInterval(heartbeat)
             if (abortCheck) clearInterval(abortCheck)
@@ -1467,11 +1576,11 @@ export function useCreate() {
                   addToGallery({
                     id: uuid(), type: galleryTypeForFile(file.filename, mode),
                     filename: file.filename, subfolder: file.subfolder ?? '', comfyType: file.type ?? 'output',
-                    prompt, negativePrompt, model: activeModel,
+                    prompt, ...improveFields, ...transparentFields(), negativePrompt, model: activeModel,
                     modelType: mode === 'image' ? imageModelType : (videoModelsList.find(m => m.name === activeModel)?.type ?? 'wan'),
                     seed: runSeed,
                     steps, cfgScale, sampler, scheduler, width: outputWidth, height: outputHeight, batchSize,
-                    createdAt: Date.now(), builderUsed,
+                    createdAt: Date.now(), builderUsed, intent, ...toolFields, ...(skippedNote ? { runNote: skippedNote } : {}),
                   })
                 }
               }
@@ -1498,7 +1607,7 @@ export function useCreate() {
                   break
                 }
                 const classType = nodeClassMap.get(nodeId) || ''
-                const step = phaseForExecutingNode(classType, mode === 'video' ? 'video' : 'image')
+                const step = phaseForExecutingNode(classType, mode === 'video' ? 'video' : 'image', cutoutDownload)
                 if (step) {
                   st.setProgressPhase(step.phase)
                   setPhase(step.pct, step.label)
@@ -1622,11 +1731,11 @@ export function useCreate() {
                     addToGallery({
                       id: uuid(), type: galleryTypeForFile(file.filename, mode),
                       filename: file.filename, subfolder: file.subfolder ?? '', comfyType: file.type ?? 'output',
-                      prompt, negativePrompt, model: activeModel,
+                      prompt, ...improveFields, ...transparentFields(), negativePrompt, model: activeModel,
                       modelType: mode === 'image' ? imageModelType : (videoModelsList.find(m => m.name === activeModel)?.type ?? 'wan'),
                       seed: runSeed,
                       steps, cfgScale, sampler, scheduler, width: outputWidth, height: outputHeight, batchSize,
-                      createdAt: Date.now(), builderUsed, intent,
+                      createdAt: Date.now(), builderUsed, intent, ...toolFields, ...(skippedNote ? { runNote: skippedNote } : {}),
                     })
                   }
                 }
@@ -1664,6 +1773,10 @@ export function useCreate() {
       }
       if (err instanceof Error && err.message === 'Cancelled') {
         // User cancelled, not an error
+      } else if (err instanceof Error && wasDeclined(err)) {
+        // A no to the download or update question: nothing failed, the run
+        // never started, and the reason says what it would have needed.
+        useCreateStore.getState().setError(`Not started. ${err.message}`)
       } else {
         const msg = err instanceof Error ? err.message : String(err)
         useCreateStore.getState().setError(`Generation failed: ${msg}`)

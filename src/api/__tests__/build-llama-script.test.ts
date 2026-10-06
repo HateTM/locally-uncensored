@@ -242,7 +242,8 @@ describe('build-llama.sh: staging the dynamic-ISA companion libraries', () => {
  * users installed was in practice unpinned. The commit SHA is the pin now; the
  * tag stays as the readable name and is cross-checked against it.
  */
-describe('build-llama.sh — the llama.cpp revision is pinned to a commit', () => {
+// These cases run real git clones, which need more than the default 5 s when the whole suite runs in parallel.
+describe('build-llama.sh — the llama.cpp revision is pinned to a commit', { timeout: 30_000 }, () => {
   const temps: string[] = []
   const tmp = (prefix: string) => {
     const dir = mkdtempSync(join(tmpdir(), prefix))

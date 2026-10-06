@@ -118,7 +118,10 @@ export function PlanBar({ variant = 'header' }: Props) {
       className={panel ? 'w-full p-1.5' : 'mx-auto w-full max-w-[var(--lu-measure)] px-3 pt-1'}
       data-testid={panel ? 'plan-panel' : 'plan-header'}
     >
-      <div className="w-full rounded-md border border-blue-500/20 bg-blue-500/[0.04]">
+      {/* Neutral on purpose (David 30.09.2026: "dunkel LU design, nicht
+          abheben"). The plan is a footer of the column, it takes the column's
+          own surface and line colour instead of a blue box of its own. */}
+      <div className="w-full rounded-md border border-gray-200 dark:border-white/[0.06] bg-white dark:bg-white/[0.02]">
         <div className="flex items-center gap-1.5 px-2 py-1">
           <button
             onClick={() => setExpanded((v) => !v)}
@@ -126,11 +129,11 @@ export function PlanBar({ variant = 'header' }: Props) {
             className="flex items-center gap-1.5 min-w-0 flex-1 text-left"
           >
             {expanded ? (
-              <ChevronDown size={9} className="text-blue-400 shrink-0" />
+              <ChevronDown size={9} className="text-gray-400 dark:text-gray-500 shrink-0" />
             ) : (
-              <ChevronRight size={9} className="text-blue-400 shrink-0" />
+              <ChevronRight size={9} className="text-gray-400 dark:text-gray-500 shrink-0" />
             )}
-            <ListTodo size={9} className="text-blue-400 shrink-0" />
+            <ListTodo size={9} className="text-gray-400 dark:text-gray-500 shrink-0" />
             <span className="text-[0.55rem] uppercase tracking-wider text-gray-500 shrink-0">
               plan {done}/{todos.length}
             </span>
@@ -160,7 +163,7 @@ export function PlanBar({ variant = 'header' }: Props) {
             {todos.map((t, i) => (
               <li key={`${i}-${t.content}`} className="flex items-start gap-1.5">
                 {t.status === 'completed' ? (
-                  <CheckCircle2 size={10} className="text-emerald-400 shrink-0 mt-[1px]" />
+                  <CheckCircle2 size={10} className="text-gray-400 dark:text-gray-500 shrink-0 mt-[1px]" />
                 ) : t.status === 'in_progress' ? (
                   // Ein Kreisel, der sich dreht, behauptet Arbeit. Nach dem Ende
                   // des Laufs ist das eine Behauptung ueber nichts: gemessen
@@ -171,10 +174,10 @@ export function PlanBar({ variant = 'header' }: Props) {
                   // siehe `lib/hinweis.ts`.)
                   <Loader2
                     size={10}
-                    className={`shrink-0 mt-[1px] ${runActive ? 'text-blue-400 animate-spin' : HINWEIS_TEXT.ruhig}`}
+                    className={`shrink-0 mt-[1px] ${runActive ? 'text-gray-600 dark:text-gray-300 animate-spin' : HINWEIS_TEXT.ruhig}`}
                   />
                 ) : (
-                  <Circle size={10} className="text-gray-600 shrink-0 mt-[1px]" />
+                  <Circle size={10} className="text-gray-300 dark:text-gray-700 shrink-0 mt-[1px]" />
                 )}
                 <span
                   className={`t-micro leading-snug ${

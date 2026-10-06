@@ -162,11 +162,16 @@ describe('the action bar is one quiet row', () => {
     expect(INPUT).toMatch(/flex flex-nowrap items-center gap-1 px-2 py-1\.5 min-h-\[38px\]/)
   })
 
-  it('gives way in the middle only, so nothing on either end jumps', () => {
+  it('gives way in the middle, then only at the model name, so Stop stays in the frame', () => {
+    // UX pass 30.09.2026: in the Code tab with the explorer open (900 px
+    // window) the fixed row was wider than the composer and pushed Stop out
+    // of the frame. The spacer still gives way first; after it only the model
+    // slot shrinks, down to a floor, and its name ellipsizes.
     const row = INPUT.slice(bar)
     expect(row).toMatch(/<div className="flex flex-nowrap items-center gap-1 shrink-0">\{composerActions\}<\/div>/)
     expect(row).toMatch(/<div className="flex-1 min-w-0" \/>/)
-    expect(row).toMatch(/<div className="shrink-0">\{composerModel\}<\/div>/)
+    expect(row).toMatch(/<div className="min-w-\[4rem\] shrink">\{composerModel\}<\/div>/)
+    expect(row).toMatch(/<div className="shrink-0"><SamplingControls \/><\/div>/)
   })
 
   it('the Code mode trigger grows sideways when a run starts, never downwards', () => {

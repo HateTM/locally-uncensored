@@ -23,6 +23,7 @@ import { deriveSideEffectKey } from './side-effect-key'
 import { validateToolArgs, formatValidationErrors, type JsonSchema } from './args-validator'
 import { stableArgsHash } from './block-helpers'
 import type { ToolArgs } from '../mcp/types'
+import { isGenericCallName } from '../../lib/loose-tool-parse'
 
 export interface ExecutorToolDef {
   name: string
@@ -235,6 +236,10 @@ async function runSingle(
   opts: ExecutorOptions
 ): Promise<ExecutionResult> {
   const startedAt = Date.now()
+  // What the duration counts from. Moves to the end of the approval wait: the
+  // time a call sat on the user's card is not the tool's time, and a 20 ms
+  // file_write read "21.6s" next to its tick (Gegenprobe 01.10.2026).
+  let clockFrom = startedAt
   const argsHash = stableArgsHash(req.args ?? {})
 
   opts.onStart?.(req)
@@ -250,7 +255,7 @@ async function runSingle(
 
   const finalize = (partial: Omit<ExecutionResult, 'completedAt' | 'durationMs'>): ExecutionResult => {
     const completedAt = Date.now()
-    const durationMs = completedAt - startedAt
+    const durationMs = completedAt - clockFrom
     const result: ExecutionResult = { ...partial, completedAt, durationMs }
     runtime.recordAudit?.({
       kind: 'complete',
@@ -272,7 +277,9 @@ async function runSingle(
       id: req.id,
       toolName: req.toolName,
       status: 'failed',
-      error: `Unknown tool: ${req.toolName}`,
+      error: isGenericCallName(req.toolName)
+        ? `Unknown tool: ${req.toolName}. "${req.toolName}" is not a tool name. Send the call again with the tool's own name, for example file_list or file_read, in the name field.`
+        : `Unknown tool: ${req.toolName}`,
       dispatchedArgs: req.args,
       argsHash,
       sideEffectKey,
@@ -349,6 +356,7 @@ async function runSingle(
   // User approval. Unconditional: a runtime that does not want a prompt says
   // so with APPROVE_ALL, it does not get there by forgetting the field.
   const approved = await runtime.awaitApproval(req, tool)
+  clockFrom = Date.now()
   if (!approved) {
     return finalize({
       id: req.id,
@@ -493,6 +501,18 @@ function abortedResult(tagged: { req: ExecutionRequest; key?: string }): Executi
     cacheHit: false,
     schemaValidated: false,
   }
+}
+
+/**
+ * What the loop guard needs to know about one result: did it fail. A tool that
+ * reports its failure as text (`Error (1): …`, `Web search failed: …`) comes
+ * back `completed`, and the guard fed `status === 'failed'` never saw it: a
+ * command failing over and over read as progress and even cleared the failure
+ * streaks (bug hunt 01.10.2026), so the run went on to the 200-round budget.
+ */
+export function resultFailed(r: Pick<ExecutionResult, 'status' | 'result'>): boolean {
+  if (r.status === 'failed') return true
+  return (r.status === 'completed' || r.status === 'cached') && toolResultIsFailure(r.result)
 }
 
 /** Convenience: attach ExecutionResult fields back onto an AgentToolCall. */

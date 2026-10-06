@@ -1,4 +1,6 @@
 import { useRef, useState, useCallback, useEffect } from 'react'
+import { frameFlush } from '../lib/frame-flush'
+import { useRunActivityStore, toolProgressActivity } from '../stores/runActivityStore'
 import { markCannotThink } from '../lib/model-compatibility'
 import {
   type ApprovalEntry,
@@ -38,18 +40,20 @@ import { resolveToolCallingStrategy } from '../lib/agent-strategy'
 import { isMultimodalUnsupportedError, MULTIMODAL_UNSUPPORTED_MESSAGE } from '../lib/ollama-errors'
 import { stripVisionFeedbackMessages, stripUserImagesForToolUse, reportMultimodalRefusal } from '../lib/vision-heal'
 import { log } from '../lib/logger'
+import { gatePlanTool, planToolAllowed } from '../lib/plan-gate'
 import { buildHermesToolPrompt, buildHermesToolResult, buildHermesToolCall, parseHermesToolCalls, stripToolCallTags, hasToolCallTags } from '../api/hermes-tool-calling'
-import { parseLooseToolCalls, stripMatchedCalls, stripToolCallText, canonicalToolName } from '../lib/loose-tool-parse'
+import { parseLooseToolCalls, stripMatchedCalls, stripToolCallText, repairToolCall } from '../lib/loose-tool-parse'
 import { mediaCallSucceeded } from '../lib/media-result'
 import { summarizeTurn } from '../lib/turn-summary'
 import { buildVisionFeedback } from '../api/vision-feedback'
 import { getModelMaxTokens, estimateTokens } from '../lib/context-compaction'
 import { buildRequestMessages, trimWorkingHistory } from '../lib/context-decay'
-import { effectiveSendWindow } from '../lib/send-window'
+import { effectiveSendWindow, sendWindowFor } from '../lib/send-window'
 import { sendsToALanBackend } from '../lib/lan-openai-slot'
 import { useSendSizeStore } from '../stores/sendSizeStore'
 import { resolveAgentNumCtx } from '../lib/agent-num-ctx'
 import { ensureBuiltinAgentCtx } from '../api/builtin-ensure'
+import { approvalIsMoot } from '../api/mcp/builtin-tools'
 import { useMemoryStore } from '../stores/memoryStore'
 import { useVoiceStore } from '../stores/voiceStore'
 import { autoSpeak } from '../lib/ttsBridge'
@@ -76,6 +80,8 @@ import { useAgentTaskStore } from '../stores/agentTaskStore'
 import { useAgentGoalStore, renderGoalSection } from '../stores/agentGoalStore'
 import { endLoopUnlessRearmed, useAgentLoopStore } from '../stores/agentLoopStore'
 import { beginRun, isRunStopped, stopRun } from '../lib/run-stop'
+import { noteStoppedIfEmpty } from '../lib/stopped-note'
+import { REJECTED_CALL_FOR_MODEL } from '../lib/rejected-call'
 import { buildLoopRecheck, loopPassSaysDone } from '../lib/agent-commands'
 import { applyStoredCompaction } from '../lib/compact-summary'
 import { maybeAutoCompact } from '../lib/run-compact-command'
@@ -85,18 +91,18 @@ import { toolFailureNote } from '../lib/tool-failure-note'
 import { toolCallCapMs, raceWithToolTimeout, SHELL_EXECUTE_DEFAULT_TIMEOUT_MS } from '../lib/tool-timeout'
 import { AgentLoopGuard } from '../lib/agent-loop-guard'
 import { budgetFromSettings } from '../api/agents/budget'
-import type { ChatMessage, ToolCall, ToolDefinition } from '../api/providers/types'
+import type { ChatMessage, ToolCall, ToolCallProgress, ToolDefinition } from '../api/providers/types'
 import type { WorkflowEngineCallbacks } from '../types/agent-workflows'
 import { renderWorkflowStepList, workflowProgressHeader, type WorkflowStepView } from '../lib/workflow-progress-view'
-import { executeParallel, applyResultToToolCall, type ExecutionRequest } from '../api/agents/tool-executor'
+import { executeParallel, applyResultToToolCall, resultFailed, type ExecutionRequest } from '../api/agents/tool-executor'
 import { useToolAuditStore } from '../stores/toolAuditStore'
 import { makeInTurnCacheLookup } from '../api/agents/in-turn-cache'
 import { explainError as explainToolError } from '../api/agents/error-hints'
-import { isOutsideWorkspaceRefusal, OUTSIDE_WORKSPACE_NOTICE } from '../lib/workspace-refusal'
-import { useChatNoticeStore } from '../stores/chatNoticeStore'
+import { hasUnrecoveredOutsideRefusal, OUTSIDE_WORKSPACE_NOTICE } from '../lib/workspace-refusal'
+import { useChatNoticeStore, CHAT_NOTICE_MS } from '../stores/chatNoticeStore'
+import { copyFailedMessage, fileMessageFields, filesWithoutWorkspace, placeChatFiles, type ChatFileInput } from '../lib/chat-files'
 import { settleThinking } from '../lib/thinking-stripper'
 import { openPlanGap, planReconcileSteer, PLAN_RECONCILE_BUDGET } from '../lib/plan-reconcile'
-import { PlanStaleness, planStalenessSteer } from '../lib/plan-staleness'
 import { planResumeAnchor } from '../lib/plan-resume'
 import { reasoningOnlyRound, REASONING_CONTINUE_BUDGET, REASONING_CONTINUE_STEER } from '../lib/reasoning-round'
 import { findUnbackedLinks, unbackedLinksSteer } from '../lib/unbacked-links'
@@ -109,8 +115,8 @@ import { capHiddenToolHistory } from './codex/hidden-history'
 // Derselbe Satz wie im Code Reiter, aus derselben Datei: der Fall ist
 // derselbe, und zwei Wortlaute fuer einen abgeschnittenen Zug waeren zwei
 // Stellen, von denen eine gepflegt wird.
-import { codexCutoffNote } from './codex/turn-cutoff'
-import { asString, errorText, prop } from '../types/json-guards'
+import { codexCutoffNote, dropCutOffCall } from './codex/turn-cutoff'
+import { asString, errorText, isRecord, prop } from '../types/json-guards'
 import type { ToolArgs } from '../api/mcp/types'
 import { CREDITS_EXHAUSTED_MESSAGE } from '../lib/credits-exhausted'
 import { buildChatSystemPrompt } from '../lib/system-prompt'
@@ -230,7 +236,7 @@ export function useAgentChat() {
         resolve(false)
         return
       }
-      const entry: ApprovalEntry = { toolCall, resolve }
+      const entry: ApprovalEntry = { toolCall, resolve, owner: signal }
       enqueueApproval(convId, entry)
       signal?.addEventListener(
         'abort',
@@ -253,12 +259,6 @@ export function useAgentChat() {
     runState.blocks = [...runState.blocks, block]
     useChatStore.getState().updateMessageAgentBlocks(convId, msgId, runState.blocks)
   }
-
-  function removeBlock(runState: AgentRunState, convId: string, msgId: string, blockId: string) {
-    runState.blocks = runState.blocks.filter(b => b.id !== blockId)
-    useChatStore.getState().updateMessageAgentBlocks(convId, msgId, runState.blocks)
-  }
-
 
   /**
    * ID-keyed block update — used by the parallel tool executor (Phase 5) so
@@ -317,6 +317,13 @@ export function useAgentChat() {
        * einem Lauf zurueckschreibt.
        */
       hiddenUser?: boolean
+      /**
+       * Files attached to this message (3.0.5). In Agent mode they are copied
+       * into the chat's working folder before the turn starts, so the file
+       * tools can work on the real bytes; in Chat Tools mode (plain chat) the
+       * model gets their summaries only. See lib/chat-files.ts.
+       */
+      files?: ChatFileInput[]
     },
   ) => {
     const { activeModel } = useModelStore.getState()
@@ -749,6 +756,12 @@ export function useAgentChat() {
     const abort = new AbortController()
     const runState: AgentRunState = { convId, content: '', thinking: '', blocks: [], abort }
     activeAgentRuns.set(convId, runState)
+    // A brand-new instruction clears a previous stop; a /loop pass inherits it,
+    // which is what makes Stop end the LOOP and not just the pass in flight.
+    // Cleared HERE, in the same beat as the claim, because the Stop button is
+    // live from the next line on: cleared after the awaits below, it wiped a
+    // Stop pressed right after Send and the run went on (Gegenprobe 01.10.2026).
+    if (!opts?.loop) beginRun(convId)
     // Flip the INPUT gate true in the SAME synchronous beat as the claim
     // above (David 2026-06-16, bug A). The input shows Send vs Stop off
     // `isAgentRunning`, which used to flip true only ~80 lines down, AFTER
@@ -790,11 +803,6 @@ export function useAgentChat() {
     } catch { /* run with whatever the engine has */ }
 
     const memoryScope = store.conversations.find(c => c.id === convId)?.memoryScope
-    // A brand-new instruction clears a previous stop; a /loop pass inherits it,
-    // which is what makes Stop end the LOOP and not just the pass in flight.
-    // The old per-instance ref was set by stopAgent and never cleared anywhere,
-    // so after one Stop every later /loop ran exactly one pass, in silence.
-    if (!opts?.loop) beginRun(convId)
 
     // Publish a HUMAN-READABLE slug ("create-an-index-7f2c3d") so
     // built-in tools land in `~/agent-workspace/<slug>/`. Previously
@@ -860,11 +868,38 @@ export function useAgentChat() {
       remote: providerId === 'ollama' ? !isOllamaLocal() : false,
     })
 
+    // Attached files. Full Agent mode works in a real folder, so the file goes
+    // there first and the message names its path; Chat Tools writes nothing to
+    // disk (artifact mode), so there the summary is all the model gets. A copy
+    // that fails never stops the turn: the block then says that only the
+    // summary is available, and the line above the transcript tells the user.
+    let attachedFiles = filesWithoutWorkspace(opts?.files)
+    if (opts?.files?.length && opts.chatToolsMode !== true) {
+      const placed = await placeChatFiles(opts.files, {
+        chatId: slug,
+        ...(resolvedWorkspace?.kind === 'folder' && resolvedWorkspace.path
+          ? { workingDirectory: resolvedWorkspace.path }
+          : {}),
+      })
+      attachedFiles = placed.files
+      if (placed.failed.length) {
+        useChatNoticeStore.getState().show('file-attach', copyFailedMessage(placed.failed), 'ruhig', CHAT_NOTICE_MS)
+      }
+    }
+    const fileFields = fileMessageFields(
+      userContent,
+      attachedFiles,
+      opts?.chatToolsMode === true ? 'chat' : 'workspace',
+    )
+
     // Add user message
     const userMessage = {
       id: uuid(),
       role: 'user' as const,
-      content: userContent,
+      // With files: the typed text plus one summary block per file, and the
+      // typed text alone as what the bubble shows. `userContent` itself stays
+      // the typed text for retrieval, memory and tool selection below.
+      ...fileFields,
       // Slash command: show "/commit" to the user, keep the expansion in content.
       ...(opts?.displayContent ? { displayContent: opts.displayContent } : {}),
       ...(opts?.hiddenUser ? { hidden: true } : {}),
@@ -1002,13 +1037,21 @@ export function useAgentChat() {
     //
     // Nur im hermes_xml-Fall berechnet: sonst zahlte jeder native Zug eine
     // Einbettungsabfrage fuer eine Liste, die er nie benutzt.
+    // Planning is opt-in (lib/plan-gate.ts). Decided once per run: the tool
+    // list of a run must not change mid-way, and a plan the model cannot open
+    // cannot become an open plan inside this run either.
+    const planAllowed = planToolAllowed({
+      mode: null,
+      userText: userContent,
+      todos: convId ? useTodoStore.getState().getTodos(convId) : [],
+    })
     const hermesToolDefs = strategy === 'hermes_xml'
-      ? await selectRelevantToolsAsync(
+      ? gatePlanTool(await selectRelevantToolsAsync(
           userContent,
           toolRegistry.getAll().filter((t) => toolMatchesCurated(t.name)),
           permissions,
           toolSelectionOpts(!!settings.smallModelMode, (texts) => generateEmbeddings(texts), skillPin),
-        )
+        ), planAllowed)
       : []
     // Small-Model Mode (Knob 2): swap the ~3000-char agent prompt for a lean
     // ~750-char one on the native path. Der Hermes-Zweig behaelt seine eigene
@@ -1027,8 +1070,10 @@ export function useAgentChat() {
     // The roster the prompt shows comes from the same filtered registry the
     // request draws on, so the prompt can never advertise a tool a permission
     // blocked or omit one that was added since (audit 2026-08-05).
-    const offeredTools = toolRegistry.getAvailableTools(permissions)
-      .filter((t) => toolMatchesCurated(t.name))
+    const offeredTools = gatePlanTool(
+      toolRegistry.getAvailableTools(permissions).filter((t) => toolMatchesCurated(t.name)),
+      planAllowed,
+    )
     let agentSystemPrompt = strategy === 'hermes_xml'
       ? buildHermesToolPrompt(hermesToolDefs) + (systemPrompt ? `\n\n${systemPrompt}` : '')
       : opts?.chatToolsMode
@@ -1163,7 +1208,15 @@ export function useAgentChat() {
     run.heldLocalLane = heldLocalLane
     // Bind the generating flag to THIS conversation so the typing indicator
     // shows only in the chat whose turn is in flight (David 2026-06-12).
-    useGenerationStore.getState().setGenerating(convId, true)
+    // A Stop that landed before this point already released the slot, so the
+    // finally below will not clear what is set here: marking the run as
+    // generating now left "Working" counting with nothing behind it until a
+    // second Stop (Gegenprobe 01.10.2026). The loop below sees the aborted
+    // signal and ends without a request.
+    const stoppedBeforeStart = abort.signal.aborted
+    if (!stoppedBeforeStart) useGenerationStore.getState().setGenerating(convId, true)
+    // A run that threw mid-call left its label behind; this run starts clean.
+    useRunActivityStore.getState().setActivity(convId, null)
     // Register so deleting/closing this chat stops the agent loop (Bug C).
     // requestGenerationCancel too, so a ComfyUI gen the agent kicked off is
     // interrupted when the chat is deleted mid-generation (gated to a no-op when
@@ -1171,7 +1224,7 @@ export function useAgentChat() {
     // review-lanes.md): passed bare this used to cancel whichever generation
     // happened to be running app-wide, so Stop in conversation B could kill an
     // image/video conversation A's agent was still producing.
-    useGenerationStore.getState().registerAborter(convId, () => { abort.abort(); requestGenerationCancel(convId) })
+    if (!stoppedBeforeStart) useGenerationStore.getState().registerAborter(convId, () => { abort.abort(); requestGenerationCancel(convId) })
     // A refusal no retry can fix has to end the loop as well. `return` in the
     // catch does not skip the finally, so without this the driver fires the
     // next pass into the same refusal and the credits dialog reopens every
@@ -1181,21 +1234,19 @@ export function useAgentChat() {
     runState.thinking = ''
     runState.blocks = []
 
-    let frameScheduled = false
+    // Closed at the final write and in the catch, so a late frame never lands
+    // on the closing line or the error (lib/frame-flush).
+    const frames = frameFlush()
 
     function scheduleUIUpdate() {
-      if (!frameScheduled) {
-        frameScheduled = true
-        requestAnimationFrame(() => {
-          const cId = convId!
-          const mId = assistantMessage.id
-          useChatStore.getState().updateMessageContent(cId, mId, runState.content)
-          if (runState.thinking) {
-            useChatStore.getState().updateMessageThinking(cId, mId, runState.thinking)
-          }
-          frameScheduled = false
-        })
-      }
+      frames.schedule(() => {
+        const cId = convId!
+        const mId = assistantMessage.id
+        useChatStore.getState().updateMessageContent(cId, mId, runState.content)
+        if (runState.thinking) {
+          useChatStore.getState().updateMessageThinking(cId, mId, runState.thinking)
+        }
+      })
     }
 
     // Phase 6: lock in the start-of-turn timestamp so the in-turn cache
@@ -1220,8 +1271,8 @@ export function useAgentChat() {
       [...agentMessages].reverse().find((m) => m.role === 'user')?.content || ''
     // G27b, parity with useCodex: a new turn on a conversation whose plan is
     // still open carries the plan instead of hoping the model digs it back out
-    // of the history. This loop persists NO hidden tool chain at all, so
-    // without the anchor the next request contains no todo_write whatsoever.
+    // of the history. The stored chain is capped, so the last todo_write may
+    // already be outside it.
     // The plan state comes from the todoStore, which is what the PlanBar shows.
     // Pushed LAST, behind the user's own message: volatile tail, stable head
     // (plan A5). Deliberately after userPromptText above, so the media-intent
@@ -1306,9 +1357,6 @@ export function useAgentChat() {
     let planReconcilesRemaining = PLAN_RECONCILE_BUDGET
     // G17: budget for continuing past reasoning-only rounds mid-run.
     let reasoningContinuesRemaining = REASONING_CONTINUE_BUDGET
-    // PlanBar lag: batches of real work without a todo_write while the plan
-    // has open items earn one bounded mid-run steer to report progress.
-    const planStaleness = new PlanStaleness()
     const executedCallKeys = new Set<string>()
     const callKey = (tc: { function: { name: string; arguments: unknown } }) =>
       tc.function.name + '|' + JSON.stringify(tc.function.arguments ?? {})
@@ -1469,7 +1517,7 @@ export function useAgentChat() {
         const sendWindow = effectiveSendWindow({
           providerId,
           modelWindow: agentCtx,
-          sendWindowTokens: settings.codexSendWindowTokens,
+          sendWindowTokens: sendWindowFor(settings, activeModel),
           capEnabled: decayOn,
           smallModelMode: settings.smallModelMode,
           localBackend: sendsToALanBackend(providerId),
@@ -1549,12 +1597,10 @@ export function useAgentChat() {
         }
 
         if (strategy === 'native') {
-          // Show thinking indicator while model processes
-          const thinkingBlockId = uuid()
-          addBlock(runState, convId!, assistantMessage.id, {
-            id: thinkingBlockId, phase: 'thinking', content: 'Analyzing...',
-            timestamp: Date.now(),
-          })
+          // No placeholder block while the model works: an "Analyzing..."
+          // thinking block showed as a "Thinking" chip, also for models that
+          // do not think, next to the status line that already says Working
+          // (Gegenprobe 01.10.2026). The status line is the one sign of life.
 
           // Intelligent tool selection — keyword for small lists, embedding
           // routing once the total tool count grows past the threshold
@@ -1573,12 +1619,12 @@ export function useAgentChat() {
           // Als sie hier standen, gab es sie nur an DIESER Stelle — der
           // hermes_xml-Zweig oben nahm stattdessen den ganzen Katalog, und
           // niemandem fiel es auf, weil nichts brach.
-          const relevantDefs = await selectRelevantToolsAsync(
+          const relevantDefs = gatePlanTool(await selectRelevantToolsAsync(
             lastUserMsg,
             toolRegistry.getAll().filter((t) => toolMatchesCurated(t.name)),
             permissions,
             toolSelectionOpts(!!settings.smallModelMode, (texts) => generateEmbeddings(texts), skillPin),
-          )
+          ), planAllowed)
           const tools: ToolDefinition[] = relevantDefs.map(t => ({
             type: 'function' as const,
             function: { name: t.name, description: t.description, parameters: t.inputSchema },
@@ -1619,17 +1665,6 @@ export function useAgentChat() {
             // the user stared at a frozen chat for 30-90 s while Gemma
             // thought (no tokens, no 3-dot, just dead air). Now content
             // and thinking land in real time.
-            //
-            // The thinking-indicator block is removed the moment ANY
-            // token arrives, so the user sees the live answer instead
-            // of the placeholder once the model starts producing.
-            let thinkingBlockRemoved = false
-            const dropThinkingBlock = () => {
-              if (!thinkingBlockRemoved) {
-                thinkingBlockRemoved = true
-                removeBlock(runState, convId!, assistantMessage.id, thinkingBlockId)
-              }
-            }
             // Connection-failure retry (David 2026-06-04): right after a VRAM
             // hand-off reloads the text model, the very next call can race the
             // still-warming model and die as "Agent error: Connection failed"
@@ -1657,12 +1692,10 @@ export function useAgentChat() {
                     signal: abort.signal,
                   },
                   (c) => {
-                    dropThinkingBlock()
                     runState.content = c
                     scheduleUIUpdate()
                   },
                   (t) => {
-                    dropThinkingBlock()
                     // The one gate for the whole step. Reading the raw setting
                     // here disagreed with the end-of-turn routing for an
                     // 'always' reasoner: nothing streamed live, then the whole
@@ -1711,7 +1744,6 @@ export function useAgentChat() {
                       signal: abort.signal,
                     },
                     (c) => {
-                      dropThinkingBlock()
                       runState.content = c
                       scheduleUIUpdate()
                     },
@@ -1734,7 +1766,6 @@ export function useAgentChat() {
                 throw thinkErr
               }
             }
-            dropThinkingBlock()
             turn = ollamaTurn
             // Ollama nennt den Grund `done_reason`; `lib/ollama-stream-tools.ts`
             // reicht ihn seit Fehler D durch.
@@ -1753,25 +1784,21 @@ export function useAgentChat() {
             // v2.5.3); a request that races that reload window dies as
             // "LM Studio: Request failed". Retry transient failures a couple
             // of times; a 4xx is deterministic and still surfaces.
-            let thinkingBlockRemoved = false
-            const dropThinkingBlock = () => {
-              if (!thinkingBlockRemoved) {
-                thinkingBlockRemoved = true
-                removeBlock(runState, convId!, assistantMessage.id, thinkingBlockId)
-              }
-            }
             const onLiveContent = (c: string) => {
-              dropThinkingBlock()
               runState.content = c
               scheduleUIUpdate()
             }
             const onLiveThinking = (t: string) => {
-              dropThinkingBlock()
               // Same gate as the end-of-turn routing, see the Ollama branch.
               if (keepThinking) {
                 runState.thinking = t
                 scheduleUIUpdate()
               }
+            }
+            // A call still being written names itself on the run anchor
+            // (stores/runActivityStore, realtime pass R1).
+            const onToolProgress = (p: ToolCallProgress) => {
+              useRunActivityStore.getState().setActivity(convId, toolProgressActivity(p))
             }
             const streamOpts = { ...chatOptions, tools }
             // Dasselbe wie im Ollama-Zweig, aus demselben Grund.
@@ -1779,7 +1806,7 @@ export function useAgentChat() {
             let connRetries = 0
             for (;;) {
               try {
-                providerTurn = await streamProviderTurn(provider, modelToUse, sendMessages, streamOpts, onLiveContent, onLiveThinking)
+                providerTurn = await streamProviderTurn(provider, modelToUse, sendMessages, streamOpts, onLiveContent, onLiveThinking, onToolProgress)
                 break
               } catch (thinkErr) {
                 // G22 parity with the Ollama branch: heal a wrong vision
@@ -1798,7 +1825,7 @@ export function useAgentChat() {
                 // number used to be in useChat.ts only, so this branch ended
                 // the whole run where plain chat just retried.
                 if (shouldDowngradeThinking(streamOpts.thinking, thinkErr)) {
-                  providerTurn = await streamProviderTurn(provider, modelToUse, sendMessages, { ...streamOpts, thinking: undefined as unknown as boolean }, onLiveContent, () => {})
+                  providerTurn = await streamProviderTurn(provider, modelToUse, sendMessages, { ...streamOpts, thinking: undefined as unknown as boolean }, onLiveContent, () => {}, onToolProgress)
                   break
                 }
                 const transient = asString(prop(thinkErr, 'name')) !== 'AbortError' && !isTerminalModelError(thinkErr)
@@ -1813,7 +1840,7 @@ export function useAgentChat() {
                 throw thinkErr
               }
             }
-            dropThinkingBlock()
+            useRunActivityStore.getState().setActivity(convId, null)
             turn = providerTurn
             // Und jeder andere Transport nennt ihn `finish_reason`.
             turnFinishReason = providerTurn.finishReason
@@ -1974,10 +2001,11 @@ export function useAgentChat() {
         // NATIVE call to `video_generation` (not `video_generate`) → "Unknown
         // tool" → it gave up. Map such close misses to the registered name.
         if (toolCalls.length > 0) {
-          toolCalls = toolCalls.map((tc) => ({
-            ...tc,
-            function: { ...tc.function, name: canonicalToolName(tc.function.name, knownToolNames) },
-          }))
+          const tools = toolRegistry.getAll()
+          toolCalls = toolCalls.map((tc) => {
+            const fixed = repairToolCall(tc.function.name, isRecord(tc.function.arguments) ? tc.function.arguments : {}, tools)
+            return fixed.name === tc.function.name ? tc : { ...tc, function: { ...tc.function, name: fixed.name, arguments: fixed.arguments } }
+          })
         }
 
         // Loose tool-call fallback (David 2026-06-03): weak local models often
@@ -2002,6 +2030,17 @@ export function useAgentChat() {
         // call was emitted alongside the echo. Tool args/results stay in the
         // agent's internal history; this only cleans the visible bubble.
         turnContent = stripToolCallText(turnContent, knownToolNames)
+
+        // A turn cut off by the token limit: its last call may stop halfway
+        // (dropCutOffCall). Checked after the loose fallback, which reads the
+        // same cut text.
+        {
+          const cut = dropCutOffCall(toolCalls, turnFinishReason)
+          if (cut.dropped) {
+            toolCalls = cut.calls
+            log.info('agent.cut_off_call_dropped', { name: cut.dropped.function.name })
+          }
+        }
 
         // Over-loop guard: keep only the media the user asked for (once each) and
         // drop any tool call that exactly repeats one already run this turn.
@@ -2300,6 +2339,7 @@ export function useAgentChat() {
         // this turn was allowed to offer it. Proven live on the Code side
         // 2026-07-25, where a read-only /plan created a file while every request
         // carried a read-only catalog.
+        const refusalsFrom = agentMessages.length
         if (opts?.readOnly) {
           const blocked = toolCalls.filter((tc) => !allowedInReadOnlyTurn(tc.function?.name ?? ''))
           if (blocked.length) {
@@ -2314,6 +2354,44 @@ export function useAgentChat() {
               content: `${names} is not available on this turn, it is a read-only command. Do not try to change anything. Finish with the written answer using what you have already read.`,
             })
           }
+        }
+
+        // A tool switched off in the permissions is refused, not offered for
+        // approval (bug hunt 01.10.2026, A4). The approval below asked for
+        // every level that was not 'auto', 'blocked' included, so one click on
+        // Approve ran a tool the user had turned off. Leaving it out of the
+        // catalog is not a gate: the loose parser lifts a call written as text
+        // and the executor resolves it by name. Same level, same inputs as the
+        // approval, and the same refusal the Code tab gives.
+        {
+          const overrides = usePermissionStore.getState().perToolOverrides
+          const isBlocked = (tc: ToolCall) => resolveApprovalLevel(tc.function.name, {
+            categoryLevel: toolRegistry.getPermissionLevelWithOverrides(tc.function.name, permissions, {}),
+            override: overrides[tc.function.name],
+            codexMode: null,
+            readOnlyRun: run.readOnlyShellTurn,
+          }) === 'blocked'
+          const refused = toolCalls.filter(isBlocked)
+          if (refused.length) {
+            toolCalls = toolCalls.filter((tc) => !isBlocked(tc))
+            const names = [...new Set(refused.map((tc) => tc.function.name))].join(', ')
+            agentMessages.push({
+              role: 'user',
+              content: `${names} is switched off for this conversation in the tool permissions, so it was not run. Do not call it again. Continue with the tools you have, or say what you would need.`,
+            })
+          }
+        }
+
+        // Every call of this turn was refused (bug hunt 01.10.2026, A9). The
+        // turn went on with an empty batch and wrote `tool_calls: []` into the
+        // history, which a strict upstream rejects, behind the refusal it
+        // answers. The model's own words go in first, then the refusal, and
+        // the next round answers it.
+        if (toolCalls.length === 0 && agentMessages.length > refusalsFrom) {
+          if (turnContent.trim()) {
+            agentMessages.splice(refusalsFrom, 0, { role: 'assistant', content: turnContent })
+          }
+          continue
         }
 
         // Loop-detector, parity with Codex: narration first (the same line
@@ -2404,7 +2482,8 @@ export function useAgentChat() {
               cloudOptIn: settings.codexCloudConfirmOptIn,
               providerId,
             })
-          const needsApproval = permLevel !== 'auto' || cloudShellConfirm
+          const needsApproval = (permLevel !== 'auto' || cloudShellConfirm)
+            && !(await approvalIsMoot(tc.function.name, tc.function.arguments ?? {}, run))
           // Exec-timeout parity with the Code tab (audit B8): without an
           // injected default the Rust side used its 120 s fallback, so the
           // same npm install that passed in Code died here after 2 minutes.
@@ -2527,15 +2606,6 @@ export function useAgentChat() {
           const result = results.find((r) => r.id === entry.ac.id)
           if (!result) continue
           applyResultToToolCall(entry.ac, result)
-          // Discord 2026-09-28 (xambran): a file outside the chat's folder was
-          // refused in a collapsed tool block, and the model alone was left to
-          // explain it. The user gets the way out above the chat, whatever the
-          // model makes of the refusal (lib/workspace-refusal.ts).
-          // Read off the applied call: file_edit returns its refusal as text,
-          // and only applyResultToToolCall turns that into a failure.
-          if (entry.ac.status === 'failed' && isOutsideWorkspaceRefusal(entry.ac.toolName, entry.ac.error)) {
-            useChatNoticeStore.getState().show('agent-outside-workspace', OUTSIDE_WORKSPACE_NOTICE)
-          }
           // Over-loop accounting (David 2026-06-04): remember every executed call
           // (so an identical repeat is skipped) and count successful media gens
           // against the per-turn cap that stops "13× the same cat".
@@ -2601,7 +2671,7 @@ export function useAgentChat() {
         const resultTextFor = (r: typeof results[number]): string => {
           const text =
             r.status === 'rejected'
-              ? 'User rejected this action. Try a different approach.'
+              ? REJECTED_CALL_FOR_MODEL
               : r.status === 'completed' || r.status === 'cached'
                 ? (r.result ?? '')
                 : r.errorHint
@@ -2693,10 +2763,16 @@ export function useAgentChat() {
             }, tc))
           }
         } else if (strategy === 'native') {
+          // Ids kept on the native channel too (bug hunt 01.10.2026, A7). Ollama
+          // ignores them, but this chain is saved as hidden history: a switch to
+          // LU Cloud in the same conversation sent id-less calls and results,
+          // which a strict upstream 422s, or at best a prompt prefix that changed
+          // every step and missed the upstream cache.
           agentMessages.push({
             role: 'assistant',
             content: turnContent || '',
             tool_calls: toolCalls.map((tc) => ({
+              id: tc.id,
               function: { name: tc.function.name, arguments: tc.function.arguments },
             })),
           })
@@ -2705,6 +2781,7 @@ export function useAgentChat() {
             agentMessages.push(rememberResult({
               role: 'tool',
               content: resultTextFor(result) + mediaNote(tc.function.name, result),
+              tool_call_id: tc.id,
             }, tc))
           }
         } else {
@@ -2730,7 +2807,7 @@ export function useAgentChat() {
         // cannot see (they only look at what was asked for, and they skip
         // shell on purpose).
         const failVerdict = loopGuard.recordResults(
-          results.map((r) => ({ name: r.toolName, failed: r.status === 'failed', error: r.error, args: r.dispatchedArgs })),
+          results.map((r) => ({ name: r.toolName, failed: resultFailed(r), error: r.error ?? (resultFailed(r) ? r.result?.split('\n')[0].slice(0, 300) : undefined), args: r.dispatchedArgs })),
         )
         if (failVerdict.action === 'halt') {
           addBlock(runState, convId!, assistantMessage.id, {
@@ -2752,14 +2829,6 @@ export function useAgentChat() {
         }
         if (failVerdict.action === 'steer') {
           agentMessages.push({ role: 'user', content: failVerdict.message })
-        }
-        // PlanBar lag: the bar renders only what the model reports, so after
-        // enough batches of silent progress ask it to bring the list current.
-        {
-          const staleGap = openPlanGap(useTodoStore.getState().getTodos(convId!))
-          if (planStaleness.recordBatch(batch.map((e) => e.ac.toolName), staleGap !== null) && staleGap) {
-            agentMessages.push({ role: 'user', content: planStalenessSteer(staleGap) })
-          }
         }
 
         // Vision feedback (David 2026-06-03): after image_generate, hand the
@@ -2810,7 +2879,9 @@ export function useAgentChat() {
       // tool-call rows but no closing line. Build a concise summary
       // from the actually-completed blocks so there is always a final
       // answer at the bottom of the bubble.
-      if (!runState.content.trim()) {
+      // A stopped run gets the stop note in the finally instead: "rephrase, or
+      // turn off Think" blamed the prompt for the user's own Stop.
+      if (!runState.content.trim() && !abort.signal.aborted) {
         // Closing line when the model said nothing itself. Pure logic lives in
         // summarizeTurn so the D#81 rules (a failed picture is not a completed
         // task, and its reason gets shown) are locked by tests.
@@ -2821,37 +2892,15 @@ export function useAgentChat() {
         runState.content = closingSummary()
       }
 
-      // Die Werkzeugkette als versteckte Nachrichten ablegen, VOR der
-      // Assistentenantwort — genau wie useCodex es tut (dieselbe Deckelung,
-      // derselbe Waisenschnitt aus hooks/codex/hidden-history.ts: ein Fenster,
-      // das mit einem Ergebnis ohne seinen Aufruf beginnt, laesst strenge
-      // Anbieter mit 422 antworten). Ohne das hier sah die naechste Runde nur
-      // noch den Antworttext und holte dieselbe Seite ein zweites Mal.
-      if (werkzeugKette.length > 0 && convId) {
-        const kette = capHiddenToolHistory(werkzeugKette)
-        const store = useChatStore.getState()
-        const convNow = store.conversations.find((c) => c.id === convId)
-        const idx = convNow?.messages.findIndex((m) => m.id === assistantMessage.id) ?? -1
-        if (kette.length > 0 && idx > 0) {
-          store.insertMessagesBefore(convId, assistantMessage.id, kette.map((tm) => ({
-            id: uuid(),
-            role: tm.role as import('../types/chat').Message['role'],
-            content: tm.content || '',
-            timestamp: Date.now(),
-            hidden: true,
-            ...(tm.tool_calls ? { tool_calls: tm.tool_calls as import('../types/chat').Message['tool_calls'] } : {}),
-            ...(tm.tool_call_id ? { tool_call_id: tm.tool_call_id } : {}),
-          })))
-        }
-      }
-
       // Final store update
+      frames.close()
       useChatStore.getState().updateMessageContent(convId!, assistantMessage.id, runState.content)
       if (runState.thinking) {
         useChatStore.getState().updateMessageThinking(convId!, assistantMessage.id, runState.thinking)
       }
 
     } catch (err) {
+      frames.close()
       if ((err as Error).name !== 'AbortError') {
         const errorMsg = errorText(err) || 'Connection failed'
         // Bug B3 round 2: a refusal that produced nothing at all (the model's
@@ -2987,11 +3036,54 @@ export function useAgentChat() {
       // to false, and reject B's pending approvals, leaving the NEW run
       // unstoppable through generationStore (Stop button, sign-out, window
       // close, app quit) even though activeAgentRuns still pointed at it.
+      // A Stop before anything was written leaves a line, not an empty bubble.
+      // Discord 2026-09-28 (xambran): a file outside the chat's folder was
+      // refused in a collapsed tool block, and the model alone was left to
+      // explain it. The user gets the way out above the chat, whatever the
+      // model makes of the refusal (lib/workspace-refusal.ts). Only when the
+      // run did not fix it itself: a model that retried inside its folder
+      // and succeeded left a "then ask again" over a finished task
+      // (Gegenprobe 01.10.2026). file_edit returns its refusal as text, and
+      // only applyResultToToolCall turned that into the failure read here.
+      const steps = runState.blocks.flatMap((b) => (b.phase === 'tool_call' && b.toolCall ? [b.toolCall] : []))
+      // Only over the conversation it is about: a run that ends after the user
+      // moved on does not put its line over another chat.
+      if (hasUnrecoveredOutsideRefusal(steps) && useChatStore.getState().activeConversationId === convId) {
+        useChatNoticeStore.getState().show('agent-outside-workspace', OUTSIDE_WORKSPACE_NOTICE)
+      }
+      if (abort.signal.aborted || isRunStopped(convId)) noteStoppedIfEmpty(convId, assistantMessage.id)
       const stillOwnsSlot = activeAgentRuns.get(convId) === runState
       if (stillOwnsSlot) {
         useGenerationStore.getState().clearAborter(convId)
         activeAgentRuns.delete(convId)
       }
+      // Die Werkzeugkette als versteckte Nachrichten ablegen, VOR der
+      // Assistentenantwort. Im finally, nicht am Ende des Erfolgswegs: ein Lauf,
+      // der mit einem Fehler oder Abbruch endete, verlor sonst seine ganze Kette,
+      // und "continue" fing von vorn an (Kundenfall swift_maple90, 30.09.2026).
+      // Genau wie useCodex (dieselbe Deckelung und
+      // derselbe Waisenschnitt aus hooks/codex/hidden-history.ts: ein Fenster,
+      // das mit einem Ergebnis ohne seinen Aufruf beginnt, laesst strenge
+      // Anbieter mit 422 antworten). Ohne das hier sah die naechste Runde nur
+      // noch den Antworttext und holte dieselbe Seite ein zweites Mal.
+      if (werkzeugKette.length > 0 && convId) {
+        const kette = capHiddenToolHistory(werkzeugKette)
+        const store = useChatStore.getState()
+        const convNow = store.conversations.find((c) => c.id === convId)
+        const idx = convNow?.messages.findIndex((m) => m.id === assistantMessage.id) ?? -1
+        if (kette.length > 0 && idx > 0) {
+          store.insertMessagesBefore(convId, assistantMessage.id, kette.map((tm) => ({
+            id: uuid(),
+            role: tm.role as import('../types/chat').Message['role'],
+            content: tm.content || '',
+            timestamp: Date.now(),
+            hidden: true,
+            ...(tm.tool_calls ? { tool_calls: tm.tool_calls as import('../types/chat').Message['tool_calls'] } : {}),
+            ...(tm.tool_call_id ? { tool_call_id: tm.tool_call_id } : {}),
+          })))
+        }
+      }
+
       // Chat-tools artifact mode: attach any files the model "wrote" (captured
       // in-memory, NOT on disk) to the assistant message so they render inline
       // with a preview + Download button. takeChatArtifacts drains this run's
@@ -3030,7 +3122,7 @@ export function useAgentChat() {
       // but only THIS run's: a replaced slot means a NEW run's approvals are
       // waiting under the same convId, and they must survive.
       if (stillOwnsSlot) {
-        drainApprovals(convId)
+        drainApprovals(convId, abort.signal)
       }
 
       // Auto-read the finished response when the user opted in (#77). Default
@@ -3269,10 +3361,9 @@ ${roster}
 
 That list is what LU can do. Your request carries the subset that fits the task at hand, and on a local model it is a subset. Only ever call a tool that is in your tool list. Calling one that is not there fails as an unknown tool and wastes a step. If you need one that is missing, name it in your answer and carry on with what you have.
 
-PLAN FIRST (todo_write):
-- Any task that needs more than about three tool calls starts with todo_write: write the whole plan before the first step. The user sees that list live, it is how they know what you are doing.
-- After each step, call todo_write again with the COMPLETE list, flipping the finished item to completed and the next one to in_progress. Exactly one item is in_progress at a time.
-- Never mark an item completed before the work actually succeeded. Skip the plan entirely for a single-step request.
+WORK IN BATCHES (every step resends the whole conversation and costs the user money):
+- Put independent tool calls into ONE response: several reads, searches or edits at once.
+- Never spend a step on bookkeeping alone. If a todo_write tool is offered, send the updated list together with your next real tool call.
 
 AUTONOMY CONTRACT (read carefully, this is the most important rule):
 - When the user asks you to BUILD, CREATE, MAKE, or WRITE something (a file, a website, a script, a folder structure), you MUST execute it via tools, typically file_write.
@@ -3324,11 +3415,11 @@ ${platformPromptLine()}
 You always have: ${alwaysThere}. Your request carries the other tools that fit the task. Read their names there, do not guess.
 
 Rules:
-- For a task of more than about three steps, call todo_write FIRST with the whole plan, then again after each step with the complete list (one item in_progress, finished ones completed). The user watches that list.
+- Put independent tool calls into one response (several reads or edits at once). Every step costs the user money.
 - To build/create/write something, CALL the tool (usually file_write), never paste a code block and say "save this".
 - To change an existing file use file_edit with a unique old_string, not file_write.
 - PATHS: use relative paths (e.g. \`package.json\`, \`.\`). Never start with \`/\` or a drive letter, it escapes your workspace and fails.
-- Emit the tool call as your FIRST output, no "Okay, let me…" preamble. Valid JSON, one at a time. Never guess file contents, file_read first.
+- Emit the tool call as your FIRST output, no "Okay, let me…" preamble. Valid JSON. Never guess file contents, file_read first.
 - After each tool result, if a step remains, immediately call the next tool. Do not narrate "I will now…" and then stop.
 - For images/video call image_generate / video_generate as real tool calls.
 - When everything is done, reply with one short sentence in the user's language.`

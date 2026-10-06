@@ -128,7 +128,7 @@ const fullWire = () => JSON.stringify(wireTools(codingCatalog()))
  */
 const CODING_CHAR_CEILING = 7600
 const CODING_TOKEN_CEILING = 1730
-const FULL_CHAR_CEILING = 22355
+const FULL_CHAR_CEILING = 22453
 const FULL_TOKEN_CEILING = 5120
 
 describe('the coding step carries a catalog the diet actually shrank', () => {

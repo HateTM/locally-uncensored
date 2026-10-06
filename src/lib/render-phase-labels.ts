@@ -29,6 +29,9 @@ import {
   LOADER_NODES, CLIP_LOADER_NODES, VAE_LOADER_NODES, SAMPLER_NODES, DECODE_NODES,
 } from '../api/comfyui-ws'
 
+/** ComfyUI-RMBG's node class, the one node a cutout graph runs. */
+const CUTOUT_NODE = 'RMBG'
+
 /** Which of the two Create lanes a render belongs to. */
 export type RenderMode = 'image' | 'video'
 
@@ -48,7 +51,18 @@ export interface RenderPhaseStep {
  * not sampled anything. It reads as a load because that is what ComfyUI does
  * there, and the first `progress` event is what proves sampling started.
  */
-export function phaseForExecutingNode(classType: string, mode: RenderMode): RenderPhaseStep | null {
+export function phaseForExecutingNode(
+  classType: string,
+  mode: RenderMode,
+  /** Set when the cutout node is about to fetch its model (api/cutout-model). */
+  cutoutDownloadLine?: string | null,
+): RenderPhaseStep | null {
+  if (classType === CUTOUT_NODE) {
+    // The box, 04.10.2026: the node spent 160 s fetching its model and the
+    // waiting area said "Queued..." for all of it, because this node had no
+    // label of its own. It is the whole run of a cutout.
+    return { phase: 'sampling', pct: 40, label: cutoutDownloadLine || 'Removing the background...' }
+  }
   if (LOADER_NODES.has(classType)) {
     return { phase: 'loading-model', pct: 15, label: 'Loading model...' }
   }

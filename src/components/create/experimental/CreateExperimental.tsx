@@ -1,12 +1,15 @@
-import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { AlertTriangle, Cloud, Cpu } from 'lucide-react'
 import { useCreateStore, type GalleryItem } from '../../../stores/createStore'
 import { useCloudNoticeStore, CLOUD_RETENTION_DAYS, shouldShowRetentionNotice } from '../../../stores/cloudNoticeStore'
 import { useComfyNoticeStore } from '../../../stores/comfyNoticeStore'
 import { loadComfyCorsSignature, shouldShowCorsNotice } from '../../../lib/comfy-cors-notice'
-import { comfyIdleNotice, shouldWatchComfyIdle, IDLE_WATCH_INTERVAL_MS } from '../../../lib/comfy-idle-watch'
+import { comfyIdleNotice, shouldWatchComfyIdle, IDLE_WATCH_INTERVAL_MS, IDLE_STARTING } from '../../../lib/comfy-idle-watch'
 import type { ComfyGuardStatus } from '../../../lib/comfy-restart-guard'
+import { anyInstallRunning, subscribeInstallRuns } from '../../../lib/model-install-runs'
+import { useComfyInstallStore } from '../../../stores/comfyInstallStore'
+import { setRenderSurfaceOpen } from '../../../api/vram-handoff'
 import { useWorkflowStore } from '../../../stores/workflowStore'
 import { CreateExpProvider, useCreateExp } from './CreateContext'
 import { IntentBar } from './IntentBar'
@@ -14,13 +17,14 @@ import { Stage } from './Stage'
 import { Composer } from './Composer'
 import { CreatePanel } from './CreatePanel'
 import { Lightbox } from './Lightbox'
+import { SaveCharacterModal } from './SaveCharacterModal'
 import { AdvancedDrawer } from './AdvancedDrawer'
 import { WorkflowsModal } from '../WorkflowsModal'
 import { Hinweis } from '../../ui/Hinweis'
 import { BannerText } from './BannerText'
 import { MaskEditor } from './MaskEditor'
 import { VhsInstallModal } from './VhsInstallModal'
-import { RenderFixupModal } from './RenderFixupModal'
+import { CloudHiddenNotice } from '../../cloud/CloudHiddenNotice'
 import { PresetShelf } from './PresetShelf'
 import type { CreatePreset } from '../../../lib/render/create-presets'
 import { Modal } from '../../ui/Modal'
@@ -37,8 +41,8 @@ const PresetWorkshop = lazy(() =>
   import('./PresetWorkshop').then((m) => ({ default: m.PresetWorkshop })),
 )
 import { INTENT_MAP, isIntentAvailable } from './intents'
-import { intentRoles, isStudioModel, resolveIntentPick } from '../../../lib/render/create-studio'
-import { modelForOp } from '../../../stores/cloudCatalogStore'
+import { studioPickFor } from '../../../lib/render/create-studio'
+import { modelForOp, useCloudCatalogStore } from '../../../stores/cloudCatalogStore'
 import { stageShowsSetupCard, laneModelCount } from './stageGate'
 import { isMlxImageHost } from '../../../api/mlx-image'
 import { fetchGalleryItemBlob } from './galleryUrl'
@@ -84,21 +88,25 @@ function CreateExperimentalInner() {
   // Composer.tsx, kept in sync by hand (both read the same store getters and
   // pure functions, no new state).
   const intent = useCreateStore((s) => s.intent())
-  const characterTab = useCreateStore((s) => s.characterTab)
   const cloudOpModel = useCreateStore((s) => s.cloudOpModel)
-  // characterUse never resolves to a Studio pick (Composer.tsx: roleIntent
-  // excludes it outright, character-use stays on its fixed -lora family via
-  // resolveCharacterModel), so this derivation does not need
-  // selectedCharacter at all.
-  const characterUse = intent === 'character' && characterTab === 'use'
-  const roleIntent = backend === 'cloud' && !characterUse && intentRoles(intent).length > 0
-  const rolePick = roleIntent ? resolveIntentPick(intent, cloudOpModel) : undefined
-  const studioPick = rolePick && isStudioModel(rolePick) ? rolePick : undefined
+  const cloudImageModel = useCreateStore((s) => s.cloudImageModel)
+  const cloudVideoModel = useCreateStore((s) => s.cloudVideoModel)
+  // Der Katalog kommt vom Server; die Studio-Wahl liest ihn, also zeichnet sich
+  // diese Flaeche neu, sobald er eintrifft.
+  useCloudCatalogStore((s) => s.models)
+  // Seit 02.10.2026 faehrt nicht nur eine Rollen-Absicht ein Studio-Modell,
+  // sondern auch Image, Edit, Video und Animate (Web-Paritaet). Eine Funktion
+  // traegt die Regel fuer Composer, Zaehler, Start und diese Schublade; der
+  // Character-Weg bleibt davon ausgenommen. Auf der lokalen Spur gibt es nie
+  // eine Studio-Wahl.
+  const studioPick = backend === 'cloud' ? studioPickFor(intent, { cloudImageModel, cloudVideoModel, cloudOpModel }) : undefined
 
   const [shownId, setShownId] = useState<string | null>(null)
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [maskOpen, setMaskOpen] = useState(false)
   const [lightbox, setLightbox] = useState<GalleryItem | null>(null)
+  // The video whose frames are being saved as a character (SaveCharacterModal).
+  const [characterFrom, setCharacterFrom] = useState<GalleryItem | null>(null)
   const [panelOpen, setPanelOpen] = useState(false)
   const [workflowsOpen, setWorkflowsOpen] = useState(false)
 
@@ -156,6 +164,18 @@ function CreateExperimentalInner() {
   // A glance every 30s while this tab is open and idle, no restart of its own:
   // holding an engine warm for work nobody asked for costs RAM and VRAM, and
   // the render path already fixes it on demand. Wording in lib/comfy-idle-watch.
+  //
+  // Silent while LU restarts ComfyUI itself: the setup card or the update line
+  // is already saying what happens, and the look comes back when it is done.
+  const setupRunning = useSyncExternalStore(subscribeInstallRuns, anyInstallRunning)
+  const comfyUpdating = useComfyInstallStore((s) => s.phase !== 'idle' && s.phase !== 'error')
+  const luIsRestartingComfy = setupRunning || comfyUpdating || corsFixing
+  // While this view is open a finished render keeps the graphics card for the
+  // next one; leaving it brings the chat model back (api/vram-handoff).
+  useEffect(() => {
+    setRenderSurfaceOpen(true)
+    return () => setRenderSurfaceOpen(false)
+  }, [])
   const [idleNotice, setIdleNotice] = useState('')
   const idleTimerRef = useRef<(() => void) | null>(null)
   useEffect(() => {
@@ -164,7 +184,7 @@ function CreateExperimentalInner() {
     void (async () => {
       const { isMacOS } = await import('../../../api/backend')
       if (cancelled) return
-      if (!shouldWatchComfyIdle(backend === 'local', isMacOS(), isGenerating)) { clear(); return }
+      if (!shouldWatchComfyIdle(backend === 'local', isMacOS(), isGenerating, luIsRestartingComfy)) { clear(); return }
       const { backendCall } = await import('../../../api/backend')
       const look = async () => {
         const st = await backendCall<ComfyGuardStatus>('comfyui_status').catch(() => null)
@@ -175,7 +195,7 @@ function CreateExperimentalInner() {
       idleTimerRef.current = () => clearInterval(timer)
     })()
     return () => { cancelled = true; idleTimerRef.current?.(); idleTimerRef.current = null }
-  }, [backend, isGenerating])
+  }, [backend, isGenerating, luIsRestartingComfy])
 
   const fixCorsForMe = useCallback(async () => {
     setCorsFixing(true)
@@ -221,18 +241,23 @@ function CreateExperimentalInner() {
   // `error` ist davon ausgenommen: das sind Laufzeitfehler eines konkreten
   // Laufs, die die Karte nicht erklaert — und nur sie tragen das
   // Schliesskreuz.
+  const comfyStarting = idleNotice === IDLE_STARTING
   const setupCardOwnsStage = stageShowsSetupCard({
     backend,
     requiresModels: INTENT_MAP[intent].requiresModels,
     mlxMissing,
     connected,
+    comfyStarting,
     modelsLoaded,
     laneModelCount: laneModelCount(intent, INTENT_MAP[intent].requiresModels, {
       image: imageModelList, video: videoModelList, audio: audioModelList,
       lipsync: lipsyncModelList, motion: motionModelList,
     }),
   })
-  const banner = error ?? (setupCardOwnsStage ? null : modelLoadError)
+  // While ComfyUI starts, "ComfyUI is starting up." is the one voice; the
+  // load error "is not running" said the opposite in red next to it
+  // (3.0.4 Gegenprobe 8).
+  const banner = error ?? (setupCardOwnsStage || comfyStarting ? null : modelLoadError)
 
   // "Edit with mask" on a finished image force-sets the 'edit' intent. On the
   // MLX Mac that lane does not exist (no ComfyUI inpaint nodes, and MLX
@@ -395,6 +420,8 @@ function CreateExperimentalInner() {
         </Hinweis>
       )}
 
+      <CloudHiddenNotice />
+
       {/* Cloud gallery retention (David 2026-07-24). Cloud renders live on our
           servers, not on this machine, so the gallery is not permanent storage.
           Cloud mode only. One time ever: no close X and no auto-hide, the only
@@ -424,6 +451,8 @@ function CreateExperimentalInner() {
           onEditResult={editAvailable ? (it) => { void editResultWithMask(it) } : undefined}
           onAnimateResult={animateAvailable ? (it) => { void animateResult(it) } : undefined}
           onFullscreen={(it) => setLightbox(it)}
+          onSaveCharacter={setCharacterFrom}
+          comfyStarting={comfyStarting}
         />
         <CreatePanel open={panelOpen} onOpenChange={setPanelOpen} activeId={shownId} onSelect={openGalleryItem} />
         <PresetShelf
@@ -489,9 +518,9 @@ function CreateExperimentalInner() {
         </Modal>
       )}
 
-      <Lightbox item={lightbox} onClose={() => setLightbox(null)} />
+      <Lightbox item={lightbox} onClose={() => setLightbox(null)} onSaveCharacter={setCharacterFrom} />
+      <SaveCharacterModal item={characterFrom} onClose={() => setCharacterFrom(null)} />
       <VhsInstallModal />
-      <RenderFixupModal />
     </div>
   )
 }

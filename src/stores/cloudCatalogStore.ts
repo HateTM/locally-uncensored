@@ -7,7 +7,12 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { safeJSONStorage } from '../lib/storage-quota'
-import { CLOUD_MODEL_SEED, type CloudModel } from '../lib/render/cloud-models'
+import { CLOUD_MODEL_SEED, DEFAULT_MODEL_IDS, type CloudModel } from '../lib/render/cloud-models'
+import { STUDIO_MODELS } from '../lib/render/studio-contract'
+import {
+  STUDIO_EDIT_MODELS, studioImageToVideo, studioReferenceVideo, studioTextToImage,
+  studioTextToVideo,
+} from '../lib/render/studio-roles'
 import type { RenderKind, RenderOp } from '../lib/render/cloud-jobs'
 import { getCatalog, type CatalogOps, type CloudCatalog } from '../api/cloud/catalog'
 
@@ -64,23 +69,6 @@ export function cloudModelsFor(kind: RenderKind): CloudModel[] {
   return useCloudCatalogStore.getState().models.filter((m) => m.kind === kind && !m.ops)
 }
 
-/** Review B1 (Runde 2, 20.09.2026): the ONLY signal that the connected
- *  server knows the Studio endpoints at all (Portplan Abschnitt 4, "nie
- *  eine Serverversion fest verdrahten"): absence, not a version number, is
- *  what an older catalog payload looks like. The default seed
- *  (CLOUD_MODEL_SEED) carries `quote_required` on no entry, so a fresh
- *  install reads false here until the first successful catalog fetch, same
- *  as an old server that never gained Studio. Every caller that would
- *  otherwise pick a Studio model as a role intent's DEFAULT (create-
- *  studio.ts's `intentPickerModels`, which `resolveIntentPick` and five
- *  downstream components all read) must gate on this, or a Create-tab run
- *  on an old server picks an endpoint that server has never heard of
- *  (review-studio-B.md B1: Extend/Motion broke on today's server). Already
- *  used the same way by PresetShelf.tsx to hide the shelf entirely. */
-export function catalogHasStudio(): boolean {
-  return useCloudCatalogStore.getState().models.some((m) => m.quote_required === true)
-}
-
 // Does this catalog entry serve this op? Classic models (no `ops`) keep their
 // flag contract: generate always, edit per flag, animate = video i2v.
 export function cloudModelSupportsOp(m: CloudModel, op: RenderOp): boolean {
@@ -122,11 +110,53 @@ export function loraGenModels(): CloudModel[] {
   return useCloudCatalogStore.getState().models.filter((m) => m.lora === true)
 }
 
-/** First classic model of the kind; kinds whose models are ALL op-specialized
- *  (audio — every entry carries `ops`, in the live catalog and the seed alike)
- *  fall back to the kind's first entry so callers never explode on `.id`. */
-export function defaultCloudModel(kind: RenderKind): CloudModel | undefined {
+// Which generation models accept which trained-LoRA family. Ported from
+// uselu main 5be5dec3 (apps/web/lib/render/cloud-models.ts,
+// CHARACTER_MODEL_FAMILY): the picker (ModelChip), the meter (CreditsMeter)
+// and the submit path (useCloudCreate) all resolve through the SAME table, so
+// the UI cannot show Flux while quietly running Z-Image. `qwen-image-lora` is
+// in the desktop seed (cloud-models.ts); flux/z-image keep their two endpoints
+// each (a fast + a slower/quality one).
+export const CHARACTER_MODEL_FAMILY: Readonly<Record<string, string>> = {
+  'flux-schnell-lora': 'flux',
+  'flux-dev-lora-ultra-fast': 'flux',
+  'z-image-turbo-lora': 'z-image',
+  'z-image-base-lora': 'z-image',
+  'qwen-image-lora': 'qwen-image',
+  'ltx-2': 'ltx-2',
+  'ltx-2.3': 'ltx-2',
+}
+
+/** Generation models that accept this trained-LoRA family's weights. */
+export function characterGenerationModels(family: string): CloudModel[] {
+  return loraGenModels().filter((m) => CHARACTER_MODEL_FAMILY[m.id] === family)
+}
+
+/** The model a character run will really use: the stored pick if it still
+ *  fits the trained family, else the family's first compatible model, else
+ *  null (no compatible generation endpoint exists yet for this family). */
+export function resolveCharacterModel(family: string, pickedId: string): string | null {
+  const list = characterGenerationModels(family)
+  return list.some((m) => m.id === pickedId) ? pickedId : (list[0]?.id ?? null)
+}
+
+/** Das klassische Standardmodell (ohne Studio-Eintraege) fuer Wege, die nur den
+ *  klassischen Katalog fahren. First classic model of the kind; kinds whose
+ *  models are ALL op-specialized (audio, every entry carries `ops`, in the live
+ *  catalog and the seed alike) fall back to the kind's first entry so callers
+ *  never explode on `.id`. */
+export function classicDefaultModel(kind: RenderKind): CloudModel | undefined {
   return cloudModelsFor(kind)[0] ?? useCloudCatalogStore.getState().models.find((m) => m.kind === kind)
+}
+
+/** Das Standardmodell fuer eine NEUE Auswahl (DEFAULT_MODEL_IDS, seit
+ *  02.10.2026), sofern der Server es kennt. Kennt er es nicht (ein aelterer
+ *  Server, oder der Notvorrat), gilt wie vor diesem Stand das erste klassische
+ *  Modell. Eine gespeicherte Wahl bleibt, wie sie ist: diese Funktion wird nur
+ *  befragt, wo nichts gewaehlt ist. */
+export function defaultCloudModel(kind: RenderKind): CloudModel | undefined {
+  const id = kind === 'image' ? DEFAULT_MODEL_IDS.image : kind === 'video' ? DEFAULT_MODEL_IDS.video : undefined
+  return (id ? cloudModelById(id) : undefined) ?? classicDefaultModel(kind)
 }
 
 export function cloudModelById(id: string): CloudModel | undefined {
@@ -142,15 +172,50 @@ export function isEditModel(m: CloudModel): boolean {
   return m.edit === true || m.ops?.includes('edit') === true
 }
 
-export function isEditCapable(id: string): boolean {
-  const m = cloudModelById(id)
-  return m !== undefined && isEditModel(m)
+/** Die Studio-Eintraege dieser Ids, die der Server wirklich fuehrt. Die Ids
+ *  kommen aus der mitgelieferten Registrierung (studio-roles.ts), die Eintraege
+ *  aus dem Katalog: was ein Server nicht kennt, wird nicht angeboten, weil der
+ *  Start es dort ablehnen wuerde. Ein Eintrag zaehlt als Studio-Eintrag, wenn
+ *  der Server `quote_required` setzt: ABWESENHEIT dieses Felds, nie eine
+ *  Versionsnummer, ist, wie ein aelterer Katalog aussieht (Portplan Abschnitt 4,
+ *  "nie eine Serverversion fest verdrahten"). Review B1 (Runde 2, 20.09.2026):
+ *  ohne diese Probe wich ein Create-Lauf auf einem Server ohne Studio auf einen
+ *  Endpunkt aus, den dieser Server nie gehoert hatte. */
+export function studioEntries(ids: readonly string[]): CloudModel[] {
+  const { models } = useCloudCatalogStore.getState()
+  return ids
+    .map((id) => models.find((m) => m.id === id))
+    .filter((m): m is CloudModel => m !== undefined && m.quote_required === true && STUDIO_MODELS[m.id] !== undefined)
 }
 
-/** First edit-capable image model in the catalog (flux-dev today) — the
- *  submit-time fallback when the picker holds a t2i-only model for an edit. */
+/** Models that can run the 'edit' op: the masked img2img editors (`edit` flag,
+ *  flux-dev) plus the instruction-based edit-only endpoints (`ops` includes
+ *  'edit', qwen-image-edit), then the studio editors (instruction, no mask, see
+ *  studio-roles.ts). The classic ones stay first. */
+export function editCapableModels(): CloudModel[] {
+  const classic = useCloudCatalogStore.getState().models.filter((m) => m.kind === 'image' && isEditModel(m))
+  return [...classic, ...studioEntries(STUDIO_EDIT_MODELS)]
+}
+
+export function isEditCapable(id: string): boolean {
+  return editCapableModels().some((m) => m.id === id)
+}
+
+/** Does an edit on this model need a painted mask? Masked editors (flux-dev) do.
+ *  Instruction editors (qwen-image-edit and every studio editor) read the
+ *  prompt and the picture alone, so the button must not wait for a mask. */
+export function editNeedsMask(id: string): boolean {
+  if (STUDIO_MODELS[id]) return false
+  // A server older than c341f5ac leaves the flag out of the catalog; the
+  // bundled registration knows that qwen-image-edit takes no mask.
+  const maskless = cloudModelById(id)?.maskless ?? CLOUD_MODEL_SEED.find((m) => m.id === id)?.maskless
+  return maskless !== true
+}
+
+/** The edit model a leftover pick falls back to: the open instruction editor
+ *  when the server has it, else the first edit-capable model, as before. */
 export function defaultEditModel(): CloudModel | undefined {
-  return useCloudCatalogStore.getState().models.find((m) => m.kind === 'image' && isEditModel(m))
+  return cloudModelById(DEFAULT_MODEL_IDS.edit) ?? editCapableModels()[0]
 }
 
 // Video models that render text-to-video (the "Video" intent) / image-to-video
@@ -165,14 +230,62 @@ export function i2vModels(): CloudModel[] {
   return useCloudCatalogStore.getState().models.filter((m) => m.kind === 'video' && !m.ops && m.i2v !== false)
 }
 
+/** Can this model make a picture from words alone? The classic image models,
+ *  the studio ones that start from a sentence, and the Character-Studio
+ *  endpoints (which take their LoRA on top). An edit model or an upscaler left
+ *  selected from another tab is not one of them. */
+export function runsTextToImage(id: string): boolean {
+  const m = cloudModelById(id)
+  if (!m || m.kind !== 'image') return false
+  return m.lora === true || !m.ops || studioTextToImage().includes(id)
+}
+
+/** The studio image models that sit in no classic entry (an entry with a
+ *  `sourceModel` twin already stands under its classic name). They belong in
+ *  the Image picker behind the classic list. */
+export function studioOnlyImageModels(): CloudModel[] {
+  return studioEntries(studioTextToImage()).filter((m) => !STUDIO_MODELS[m.id]?.sourceModel)
+}
+
+/** The Video picker of the Create tab: the classic text-to-video models, then
+ *  the studio ones that start from words alone. */
+export function videoPickerModels(): CloudModel[] {
+  return [...t2vModels(), ...studioEntries(studioTextToVideo())]
+}
+
+/** The Animate picker: the classic image-to-video models, then the studio ones
+ *  that start from one picture, then the reference models, which take that
+ *  picture as their single reference. */
+export function animatePickerModels(): CloudModel[] {
+  return [...i2vModels(), ...studioEntries(studioImageToVideo()), ...studioEntries(studioReferenceVideo())]
+}
+
+/** Utility ops (bg-remove / eraser / image upscale) have no model pick: the
+ *  server runs them on fixed endpoints and ignores the model. A Studio model
+ *  left selected on the Image tab must not reroute them to op 'studio', which
+ *  would render a new picture instead of cutting out, erasing or enhancing.
+ *  The run then looks exactly like one with the default image model picked. */
+export function utilityOpModel(kind: RenderKind, op: RenderOp, pickedId: string): string {
+  const utility = op === 'removebg' || op === 'eraser' || op === 'upscale'
+  return utility && kind === 'image' && STUDIO_MODELS[pickedId] ? (defaultCloudModel('image')?.id ?? pickedId) : pickedId
+}
+
 /** The model a run will really use for this op — coerces a leftover/incapable
  *  pick onto a capable one (edit→i2i, animate→i2v, video→t2v) so submit + the
  *  credits gate agree. Mirrors each picker's per-op filter. */
 export function modelForOp(kind: RenderKind, op: RenderOp, pickedId: string): string {
   if (op === 'edit') return isEditCapable(pickedId) ? pickedId : (defaultEditModel()?.id ?? pickedId)
   if (kind === 'video' && (op === 'generate' || op === 'animate')) {
-    const list = op === 'animate' ? i2vModels() : t2vModels()
-    return list.some((m) => m.id === pickedId) ? pickedId : (list[0]?.id ?? pickedId)
+    const list = op === 'animate' ? animatePickerModels() : videoPickerModels()
+    if (list.some((m) => m.id === pickedId)) return pickedId
+    const standard = op === 'animate' ? DEFAULT_MODEL_IDS.animate : DEFAULT_MODEL_IDS.video
+    return list.some((m) => m.id === standard) ? standard : (list[0]?.id ?? pickedId)
+  }
+  // Text zu Bild: ein Editor oder Upscaler aus einem anderen Tab darf nicht in
+  // einen Lauf ohne Bild geraten (er bricht dort nach dem Absenden ab). Ein
+  // Modell, das der Katalog nicht (mehr) kennt, faellt auf den Standard.
+  if (kind === 'image' && op === 'generate' && !runsTextToImage(pickedId)) {
+    return defaultCloudModel('image')?.id ?? pickedId
   }
   // 2.5.8 op-specialized intents: coerce a stale pick onto a model that
   // actually serves the op (same rule the pickers apply).
@@ -180,7 +293,7 @@ export function modelForOp(kind: RenderKind, op: RenderOp, pickedId: string): st
     const list = modelsForOp(kind, op)
     return list.some((m) => m.id === pickedId) ? pickedId : (list[0]?.id ?? pickedId)
   }
-  return pickedId
+  return utilityOpModel(kind, op, pickedId)
 }
 
 /** Credits the upcoming run draws, priced from the server catalog: per-op

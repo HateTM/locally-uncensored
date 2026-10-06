@@ -141,6 +141,9 @@ export interface Settings {
   loopMaxPasses: number
   /** Override for the HuggingFace GGUF download directory. Empty = auto-detect from active openai-compat provider (e.g. LM Studio models folder). */
   hfDownloadPathOverride: string
+  /** Cap for the model files LU downloads itself, in MB/s, shared by all
+   *  downloads at once. 0 = no limit (Discord, boromirofgeo 2026-09-23). */
+  downloadLimitMBps: number
   // Generation timeouts (Bug P v2.4.7 — ake0n_official Discord 2026-05-19,
   // Intel UHD CPU-only setup hit the 20-min cap at sampling 9/25 on a 1024px
   // Juggernaut-XL gen).
@@ -189,6 +192,14 @@ export interface Settings {
    * costs more. Local backends ignore it.
    */
   codexSendWindowTokens: number
+  /**
+   * Per-model choice of the send window for paid cloud models, keyed by the
+   * prefixed model name. Picked in the header's context dropdown; absent
+   * means codexSendWindowTokens applies. The model's own window is fixed on a
+   * cloud provider, so this is the one context lever there: how much of the
+   * conversation each step sends, and pays for.
+   */
+  cloudSendWindowByModel?: Record<string, number>
   /**
    * Auto-compact trigger, as a fraction of the send window. 2.6.8.
    *
@@ -290,16 +301,11 @@ export interface Settings {
    */
   codexRepoMapLimit: number
   /**
-   * Multi-File Stage-and-Approve. When on, Codex `file_write` calls don't
-   * touch the disk — they queue as "pending changes" the user reviews and
-   * applies (or rejects) per-file.
-   */
-  codexStageMode: boolean
-  /**
-   * Auto-apply staged changes when the run finishes. Only meaningful while
-   * codexStageMode is on: every diff is still recorded and visible, but the
-   * user is not asked to click Apply per file — "auto on everything" then
-   * really means auto (first customer feedback, Morgan 2026-07-26).
+   * Auto-apply the changes a run staged when it finishes. Whether a run
+   * stages at all is its mode's call (Ask stages, Bypass and Plan do not,
+   * lib/codex-mode). Every diff is still recorded and visible, but the user is
+   * not asked to click Apply per file, so "auto on everything" really means
+   * auto (first customer feedback, Morgan 2026-07-26).
    */
   codexAutoApply: boolean
   /**

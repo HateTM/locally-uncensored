@@ -93,11 +93,13 @@ export interface BundleFile {
   subfolder: string
   downloadUrl: string
   sizeGB?: number
+  /** Pinned SHA-256 of the file. Sent with EVERY start, so a mirror that swaps the file fails the check. */
+  sha256?: string
 }
 
 export interface DownloadDeps {
   /** start_model_download. Resolves once the transfer is registered, not done. */
-  start: (url: string, subfolder: string, filename: string, expectedBytes?: number) =>
+  start: (url: string, subfolder: string, filename: string, expectedBytes?: number, sha256?: string) =>
     Promise<{ status: string; error?: string }>
   /** download_progress, the whole Rust map keyed by filename. */
   progress: () => Promise<Record<string, DownloadProgress>>
@@ -130,7 +132,7 @@ async function downloadOneFile(file: BundleFile, fileLabel: string, deps: Downlo
   const expected = file.sizeGB ? Math.round(file.sizeGB * 1_073_741_824) : undefined
 
   onStatus?.(`${fileLabel}Starting ${file.filename}.`)
-  const started = await start(file.downloadUrl, file.subfolder, file.filename, expected)
+  const started = await start(file.downloadUrl, file.subfolder, file.filename, expected, file.sha256)
   if (started.status === 'error') {
     throw new Error(started.error || `Could not start the ${file.filename} download.`)
   }

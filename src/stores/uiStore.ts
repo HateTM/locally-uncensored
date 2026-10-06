@@ -112,6 +112,9 @@ interface UIState {
   cloudGateOpen: boolean
   /** CloudTeaserModal, null = closed. */
   cloudTeaser: CloudTeaserTarget | null
+  /** The Cloud sheet's link has just switched the Cloud features off. Create
+   *  says once where they are switched back on. Never persisted. */
+  cloudHiddenNotice: boolean
   /** The hosted model the user named on the way into cloud mode, by clicking
    *  its row in the local-mode picker. Read once by the mode rule when the
    *  flip lands, then cleared. Never persisted: it describes one click, not a
@@ -130,6 +133,12 @@ interface UIState {
   /** Read once by SettingsPage when it mounts, then cleared. Never persisted:
    *  it describes one navigation, not a preference. */
   settingsFocus: SettingsFocus | null
+  /** Counts the sends that were tried with no chat model picked. The model
+   *  picker of the composer watches it: each step opens the picker, which says
+   *  there what is missing. A counter and not a flag, so a second try opens it
+   *  again. Never persisted: it describes one click, not a preference. */
+  modelAskSeq: number
+  askForModel: () => void
   setView: (view: View) => void
   /** Open Settings on a given tab, optionally with one section unfolded. */
   openSettingsAt: (focus: SettingsFocus) => void
@@ -138,6 +147,7 @@ interface UIState {
   setSidebarOpen: (open: boolean) => void
   setCloudGateOpen: (open: boolean) => void
   setCloudTeaser: (target: CloudTeaserTarget | null) => void
+  setCloudHiddenNotice: (shown: boolean) => void
   setPendingCloudModel: (name: string | null) => void
   setSidebarWidth: (width: number, viewportWidth: number) => void
   setAgentPanelWidth: (width: number, viewportWidth: number) => void
@@ -191,6 +201,7 @@ export const useUIStore = create<UIState>()(
       sidebarOpen: false,
       cloudGateOpen: false,
       cloudTeaser: null,
+      cloudHiddenNotice: false,
       pendingCloudModel: null,
       sidebarWidth: SIDEBAR_DEFAULT_WIDTH,
       agentPanelWidth: AGENT_PANEL_DEFAULT_WIDTH,
@@ -200,6 +211,8 @@ export const useUIStore = create<UIState>()(
       explorerWidth: EXPLORER_DEFAULT_WIDTH,
       explorerCollapsed: false,
       settingsFocus: null,
+      modelAskSeq: 0,
+      askForModel: () => set((s) => ({ modelAskSeq: s.modelAskSeq + 1 })),
 
       // Navigation no longer touches sidebarOpen. The conversation list only
       // makes sense in Chat, and that rule now lives in the Sidebar itself
@@ -217,6 +230,7 @@ export const useUIStore = create<UIState>()(
       setSidebarOpen: (open) => set({ sidebarOpen: open }),
       setCloudGateOpen: (open) => set({ cloudGateOpen: open }),
       setCloudTeaser: (target) => set({ cloudTeaser: target }),
+      setCloudHiddenNotice: (shown) => set({ cloudHiddenNotice: shown }),
       setPendingCloudModel: (name) => set({ pendingCloudModel: name }),
       setSidebarWidth: (width, viewportWidth) =>
         set({ sidebarWidth: clampSidebarWidth(width, viewportWidth) }),

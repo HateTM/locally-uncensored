@@ -1,4 +1,8 @@
 import { create } from 'zustand'
+import { maxTrainImages } from '../lib/train-image-cap'
+import { MAX_STORED_REFERENCES } from '../lib/edit-references'
+import { clampImageCount } from '../lib/render/image-count'
+import { BATCH_INTENTS, type BatchRunState } from '../lib/batch-edit'
 import type { FixupPrompt } from '../lib/render-fixups'
 import { persist } from 'zustand/middleware'
 import { safeJSONStorage } from '../lib/storage-quota'
@@ -11,23 +15,37 @@ import { isRecord } from '../types/json-guards'
  * results, the in-flight flag). Everything else in the blob is a preference.
  */
 const RUNTIME_ONLY_KEYS: readonly string[] = [
-  'backend', 'source', 'mask', 'caps', 'isGenerating', 'comfyCorsBlocked',
+  'backend', 'source', 'mask', 'references', 'caps', 'isGenerating', 'comfyCorsBlocked',
+  // A queue of source images from yesterday must never start a run today.
+  'batchSources', 'batchRun',
   // Ein gespeicherter Preis von gestern ist eine Luege (siehe partialize
   // unten): auch wenn ein fremder/aelterer Blob ihn doch mitbringt, darf er
   // nie zurueckkommen.
   'cloudStudioCredits',
+  // Die Zahl der Bilder pro Lauf ist Laufzeit: eine Zahl von gestern buchte
+  // sonst unbemerkt mehrfach.
+  'cloudImageCount',
   // Review A kleiner Punkt 1 (studio-r2): the cloud video length selection,
   // own fields since this bugfix. Session-scratch like source/mask, not a
   // preference worth remembering across restarts.
   'cloudFrames', 'cloudFps',
+  // Belongs to the tab switch that put it aside, not to a later session.
+  'imageLaneKept',
+  // A scene from yesterday must not ride along into today's run.
+  'videoShots',
 ]
 import type { ModelType, ClassifiedModel } from '../api/comfyui'
+import { MAX_SHOTS, MAX_SHOT_CHARS } from '../lib/ltx-multishot'
+import { clampLoraStrength, defaultLoraStrength } from '../lib/lora-strength'
+import { IMPROVE_WITH, type ImproveWith } from '../lib/render/qwen-enhancer'
+import { QWEN_ENCODER_CHOICES, type QwenEncoderChoice } from '../lib/render/qwen-text-encoder'
 import { classifyModel, hidreamSampling, videoSamplingOverride } from '../api/comfyui'
 import type { HiresUpscaleMethod } from '../api/hires-fix'
 import { releaseVideoBlobUrl } from '../api/mlx-video'
 import { isMlxImageHost } from '../api/mlx-image'
 import { STUDIO_MODELS } from '../lib/render/studio-contract'
 import { cloudModelsFor } from './cloudCatalogStore'
+import { createRunModel } from '../lib/render/create-studio'
 // ModelType includes: flux, flux2, zimage, sdxl, sd15, wan, hunyuan, unknown
 
 export type ProgressPhase = 'idle' | 'queued' | 'loading-model' | 'loading-clip' | 'loading-vae' | 'sampling' | 'decoding' | 'complete'
@@ -104,6 +122,26 @@ export function deriveIntent(s: {
   return s.imageSubMode === 'img2img' ? 'edit' : 'image'
 }
 
+/** The model the tab in this state would run in the cloud. */
+function runModelOf(s: Parameters<typeof deriveIntent>[0] & Pick<CreateState,
+  'cloudImageModel' | 'cloudVideoModel' | 'cloudOpModel' | 'characterTab' | 'selectedCharacter'>): string {
+  const intent = deriveIntent(s)
+  return createRunModel(
+    intent,
+    { image: s.cloudImageModel, video: s.cloudVideoModel, op: s.cloudOpModel },
+    intent === 'character' && s.characterTab === 'use' ? s.selectedCharacter?.family ?? '' : undefined,
+  )
+}
+
+/** Studio options belong to the model they were chosen for. A change that moves
+ *  the run onto another model (a pick, a tab change, a backend flip that closes
+ *  the tab, a result that sets the picker) drops them: a longer clip or a higher
+ *  resolution must never travel along unseen and be booked on a model the
+ *  customer did not set it for. */
+function withOwnStudioOptions(s: CreateState, patch: Partial<CreateState>): Partial<CreateState> {
+  return runModelOf(s) === runModelOf({ ...s, ...patch }) ? patch : { ...patch, cloudStudioOptions: {} }
+}
+
 /**
  * Where video generation runs.
  *
@@ -150,6 +188,8 @@ export const MODEL_TYPE_DEFAULTS: Record<ModelType, {
   wan22:       { steps: 30, cfgScale: 5.0, sampler: 'euler',           scheduler: 'simple', width: 1024, height: 576, frames: 49, fps: 24 },
   hunyuan:     { steps: 30, cfgScale: 6.0, sampler: 'euler',           scheduler: 'normal', width: 848,  height: 480, frames: 45, fps: 15 },
   ltx:         { steps: 20, cfgScale: 1.0, sampler: 'euler',           scheduler: 'simple', width: 768,  height: 512, frames: 97, fps: 24 },
+  ltx25:       { steps: 8,  cfgScale: 1.0, sampler: 'euler_ancestral', scheduler: 'simple', width: 1280, height: 704, frames: 121, fps: 24 },
+  minimaxh3:   { steps: 20, cfgScale: 1.0, sampler: 'res_multistep',   scheduler: 'simple', width: 1344, height: 768, frames: 124, fps: 24 },
   mochi:       { steps: 40, cfgScale: 4.5, sampler: 'euler',           scheduler: 'normal', width: 848,  height: 480, frames: 49, fps: 24 },
   cosmos:      { steps: 30, cfgScale: 7.0, sampler: 'euler',           scheduler: 'normal', width: 1280, height: 704, frames: 57, fps: 24 },
   cogvideo:    { steps: 50, cfgScale: 6.0, sampler: 'euler',           scheduler: 'normal', width: 720,  height: 480, frames: 49, fps: 8  },
@@ -160,6 +200,7 @@ export const MODEL_TYPE_DEFAULTS: Record<ModelType, {
   // 2.5.8 specialized local lanes (see comfyui.ts MODEL_TYPE_DEFAULTS for the
   // node-default provenance). ACE width/height are unused by the audio graph.
   ace:         { steps: 50, cfgScale: 5.0, sampler: 'euler',           scheduler: 'simple', width: 1024, height: 1024 },
+  yue2:        { steps: 32, cfgScale: 1.0, sampler: 'dpm_2',           scheduler: 'sgm_uniform', width: 1024, height: 1024 },
   wans2v:      { steps: 20, cfgScale: 6.0, sampler: 'euler',           scheduler: 'simple', width: 832,  height: 480, frames: 77, fps: 16 },
   wananimate:  { steps: 20, cfgScale: 5.0, sampler: 'euler',           scheduler: 'simple', width: 832,  height: 480, frames: 77, fps: 16 },
   wanvace:     { steps: 25, cfgScale: 5.0, sampler: 'euler',           scheduler: 'simple', width: 832,  height: 480, frames: 81, fps: 16 },
@@ -222,6 +263,9 @@ export interface GalleryItem {
   batchSize: number
   createdAt: number
   builderUsed?: 'dynamic' | 'legacy' | 'custom'
+  /** What the run left out of the request, e.g. "Skipping LoRA no longer in
+   *  models/loras: style". Shown under the result. */
+  runNote?: string
   resolvedVAE?: string
   resolvedCLIP?: string
   /** Self-contained media URL for backends that don't serve files over
@@ -242,9 +286,25 @@ export interface GalleryItem {
   jobId?: string
   /** Which redesign intent produced this item (gallery tagging). */
   intent?: CreateIntent
+  /** Several source images, one edit: the file this result was made from. */
+  sourceName?: string
+  /** A tool that runs on its own model (Cutout on RMBG-2.0): that model.
+   *  `model` is then only the picker's choice, which had no part in the run. */
+  toolModel?: string
   /** Kurze Ueberschrift, wenn der Prompt nicht sagt, was dabei herauskam: der
    *  Titel des Presets, die Beschreibung des Schrittes. Siehe gallery-label.ts. */
   label?: string
+  /** "Improve my prompt": what the user typed, when the run was sent with a
+   *  rewritten prompt. `prompt` then holds the rewrite, the text that ran. */
+  promptOriginal?: string
+  /** Who wrote that rewrite: the enhancer edition or the chat model's name. */
+  rewrittenBy?: string
+  /** "Improve my prompt" was on but the rewrite failed, the run used the
+   *  user's own prompt. Said in the details, nowhere else. */
+  improveFailed?: boolean
+  /** Local Qwen-Image 2.1 with "Transparent background": the PNG carries an
+   *  alpha channel, so tiles and previews sit on a checkerboard. */
+  transparent?: boolean
   /** MLX video (Mac, Apple Silicon): absolute filesystem path of the finished
    *  mp4, as returned by `video_generate`'s `output` field. Playback/download
    *  go through `dataUrl` (a blob: URL, see above) instead — this is kept
@@ -297,6 +357,9 @@ interface CreateState {
   // other by backend switch or model switch alone.
   cloudFrames: number
   cloudFps: number
+  /** The image lane's sampling values while a video tab or Music has the
+   *  shared fields, with the model they were tuned for. Runtime only. */
+  imageLaneKept: ({ model: string } & Pick<CreateState, 'steps' | 'cfgScale' | 'sampler' | 'scheduler' | 'width' | 'height'>) | null
   denoise: number  // Denoise strength for I2I (0.0–1.0)
   /** Native text-to-image latent upscale + refinement pass (local ComfyUI). */
   hiresFixEnabled: boolean
@@ -345,13 +408,28 @@ interface CreateState {
   /** Upscale target for the cloud super-resolution endpoint. */
   targetResolution: '2k' | '4k' | '8k'
   showNegative: boolean
+  /** Whether the Expert section of the advanced settings is unfolded. Kept
+   *  here so it outlives the panel; this run of the app only, never saved. */
+  expertOpen: boolean
   selectedLoras: { name: string; strength: number }[]
+  /** The last strength set for each LoRA file, kept while the LoRA is off, so
+   *  ticking it again brings its own value back instead of the default. */
+  loraStrengths: Record<string, number>
   selectedVae: string
   clipSkip: number
   growMaskBy: number  // inpaint mask edge feather (VAEEncodeForInpaint grow_mask_by)
   /** Unified Stage input slot (runtime-only). On the local path source.filename
    *  maps to i2iImage/i2vImage; on the cloud path it is a render-inputs path. */
   source: ImageRef | null
+  /** Edit: further reference images after the source, for a model that takes
+   *  them (lib/edit-references). Runtime-only like `source`; cleared with it. */
+  references: ImageRef[]
+  /** Several source images, one edit (lib/batch-edit): the files that get the
+   *  same run, one after the other. Empty for a single image, else two or more,
+   *  and `source` shows the first. Runtime-only like `source`. */
+  batchSources: MediaRef[]
+  /** The queue of a running batch, null when none runs. */
+  batchRun: BatchRunState | null
   sourceSetAt: number
   mask: ImageRef | null
   /** Runtime-only: local (Bridge) vs cloud (/api/jobs), derived from session. */
@@ -361,9 +439,14 @@ interface CreateState {
   cloudImageModel: string
   cloudVideoModel: string
   /** Runtime-only: the model picked inside a 2.5.8 specialized intent
-   *  (trainer/lipsync/music/extend/motion). One slot for all — modelForOp
+   *  (trainer/lipsync/music/extend/motion/enhance). Mirror of the current
+   *  sub-category's entry in cloudOpPicks; modelForOp
    *  coerces a stale cross-intent pick onto the op's own list. */
   cloudOpModel: string
+  /** The pick of EACH sub-category (see opSlot), runtime-only like cloudOpModel.
+   *  cloudOpModel mirrors the entry of the current sub-category, so choosing a
+   *  model in Lip Sync no longer wipes the music pick (02.10.2026). */
+  cloudOpPicks: Record<string, string>
   /** Studio: the schema-driven option values for the picked cloudOpModel step
    *  (studio-contract.ts). Belongs to the model, not the run: a model switch
    *  drops them, see setCloudOpModel. */
@@ -371,6 +454,34 @@ interface CreateState {
   /** Studio: the last confirmed studio-quote price, shown next to the start
    *  button. Never persisted: a stale price is a lie, see partialize. */
   cloudStudioCredits: number | null
+  /** Runtime-only: images per cloud run, 1 to 4 (Image and Edit). */
+  cloudImageCount: number
+  /** LTX 2.5 multishot (lib/ltx-multishot.ts): the shots AFTER the prompt, which
+   *  is shot 1. Empty means a single shot. Runtime-only like the prompt itself:
+   *  a scene from yesterday must not ride along into today's run. */
+  videoShots: string[]
+  setVideoShotCount: (count: number) => void
+  setVideoShot: (index: number, text: string) => void
+  /** Local Qwen-Image 2.1 only: write the picture with a transparent background
+   *  (lib/transparent-image.ts). A preference like the HiRes switch, so it is
+   *  remembered. */
+  transparentBackground: boolean
+  setTransparentBackground: (on: boolean) => void
+  /** Advanced settings switch: a chat model rewrites the prompt before a run. Off by default, remembered. */
+  improvePrompt: boolean
+  setImprovePrompt: (on: boolean) => void
+  /** Who rewrites the prompt when a local Qwen-Image 2.1 run has a prompt
+   *  enhancer installed (lib/render/qwen-enhancer.ts). Remembered. */
+  improveWith: ImproveWith
+  setImproveWith: (who: ImproveWith) => void
+  /** Which text encoder reads the prompt on a local Qwen-Image 2.1 run when
+   *  both editions are installed (lib/render/qwen-text-encoder.ts). Remembered. */
+  qwenTextEncoder: QwenEncoderChoice
+  setQwenTextEncoder: (which: QwenEncoderChoice) => void
+  /** Runtime-only: the text encoder files ComfyUI lists, read with the model
+   *  lists. The prompt enhancers and the Qwen-Image 2.1 encoders are found in it. */
+  textEncoderList: string[]
+  setTextEncoderList: (list: string[]) => void
   /** Runtime-only: the LOCAL model picked inside a specialized lane (ACE
    *  checkpoint / S2V UNet / Animate-VACE UNet). One slot for all lanes —
    *  resolveLocalOpPick coerces a stale cross-lane pick onto the lane's list
@@ -426,6 +537,8 @@ interface CreateState {
   setSampler: (sampler: string) => void
   setScheduler: (scheduler: string) => void
   setSteps: (steps: number) => void
+  /** A click on Draft, Standard or High in the image tabs, see `imageQualityLadder`. */
+  setImageQuality: (quality: ImageQuality) => void
   setCfgScale: (cfgScale: number) => void
   setSize: (width: number, height: number) => void
   setSeed: (seed: number) => void
@@ -447,9 +560,13 @@ interface CreateState {
   intent: () => CreateIntent
   setIntent: (intent: CreateIntent) => void
   toggleNegative: () => void
+  setExpertOpen: (open: boolean) => void
   toggleLora: (name: string) => void
   setLoraStrengthFor: (name: string, strength: number) => void
   clearLoras: () => void
+  /** Drops picks whose file ComfyUI no longer lists (GH #146), and the local
+   *  character that rode on one of them. */
+  keepListedLoras: (listed: string[]) => void
   setSelectedVae: (name: string) => void
   setClipSkip: (n: number) => void
   setGrowMaskBy: (n: number) => void
@@ -477,6 +594,12 @@ interface CreateState {
   setMusicLyrics: (l: string) => void
   setMusicHowtoSeen: (v: boolean) => void
   setSource: (img: ImageRef | null) => void
+  setCloudImageCount: (count: number) => void
+  addReference: (img: ImageRef) => void
+  removeReference: (index: number) => void
+  setReferences: (refs: ImageRef[]) => void
+  setBatchSources: (list: MediaRef[]) => void
+  setBatchRun: (run: BatchRunState | null) => void
   setMask: (img: ImageRef | null) => void
   setBackend: (backend: CreateBackend) => void
   setCloudImageModel: (id: string) => void
@@ -572,6 +695,109 @@ function releaseReplacedMediaRef(previous: MediaRef | null, next: MediaRef | nul
   releaseDroppedMediaRefs(previous ? [previous] : [], next ? [next] : [])
 }
 
+/**
+ * SD-Turbo, SDXL-Turbo, Lightning, Hyper-SD and LCM checkpoints are distilled
+ * to a few steps at CFG 1. The family defaults (25 steps, CFG 7) cost several
+ * times the time and overcook them. Seen in the 3.0.4 Gegenprobe on the
+ * Windows box (02.10.2026): sd_turbo started at 25 steps. Only the SD and SDXL
+ * checkpoint families; Z-Image Turbo and the other UNET families carry their
+ * own tuned defaults.
+ */
+export function distilledImageCheckpoint(model: string, type: ModelType): boolean {
+  if (type !== 'sd15' && type !== 'sdxl' && type !== 'unknown') return false
+  return /(^|[^a-z])(turbo|lightning|hyper|lcm)([^a-z]|$)/i.test(model.replace(/^.*[\\/]/, ''))
+}
+
+/** The image model's own sampling values, for picking it and for everything
+ *  that measures from them. Leaving the video lane has to put them back:
+ *  Image, Edit and the other image intents only flipped the mode, so sd_turbo
+ *  rendered with MiniMax H3's 20 steps, res_multistep and 1344x768 (3.0.4
+ *  Gegenprobe 9). */
+function imageModelParams(state: { imageModel: string; imageModelType: ModelType }) {
+  const defaults = state.imageModelType === 'hidream'
+    ? hidreamDefaults(state.imageModel)
+    : MODEL_TYPE_DEFAULTS[state.imageModelType] || MODEL_TYPE_DEFAULTS.unknown
+  const distilled = distilledImageCheckpoint(state.imageModel, state.imageModelType)
+  return {
+    steps: distilled ? 4 : defaults.steps, cfgScale: distilled ? 1.0 : defaults.cfgScale,
+    sampler: defaults.sampler, scheduler: defaults.scheduler,
+    width: defaults.width, height: defaults.height,
+  }
+}
+
+type ImageLaneParams = ReturnType<typeof imageModelParams>
+
+export type ImageQuality = 'Draft' | 'Standard' | 'High'
+
+/**
+ * What the Quality buttons of the image tabs stand for: "Standard" is the
+ * picked model's own step count, Draft and High scale from it.
+ *
+ * They used to measure from the model FAMILY, 15 / 25 / 38 for every SD
+ * checkpoint. sd_turbo starts at 4 steps and CFG 1, so a click on "Draft"
+ * raised it to 15 steps, and at a CFG left over from elsewhere the image came
+ * out overcooked (Windows box, 05.10.2026). For a distilled checkpoint the
+ * buttons therefore also hold CFG at the model's value.
+ *
+ * LU Cloud renders with its own model, not the local file, so there the
+ * family's number stays the measure.
+ */
+export function imageQualityLadder(
+  s: Pick<CreateState, 'backend' | 'imageModel' | 'imageModelType'>,
+): { steps: Record<ImageQuality, number>; cfgScale?: number } {
+  const local = s.backend !== 'cloud'
+  const own = local ? imageModelParams(s) : MODEL_TYPE_DEFAULTS[s.imageModelType] || MODEL_TYPE_DEFAULTS.unknown
+  return {
+    steps: {
+      Draft: Math.max(1, Math.round(own.steps * 0.6)),
+      Standard: own.steps,
+      High: Math.round(own.steps * 1.5),
+    },
+    ...(local && distilledImageCheckpoint(s.imageModel, s.imageModelType) ? { cfgScale: own.cfgScale } : {}),
+  }
+}
+
+/** True while the tab in this state runs the image model. Music keeps mode
+ *  'image' (see setIntent) and still writes its own sampling values. */
+function onImageLane(s: Pick<CreateState, 'mode' | 'cloudOp'>): boolean {
+  return s.mode === 'image' && s.cloudOp !== 'music'
+}
+
+/** What the image lane gets back: the values it was left with, as long as
+ *  they were tuned for the model that is still picked, else the model's own. */
+function imageLaneParams(s: Pick<CreateState, 'imageModel' | 'imageModelType' | 'imageLaneKept'>): ImageLaneParams {
+  if (s.imageLaneKept?.model !== s.imageModel) return imageModelParams(s)
+  const { model: _model, ...params } = s.imageLaneKept
+  return params
+}
+
+/** The video model's own sampling values, for picking it and for every tab
+ *  that runs it. Lightning/rapid merges are distilled to few steps at cfg 1,
+ *  the architecture defaults (30 steps, cfg 5+) render them to mush. */
+function videoModelParams(model: string) {
+  const defaults = MODEL_TYPE_DEFAULTS[classifyModel(model)] || MODEL_TYPE_DEFAULTS.unknown
+  const lightning = /rapid|lightning|lightx2v/i.test(model)
+  return {
+    steps: lightning ? 6 : defaults.steps, cfgScale: lightning ? 1.0 : defaults.cfgScale,
+    sampler: defaults.sampler, scheduler: defaults.scheduler,
+    width: defaults.width, height: defaults.height,
+    ...(defaults.frames ? { frames: defaults.frames } : {}),
+    ...(defaults.fps ? { fps: defaults.fps } : {}),
+  }
+}
+
+/**
+ * The sampling values a restart may find. cloudOp is runtime-only, so the app
+ * reopens on the base tab of the stored mode, and that tab must not start with
+ * what Music, Lip sync or Motion wrote: closed on Music, Image came back at
+ * ACE's 50 steps.
+ */
+function restartSampling(s: CreateState): Partial<CreateState> {
+  if (s.cloudOp === 'music') return imageLaneParams(s)
+  if (s.cloudOp === 'lipsync' || s.cloudOp === 'motion') return videoModelParams(s.videoModel)
+  return {}
+}
+
 export const useCreateStore = create<CreateState>()(
   persist(
     // Explicit param/return types: LU compiles with `strict: true` (the web
@@ -606,6 +832,7 @@ export const useCreateStore = create<CreateState>()(
       fps: 8,
       cloudFrames: 24,
       cloudFps: 8,
+      imageLaneKept: null,
       denoise: 0.7,
       hiresFixEnabled: false,
       hiresScale: 1.5,
@@ -636,19 +863,32 @@ export const useCreateStore = create<CreateState>()(
       musicHowtoSeen: false,
       targetResolution: '4k' as '2k' | '4k' | '8k',
       showNegative: false,
+      expertOpen: false,
       selectedLoras: [] as { name: string; strength: number }[],
+      loraStrengths: {} as Record<string, number>,
       selectedVae: 'auto',
       clipSkip: 0,
       growMaskBy: 6,
       source: null as ImageRef | null,
+      references: [] as ImageRef[],
+      batchSources: [] as MediaRef[],
+      batchRun: null as BatchRunState | null,
       sourceSetAt: 0,
       mask: null as ImageRef | null,
       backend: 'local' as CreateBackend,
       cloudImageModel: '',
       cloudVideoModel: '',
       cloudOpModel: '',
+      cloudOpPicks: {} as Record<string, string>,
       cloudStudioOptions: {} as Record<string, unknown>,
       cloudStudioCredits: null as number | null,
+      cloudImageCount: 1,
+      improvePrompt: false,
+      improveWith: 'auto' as ImproveWith,
+      qwenTextEncoder: 'auto' as QwenEncoderChoice,
+      textEncoderList: [] as string[],
+      transparentBackground: false,
+      videoShots: [],
       localOpModel: '',
       charactersVersion: 0,
       caps: { rmbg: false, 'inpaint-nodes': false, dwpose: false } as Record<'rmbg' | 'inpaint-nodes' | 'dwpose', boolean>,
@@ -676,32 +916,17 @@ export const useCreateStore = create<CreateState>()(
       setMode: (mode) => set((state) => {
         // Reset parameters to the correct defaults when switching modes
         // This prevents image resolution (1024x1024) leaking into video mode (causes HTTP 500)
-        if (mode === 'video' && state.videoModel) {
-          return { mode, ...videoDefaultsFor(state.videoModel) }
-        }
-        if (mode === 'image' && state.imageModel) {
-          const defaults = MODEL_TYPE_DEFAULTS[state.imageModelType] || MODEL_TYPE_DEFAULTS.unknown
-          return {
-            mode,
-            steps: defaults.steps, cfgScale: defaults.cfgScale,
-            sampler: defaults.sampler, scheduler: defaults.scheduler,
-            width: defaults.width, height: defaults.height,
-          }
-        }
+        if (mode === 'video' && state.videoModel) return { mode, ...videoDefaultsFor(state.videoModel) }
+        if (mode === 'image' && state.imageModel) return { mode, ...imageModelParams(state) }
         return { mode }
       }),
       setImageSubMode: (subMode) => set({ imageSubMode: subMode }),
       setPrompt: (prompt) => set({ prompt }),
       setNegativePrompt: (negativePrompt) => set({ negativePrompt }),
-      setImageModel: (model, type) => {
-        const defaults = type === 'hidream' ? hidreamDefaults(model) : MODEL_TYPE_DEFAULTS[type]
-        set({
-          imageModel: model, imageModelType: type,
-          steps: defaults.steps, cfgScale: defaults.cfgScale,
-          sampler: defaults.sampler, scheduler: defaults.scheduler,
-          width: defaults.width, height: defaults.height,
-        })
-      },
+      setImageModel: (model, type) => set({
+        imageModel: model, imageModelType: type,
+        ...imageModelParams({ imageModel: model, imageModelType: type }),
+      }),
       setVideoModel: (model) => {
         // Lightning/rapid merges are distilled to few steps at cfg 1 — the
         // architecture defaults (30 steps, cfg 5+) render them to mush. The
@@ -712,6 +937,13 @@ export const useCreateStore = create<CreateState>()(
       setSampler: (sampler) => set({ sampler }),
       setScheduler: (scheduler) => set({ scheduler }),
       setSteps: (steps) => set({ steps: Math.max(1, Math.min(200, Math.floor(steps))) }),
+      setImageQuality: (quality) => set((s) => {
+        const ladder = imageQualityLadder(s)
+        return {
+          steps: ladder.steps[quality],
+          ...(ladder.cfgScale === undefined ? {} : { cfgScale: ladder.cfgScale }),
+        }
+      }),
       setCfgScale: (cfgScale) => set({ cfgScale: Math.max(0, Math.min(30, cfgScale)) }),
       setSize: (width, height) => set({
         width: Math.max(64, Math.min(4096, Math.floor(width))),
@@ -748,13 +980,30 @@ export const useCreateStore = create<CreateState>()(
 
       // ── redesign additions ──
       intent: () => deriveIntent(get()),
-      setIntent: (intent) => set((s) => {
+      // Eine andere Unterkategorie faehrt ein anderes Modell und wirft damit die
+      // Studio-Optionen weg (withOwnStudioOptions): ein Feld wie `resolution` hat
+      // je Endpunkt eine andere Auswahl.
+      setIntent: (intent) => {
+        const changed = get().intent() !== intent
+        set((s) => withOwnStudioOptions(s, ((): Partial<CreateState> => {
+        const patch = ((): Partial<CreateState> => {
         // Clear intent-incompatible inputs: intents without a source drop both;
         // removebg/animate keep the source but drop a stale mask. Video/animate
         // mirror setMode's reset so image resolution never leaks into video.
         // A stale error from the previous intent never carries over.
-        const dropAll = { source: null, mask: null, sourceSetAt: 0 }
-        const base = { removebg: false, utilityOp: null, cloudOp: null, error: null }
+        const dropAll = { source: null, mask: null, sourceSetAt: 0, references: [] }
+        // Back from a tab that runs another model (the video tabs, Music), the
+        // image lane gets its own values again; inside the image lane a switch
+        // keeps what the user tuned. Music has mode 'image', so asking the mode
+        // alone left ACE's 50 steps on Image (seen on the Windows box as
+        // Quality "High" after a visit to Music).
+        const back = onImageLane(s) ? {} : imageLaneParams(s)
+        // The number of images belongs to the tab it was chosen on: four picked
+        // for Image must not start four runs of the first Edit.
+        const base = {
+          removebg: false, utilityOp: null, cloudOp: null, error: null, ...back,
+          ...(changed ? { cloudImageCount: 1 } : {}),
+        }
         switch (intent) {
           // ── 2.5.8 cloud categories. Inputs specific to each (train set,
           // audio, driving video, extend pick) live in their own slots and are
@@ -797,26 +1046,64 @@ export const useCreateStore = create<CreateState>()(
           // no prompt); eraser keeps source + mask (paint what to remove).
           case 'upscale':  return { ...base, utilityOp: 'upscale' as const, mode: 'image' as const, imageSubMode: 'img2img' as const, mask: null }
           case 'eraser':   return { ...base, utilityOp: 'eraser' as const, mode: 'image' as const, imageSubMode: 'img2img' as const }
-          case 'video': {
+          case 'video':
             return { ...base, mode: 'video' as const, videoSubMode: 't2v' as const, ...dropAll,
               ...videoDefaultsFor(s.videoModel) }
-          }
-          case 'animate': {
+          case 'animate':
             return { ...base, mode: 'video' as const, videoSubMode: 'i2v' as const, mask: null,
               ...videoDefaultsFor(s.videoModel) }
+        }
+        })()
+        // Leaving the image lane, its values are put aside under the model
+        // they were tuned for, so the way back finds the user's own choice.
+        const next = { ...s, ...patch }
+        if (onImageLane(s) && !onImageLane(next)) {
+          return {
+            ...patch,
+            imageLaneKept: {
+              model: s.imageModel, steps: s.steps, cfgScale: s.cfgScale, sampler: s.sampler,
+              scheduler: s.scheduler, width: s.width, height: s.height,
+            },
           }
         }
-      }),
+        return onImageLane(next) ? { ...patch, imageLaneKept: null } : patch
+        })()))
+        // The list of further source images stays only where it can run.
+        if (get().batchSources.length && (!get().source || !BATCH_INTENTS.has(intent))) get().setBatchSources([])
+      },
       toggleNegative: () => set((s) => ({ showNegative: !s.showNegative })),
-      toggleLora: (name) => set((s) => ({ selectedLoras: s.selectedLoras.some((l) => l.name === name) ? s.selectedLoras.filter((l) => l.name !== name) : [...s.selectedLoras, { name, strength: 0.8 }] })),
-      setLoraStrengthFor: (name, strength) => set((s) => ({ selectedLoras: s.selectedLoras.map((l) => l.name === name ? { ...l, strength: Math.max(0, Math.min(2, strength)) } : l) })),
-      clearLoras: () => set({ selectedLoras: [] }),
+      setExpertOpen: (expertOpen) => set({ expertOpen }),
+      toggleLora: (name) => set((s) => ({ selectedLoras: s.selectedLoras.some((l) => l.name === name) ? s.selectedLoras.filter((l) => l.name !== name) : [...s.selectedLoras, { name, strength: s.loraStrengths[name] ?? defaultLoraStrength(name) }] })),
+      setLoraStrengthFor: (name, strength) => set((s) => {
+        if (!Number.isFinite(strength)) return {}
+        const value = clampLoraStrength(strength)
+        return {
+          selectedLoras: s.selectedLoras.map((l) => l.name === name ? { ...l, strength: value } : l),
+          loraStrengths: { ...s.loraStrengths, [name]: value },
+        }
+      }),
+      clearLoras: () => set((s) => ({
+        selectedLoras: [],
+        selectedCharacter: s.selectedCharacter?.id.startsWith('local:') ? null : s.selectedCharacter,
+      })),
+      keepListedLoras: (listed) => set((s) => {
+        const kept = s.selectedLoras.filter((l) => listed.includes(l.name))
+        const char = s.selectedCharacter
+        const charGone = !!char?.id.startsWith('local:') && !listed.includes(char.id.slice('local:'.length))
+        // A deleted file takes its remembered strength with it.
+        const remembered = Object.keys(s.loraStrengths)
+        const strengths = remembered.every((n) => listed.includes(n))
+          ? {}
+          : { loraStrengths: Object.fromEntries(remembered.filter((n) => listed.includes(n)).map((n) => [n, s.loraStrengths[n]])) }
+        if (kept.length === s.selectedLoras.length && !charGone) return strengths
+        return { selectedLoras: kept, ...strengths, ...(charGone ? { selectedCharacter: null } : {}) }
+      }),
       setSelectedVae: (name) => set({ selectedVae: name || 'auto' }),
       setClipSkip: (n) => set({ clipSkip: Math.max(0, Math.min(12, Math.floor(n))) }),
       setGrowMaskBy: (n) => set({ growMaskBy: Math.max(0, Math.min(64, Math.floor(n))) }),
       setTargetResolution: (targetResolution) => set({ targetResolution }),
-      setCharacterTab: (characterTab) => set({ characterTab }),
-      // Cap at 30 (the server's image_paths limit) and de-dupe by filename so
+      setCharacterTab: (characterTab) => set((s) => withOwnStudioOptions(s, { characterTab })),
+      // Cap at the backend's photo limit (lib/train-image-cap) and de-dupe by filename so
       // a re-drop of the same files doesn't double the set. Both of those
       // THROW REFS AWAY — the caller minted a blob: URL for every file it
       // handed over, including the ones landing in the dedupe and the ones
@@ -825,7 +1112,7 @@ export const useCreateStore = create<CreateState>()(
       addTrainImages: (imgs) => {
         const before = get().trainImages
         const have = new Set(before.map((i) => i.name))
-        const trainImages = [...before, ...imgs.filter((i) => !have.has(i.name))].slice(0, 30)
+        const trainImages = [...before, ...imgs.filter((i) => !have.has(i.name))].slice(0, maxTrainImages(get().backend))
         releaseDroppedMediaRefs([...before, ...imgs], trainImages)
         set({ trainImages })
       },
@@ -844,7 +1131,7 @@ export const useCreateStore = create<CreateState>()(
       setTriggerWord: (w) => set({ triggerWord: w.replace(/\s+/g, '').slice(0, 30) }),
       // Same clamp as the Rust command so the UI can never book a rejected run.
       setTrainSteps: (n) => set({ trainSteps: Math.max(100, Math.min(4000, Math.floor(n))) }),
-      setSelectedCharacter: (selectedCharacter) => set({ selectedCharacter }),
+      setSelectedCharacter: (selectedCharacter) => set((s) => withOwnStudioOptions(s, { selectedCharacter })),
       // Upload and voice-pick are mutually exclusive speech sources.
       setAudioInput: (audioInput) => {
         releaseReplacedMediaRef(get().audioInput, audioInput)
@@ -856,12 +1143,25 @@ export const useCreateStore = create<CreateState>()(
         set({ videoInput })
       },
       bumpCharactersVersion: () => set((s) => ({ charactersVersion: s.charactersVersion + 1 })),
-      // Ein Modellwechsel wirft die Studio-Optionen weg: die Felder des einen
-      // Endpunkts sind beim naechsten nicht unbedingt erlaubt, und ein
-      // uebriggebliebener Wert wuerde das Absenden abweisen.
-      setCloudOpModel: (cloudOpModel) => set({ cloudOpModel, cloudStudioOptions: {} }),
+      setCloudOpModel: (cloudOpModel) => set((s) => withOwnStudioOptions(s, { cloudOpModel })),
       setCloudStudioOptions: (cloudStudioOptions) => set({ cloudStudioOptions }),
       setCloudStudioCredits: (cloudStudioCredits) => set({ cloudStudioCredits }),
+      setCloudImageCount: (count) => set({ cloudImageCount: clampImageCount(count) }),
+      setImprovePrompt: (on) => set({ improvePrompt: on === true }),
+      setImproveWith: (who) => set({ improveWith: IMPROVE_WITH.includes(who) ? who : 'auto' }),
+      setQwenTextEncoder: (which) => set({ qwenTextEncoder: QWEN_ENCODER_CHOICES.includes(which) ? which : 'auto' }),
+      setTextEncoderList: (list) => set({ textEncoderList: list }),
+      setVideoShotCount: (count) => set((st) => {
+        const further = Math.max(1, Math.min(MAX_SHOTS, Math.floor(count) || 1)) - 1
+        return { videoShots: Array.from({ length: further }, (_, i) => st.videoShots[i] ?? '') }
+      }),
+      setVideoShot: (index, text) => set((st) => {
+        if (index < 0 || index >= st.videoShots.length) return {}
+        const next = [...st.videoShots]
+        next[index] = text.slice(0, MAX_SHOT_CHARS)
+        return { videoShots: next }
+      }),
+      setTransparentBackground: (on) => set({ transparentBackground: on === true }),
       // Picking a lane model adopts its architecture defaults (like
       // setVideoModel does) — an inherited 1024×1024 from the Image tab would
       // OOM a 14B S2V run on consumer VRAM.
@@ -883,7 +1183,21 @@ export const useCreateStore = create<CreateState>()(
       setMusicDuration: (s2) => set({ musicDuration: Math.max(5, Math.min(240, Math.floor(s2))) }),
       setMusicLyrics: (musicLyrics) => set({ musicLyrics: musicLyrics.slice(0, 2000) }),
       setMusicHowtoSeen: (musicHowtoSeen) => set({ musicHowtoSeen }),
-      setSource: (source) => set({ source, sourceSetAt: source ? Date.now() : 0, ...(source ? {} : { mask: null }) }),
+      setSource: (source) => {
+        // The list of further source images goes with the image it belongs to.
+        if (!source) get().setBatchSources([])
+        set({ source, sourceSetAt: source ? Date.now() : 0, ...(source ? {} : { mask: null, references: [] }) })
+      },
+      // Capped at the most any model takes, local or cloud (lib/edit-references);
+      // the UI offers fewer for a model with fewer slots and the builder slices.
+      addReference: (img) => set((s) => ({ references: [...s.references, img].slice(0, MAX_STORED_REFERENCES) })),
+      removeReference: (index) => set((s) => ({ references: s.references.filter((_, i) => i !== index) })),
+      setReferences: (references) => set({ references }),
+      setBatchSources: (batchSources) => {
+        releaseDroppedMediaRefs(get().batchSources, batchSources)
+        set({ batchSources })
+      },
+      setBatchRun: (batchRun) => set({ batchRun }),
       setMask: (mask) => set({ mask }),
       // Flipping to local clears the intents that have no local lane
       // (upscale/eraser plus character training — all hosted-only) so the
@@ -893,9 +1207,9 @@ export const useCreateStore = create<CreateState>()(
       // local I2V lane is back (buildDynamicWorkflow wires the family's
       // image-to-video node).
       setBackend: (backend) =>
-        set((s) => {
+        set((s) => withOwnStudioOptions(s, ((): Partial<CreateState> => {
           if (backend !== 'local') return { backend }
-          const patch: Record<string, unknown> = { backend }
+          const patch: Partial<CreateState> = { backend }
           if (s.utilityOp) Object.assign(patch, { utilityOp: null, mask: null, error: null })
           // music/lipsync/extend/motion (2.5.8) and character (2.6.0, local
           // musubi trainer) run locally, so a backend flip keeps them
@@ -922,20 +1236,25 @@ export const useCreateStore = create<CreateState>()(
             if (s.imageSubMode === 'img2img') Object.assign(patch, { imageSubMode: 'text2img' })
             if (s.videoSubMode === 'i2v') Object.assign(patch, { videoSubMode: 't2v' })
           }
+          // A tab this flip closes takes its number of images with it, like
+          // any other tab change (setIntent).
+          if (deriveIntent({ ...s, ...patch }) !== deriveIntent(s)) Object.assign(patch, { cloudImageCount: 1 })
           return patch
-        }),
-      setCloudImageModel: (cloudImageModel) => set({ cloudImageModel }),
-      setCloudVideoModel: (cloudVideoModel) => set({ cloudVideoModel }),
+        })())),
+      setCloudImageModel: (cloudImageModel) => set((s) => withOwnStudioOptions(s, { cloudImageModel })),
+      setCloudVideoModel: (cloudVideoModel) => set((s) => withOwnStudioOptions(s, { cloudVideoModel })),
       setCaps: (caps) => set({ caps }),
       resetParamsToModelDefaults: () => {
         const s = get()
         // Video: the same starting point as picking the model (distilled
         // merges keep their few steps). HiDream dev/full have their own.
         const d = s.mode === 'video'
-          ? videoDefaultsFor(s.videoModel)
-          : s.imageModelType === 'hidream'
-            ? hidreamDefaults(s.imageModel)
-            : MODEL_TYPE_DEFAULTS[s.imageModelType]
+          ? (MODEL_TYPE_DEFAULTS[classifyModel(s.videoModel)] || MODEL_TYPE_DEFAULTS.unknown)
+          : MODEL_TYPE_DEFAULTS[s.imageModelType]
+        // The picked model's own values where it has some: a distilled
+        // checkpoint reset to its family's 25 or 30 steps renders to mush.
+        // LU Cloud renders with its own model, there the family stays.
+        const own = s.backend === 'cloud' ? {} : s.mode === 'video' ? videoDefaultsFor(s.videoModel) : imageModelParams(s)
         set({
           sampler: d.sampler,
           scheduler: d.scheduler,
@@ -943,6 +1262,7 @@ export const useCreateStore = create<CreateState>()(
           cfgScale: d.cfgScale,
           width: d.width,
           height: d.height,
+          ...own,
           hiresFixEnabled: false,
           hiresScale: 1.5,
           hiresDenoise: 0.5,
@@ -950,6 +1270,11 @@ export const useCreateStore = create<CreateState>()(
           hiresUpscaleMethod: 'nearest-exact',
           ...(d.frames ? { frames: d.frames } : {}),
           ...(d.fps ? { fps: d.fps } : {}),
+          // A model's defaults carry no LoRA, so the stack goes off like with
+          // Clear (and the local character that rode on it). The strength each
+          // LoRA was left at stays in loraStrengths for the next time.
+          selectedLoras: [],
+          selectedCharacter: s.selectedCharacter?.id.startsWith('local:') ? null : s.selectedCharacter,
         })
       },
 
@@ -981,8 +1306,8 @@ export const useCreateStore = create<CreateState>()(
         const gallery = next.slice(0, GALLERY_CAP)
         if (s.backend !== 'cloud') return { gallery }
         const id = STUDIO_MODELS[item.model]?.sourceModel ?? item.model
-        if (cloudModelsFor('image').some((m) => m.id === id)) return { gallery, cloudImageModel: id }
-        if (cloudModelsFor('video').some((m) => m.id === id)) return { gallery, cloudVideoModel: id }
+        if (cloudModelsFor('image').some((m) => m.id === id)) return withOwnStudioOptions(s, { gallery, cloudImageModel: id })
+        if (cloudModelsFor('video').some((m) => m.id === id)) return withOwnStudioOptions(s, { gallery, cloudVideoModel: id })
         return { gallery }
       }),
       updateGalleryItem: (id, patch) =>
@@ -1085,6 +1410,7 @@ export const useCreateStore = create<CreateState>()(
         batchSize: state.batchSize,
         frames: state.frames,
         fps: state.fps,
+        ...restartSampling(state),
         denoise: state.denoise,
         hiresFixEnabled: state.hiresFixEnabled,
         hiresScale: state.hiresScale,
@@ -1102,6 +1428,7 @@ export const useCreateStore = create<CreateState>()(
         //    are additive and merge() backfills missing keys from defaults. ──
         showNegative: state.showNegative,
         selectedLoras: state.selectedLoras,
+        loraStrengths: state.loraStrengths,
         selectedVae: state.selectedVae,
         clipSkip: state.clipSkip,
         growMaskBy: state.growMaskBy,
@@ -1109,6 +1436,10 @@ export const useCreateStore = create<CreateState>()(
         // staged media (blobs / object URLs) and cloudOp are runtime-only.
         musicDuration: state.musicDuration,
         musicHowtoSeen: state.musicHowtoSeen,
+        improvePrompt: state.improvePrompt,
+        improveWith: state.improveWith,
+        qwenTextEncoder: state.qwenTextEncoder,
+        transparentBackground: state.transparentBackground,
         triggerWord: state.triggerWord,
         trainSteps: state.trainSteps,
         // Studio: the picked step's option values are a preference like the
@@ -1172,3 +1503,27 @@ export const useCreateStore = create<CreateState>()(
     }
   )
 )
+
+/** Which pick slot the current sub-category owns. Character Studio USE picks a
+ *  generation endpoint, TRAIN a trainer, so they are two slots. */
+export function opSlot(s: Pick<CreateState, 'characterTab' | 'removebg' | 'utilityOp' | 'cloudOp' | 'mode' | 'imageSubMode' | 'videoSubMode'>): string {
+  const intent = deriveIntent(s)
+  return intent === 'character' && s.characterTab === 'use' ? 'character:use' : intent
+}
+
+// One shared cloudOpModel used to serve lip sync, music, extend, motion and
+// video upscale, so a pick in one sub-category replaced the pick of another
+// (Opus review 02.10.2026). The slot map keeps one pick each, and the single
+// field every reader uses stays, as the mirror of the current slot:
+//   - the slot changed: the field takes that slot's own pick ('' if none yet);
+//   - the field changed inside a slot: that is a pick for the slot, remember it.
+// Runtime-only, nothing is persisted, so there is no stored pick to migrate.
+useCreateStore.subscribe((s, prev) => {
+  const slot = opSlot(s)
+  if (slot !== opSlot(prev)) {
+    const want = s.cloudOpPicks[slot] ?? ''
+    if (s.cloudOpModel !== want) useCreateStore.setState(withOwnStudioOptions(s, { cloudOpModel: want }))
+  } else if (s.cloudOpModel !== prev.cloudOpModel && s.cloudOpPicks[slot] !== s.cloudOpModel) {
+    useCreateStore.setState({ cloudOpPicks: { ...s.cloudOpPicks, [slot]: s.cloudOpModel } })
+  }
+})

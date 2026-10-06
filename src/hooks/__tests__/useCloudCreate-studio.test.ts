@@ -108,7 +108,7 @@ vi.mock('../../api/cloud/studio', () => ({
 import { useCloudCreate } from '../useCloudCreate'
 import { useCreateStore } from '../../stores/createStore'
 import { useCloudCatalogStore } from '../../stores/cloudCatalogStore'
-import { CLOUD_MODEL_SEED } from '../../lib/render/cloud-models'
+import { neuerServer } from '../../lib/render/__tests__/fixtures/test-catalogs'
 
 const BILD = { filename: 'portrait.png', url: 'data:image/png;base64,AA', width: 512, height: 512 }
 const TON = { name: 'voice.mp3', url: 'blob:voice', blob: new Blob(['x']) }
@@ -139,7 +139,7 @@ beforeEach(() => {
   // on the live catalog, `resolveIntentPick` would fall back to a CLASSIC
   // member for every one of these role intents (create-studio.test.ts has
   // the dedicated fallback coverage for the opposite state).
-  useCloudCatalogStore.setState({ models: [...CLOUD_MODEL_SEED, { id: 'test-studio-marker', label: 'x', kind: 'image', quote_required: true }] })
+  useCloudCatalogStore.setState({ models: neuerServer() })
 })
 
 describe('Studio-Modelle in den Create-Unterkategorien', () => {

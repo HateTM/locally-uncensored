@@ -1,4 +1,5 @@
 import type { Persona, Settings } from '../types/settings'
+import { DEFAULT_SEND_WINDOW_TOKENS } from './send-window'
 
 // Feature flags — flip to true when ready to ship
 export const FEATURE_FLAGS = {
@@ -53,6 +54,7 @@ export const DEFAULT_SETTINGS: Settings = {
   // Unlimited by design — see the note on the type.
   loopMaxPasses: 0,
   hfDownloadPathOverride: '',
+  downloadLimitMBps: 0,
   // Generation timeouts (Bug P v2.4.7)
   imageGenTimeoutMinutes: 20,
   videoGenTimeoutMinutes: 60,
@@ -64,7 +66,8 @@ export const DEFAULT_SETTINGS: Settings = {
   // 2.6.6 plan A1/A2: age decay and the paid-provider send cap. ON by
   // default; the switch is the support way back without a rollback release.
   contextDecay: true,
-  codexSendWindowTokens: 64000,
+  codexSendWindowTokens: DEFAULT_SEND_WINDOW_TOKENS,
+  cloudSendWindowByModel: {},
   // 2.6.8: auto-compact is OFF until someone sets a threshold. 0 is the
   // switch, not a tuning value — see the field's comment in types/settings.ts.
   // No STORE_VERSION bump for this key: settingsStore's migrate merges
@@ -121,7 +124,6 @@ export const DEFAULT_SETTINGS: Settings = {
   codexArchitectAllowCloud: false,
   codexRepoMapEnabled: false,
   codexRepoMapLimit: 20,
-  codexStageMode: false,
   codexAutoApply: false,
   codexReviewMode: false,
   // H2 security gate. OFF by default = the autonomous coding agent keeps
@@ -392,11 +394,15 @@ export const ONBOARDING_MODELS: OnboardingModel[] = [
   // under 9B is recommended to run locally: the small ones lose the thread
   // on the second tool call." The flag here is the same curation call, not
   // the wire-format check, so it stays false at 7B.
-  { name: 'qwen2.5-7b', label: 'Qwen 2.5 7B (Starter)', description: '7B chat model, Q4_K_M. Allow additional memory for context and the operating system. Download time and response speed depend on your hardware.', size: '4.4 GiB', vram: 'about 6 GB for GPU offload, context-dependent', vramGB: 6, recommended: true, agent: false, downloadUrl: HF_OB('bartowski/Qwen2.5-7B-Instruct-GGUF', 'Qwen2.5-7B-Instruct-Q4_K_M.gguf'), filename: 'Qwen2.5-7B-Instruct-Q4_K_M.gguf', sizeGB: 4683074240 / 1_073_741_824, expectedBytes: 4683074240, sha256: '65b8fcd92af6b4fefa935c625d1ac27ea29dcb6ee14589c55a8f115ceaaa1423' },
+  // Both onboarding picks are abliterated (David 2026-10-01, after hollow7896
+  // on Discord 2026-09-30: the recommended 9B refused requests). Same base
+  // models, same Q4_K_M quant, so the measured VRAM still holds; size and
+  // SHA-256 are the repo's own LFS metadata, read on 2026-10-01.
+  { name: 'qwen2.5-7b', label: 'Qwen 2.5 7B Abliterated (Starter)', description: '7B chat model without refusals, Q4_K_M. Allow additional memory for context and the operating system. Download time and response speed depend on your hardware.', size: '4.4 GiB', vram: 'about 6 GB for GPU offload, context-dependent', vramGB: 6, recommended: true, agent: false, downloadUrl: HF_OB('QuantFactory/Qwen2.5-7B-Instruct-abliterated-v2-GGUF', 'Qwen2.5-7B-Instruct-abliterated-v2.Q4_K_M.gguf'), filename: 'Qwen2.5-7B-Instruct-abliterated-v2.Q4_K_M.gguf', sizeGB: 4683073920 / 1_073_741_824, expectedBytes: 4683073920, sha256: 'da9272f09cd51d27aaadf37c1a2a3e079763682688aa1601d7406062b0caa5aa' },
   // Second onboarding pick, above the 9B floor getRecommendedAgentModels()
   // names as where tool calls start holding together. Same repo/filename as
-  // the Discover catalog entry (api/discover.ts, getMainstreamTextModels,
-  // name 'Qwen 3.5 9B'); src/lib/__tests__/onboarding-chat-minimum.test.ts
+  // the Discover catalog entry (api/discover.ts, getUncensoredTextModels,
+  // name 'Qwen 3.5 9B Abliterated'); src/lib/__tests__/onboarding-chat-minimum.test.ts
   // pins the two together so they cannot drift apart.
   //
   // NINE_B_VRAM_GB is measured, not guessed: lu-box, RTX 3060 12 GB, all 32
@@ -406,12 +412,12 @@ export const ONBOARDING_MODELS: OnboardingModel[] = [
   // number lives here once; the `vram` and `description` text below read it
   // back rather than repeating a hand-typed copy.
   //
-  // expectedBytes/sha256 come from the same box run: HuggingFace's own LFS
-  // metadata (api/models/unsloth/Qwen3.5-9B-GGUF/tree/main, lfs.size /
-  // lfs.oid for Qwen3.5-9B-Q4_K_M.gguf) and the file Get-FileHash'd on the
-  // box after download agree on both numbers (re-checked against the live
-  // HF API on 2026-09-20, unchanged).
-  { name: 'qwen3.5-9b', label: 'Qwen 3.5 9B', description: `Better for agents and tools. Needs about ${NINE_B_VRAM_GB} GB VRAM, measured on an RTX 3060 with full GPU offload.`, size: '5.3 GiB', vram: `about ${NINE_B_VRAM_GB} GB for GPU offload, context-dependent`, vramGB: NINE_B_VRAM_GB, agent: true, downloadUrl: HF_OB('unsloth/Qwen3.5-9B-GGUF', 'Qwen3.5-9B-Q4_K_M.gguf'), filename: 'Qwen3.5-9B-Q4_K_M.gguf', sizeGB: 5680522464 / 1_073_741_824, expectedBytes: 5680522464, sha256: '03b74727a860a56338e042c4420bb3f04b2fec5734175f4cb9fa853daf52b7e8' },
+  // NINE_B_VRAM_GB was measured on the stock Qwen3.5-9B Q4_K_M; the
+  // abliterated build is the same architecture and quant, 53 MB smaller.
+  // expectedBytes/sha256: HuggingFace's own LFS metadata
+  // (api/models/mradermacher/Qwen3.5-9B-abliterated-GGUF/tree/main, lfs.size /
+  // lfs.oid for Qwen3.5-9B-abliterated.Q4_K_M.gguf), read on 2026-10-01.
+  { name: 'qwen3.5-9b', label: 'Qwen 3.5 9B Abliterated', description: `Better for agents and tools, without refusals. Needs about ${NINE_B_VRAM_GB} GB VRAM, measured on an RTX 3060 with full GPU offload.`, size: '5.2 GiB', vram: `about ${NINE_B_VRAM_GB} GB for GPU offload, context-dependent`, vramGB: NINE_B_VRAM_GB, agent: true, downloadUrl: HF_OB('mradermacher/Qwen3.5-9B-abliterated-GGUF', 'Qwen3.5-9B-abliterated.Q4_K_M.gguf'), filename: 'Qwen3.5-9B-abliterated.Q4_K_M.gguf', sizeGB: 5627045216 / 1_073_741_824, expectedBytes: 5627045216, sha256: '19fadda28b2f4bd939fb4590db978acf8f0d6da274ac7ea8f7f2cdc92f1470a4' },
 ]
 
 /**

@@ -11,7 +11,9 @@
 //
 // Der Zwischenschritt mit den drei Planknoepfen ist geloescht; sein Klick ging
 // ohnehin auf dieselbe Preisseite. `PlanGrid` lebt weiter, denn ein
-// ANGEMELDETES Konto ohne Plan sieht die Plaene unveraendert.
+// ANGEMELDETES Konto ohne Plan sieht die Plaene unveraendert. Ausnahme seit
+// 3.0.5: ist die Verlaengerung geplatzt (`pastDue`), steht dort der Satz aus
+// `lib/past-due.ts` mit dem Weg zur offenen Rechnung, keine Planknoepfe.
 //
 // Jeder Zustand ohne Abo bietet weiter den Weg zurueck auf Local. Sobald
 // deriveCloudAvailable durchgeht, kippt der Modus. Bezahlt wird auf
@@ -29,6 +31,8 @@ import { CLOUD_BASE } from '../../api/cloud/config'
 import { openExternal } from '../../api/backend'
 import { MONOGRAM, MONOGRAM_INVERT } from '../layout/brand'
 import { CLOUD_PITCH, CLOUD_SUBSCRIBER_LINE, cloudSalesLines } from '../../lib/cloud-pitch'
+import { PAST_DUE_ACTION, pastDueLine } from '../../lib/past-due'
+import { Hinweis } from '../ui/Hinweis'
 
 const PLANS = [
   { anchor: 'hosted', name: 'Hosted', price: '€19' },
@@ -68,6 +72,24 @@ function StayLocalButton({ onLocal }: { onLocal: () => void }) {
     >
       <HardDrive size={15} /> Stay on Local
     </button>
+  )
+}
+
+/**
+ * A renewal payment failed and nothing else keeps the account running. The
+ * gate says that, in the account panel's own sentence, and leads to the open
+ * invoice. No plan buttons here: the server refuses a new plan (409) until the
+ * invoice is settled. Paying happens on lu-labs.ai, the app does not touch
+ * Stripe.
+ */
+function PastDueNotice({ tier }: { tier: string | null }) {
+  return (
+    <div className="space-y-3" data-testid="cloud-gate-past-due">
+      <Hinweis ton="fehler">{pastDueLine(tier)}</Hinweis>
+      <button className={primaryBtn} onClick={() => void openExternal(`${CLOUD_BASE}/account`)}>
+        <ExternalLink size={12} /> {PAST_DUE_ACTION}
+      </button>
+    </div>
   )
 }
 
@@ -194,6 +216,8 @@ export function CloudGateModal() {
   const licenseActive = useCloudAuthStore((s) => s.licenseActive)
   const access = useCloudAuthStore((s) => s.access)
   const quota = useCloudAuthStore((s) => s.quota)
+  const pastDue = useCloudAuthStore((s) => s.pastDue)
+  const pastDueTier = useCloudAuthStore((s) => s.pastDueTier)
   const available = deriveCloudAvailable({ user, licenseActive, access, quota })
 
   // Signed-out walkthrough position. Reset to the hero every time the gate
@@ -274,17 +298,30 @@ export function CloudGateModal() {
       ) : !licenseActive ? (
         <div className="space-y-5 pt-2">
           <CloudHero />
-          <div className="space-y-3 max-w-xs mx-auto">
-            <p className="text-[0.72rem] text-center text-gray-600 dark:text-gray-400">
-              You're signed in as <span className="text-gray-900 dark:text-gray-100">{user.email ?? user.id}</span>,
-              but this account has no active plan yet. LU Cloud is part of the paid plans.
-            </p>
-            <PlanGrid />
-            <StayLocalButton onLocal={stayLocal} />
-            <button className={ghostBtn} onClick={() => void refresh()}>
-              <RefreshCw size={12} /> I subscribed, check again
-            </button>
-          </div>
+          {pastDue ? (
+            <div className="space-y-3 max-w-xs mx-auto">
+              <p className="text-[0.72rem] text-center text-gray-600 dark:text-gray-400">
+                You're signed in as <span className="text-gray-900 dark:text-gray-100">{user.email ?? user.id}</span>.
+              </p>
+              <PastDueNotice tier={pastDueTier} />
+              <StayLocalButton onLocal={stayLocal} />
+              <button className={ghostBtn} onClick={() => void refresh()}>
+                <RefreshCw size={12} /> I paid, check again
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-3 max-w-xs mx-auto">
+              <p className="text-[0.72rem] text-center text-gray-600 dark:text-gray-400">
+                You're signed in as <span className="text-gray-900 dark:text-gray-100">{user.email ?? user.id}</span>,
+                but this account has no active plan yet. LU Cloud is part of the paid plans.
+              </p>
+              <PlanGrid />
+              <StayLocalButton onLocal={stayLocal} />
+              <button className={ghostBtn} onClick={() => void refresh()}>
+                <RefreshCw size={12} /> I subscribed, check again
+              </button>
+            </div>
+          )}
         </div>
       ) : !access ? (
         <div className="space-y-5 pt-2">
@@ -319,14 +356,23 @@ export function CloudGateModal() {
         <div className="space-y-5 pt-2">
           <CloudHero />
           <div className="space-y-3 max-w-xs mx-auto">
-            <p className="text-[0.72rem] text-center text-gray-600 dark:text-gray-400">
-              Your plan is active, but it doesn't include a hosted compute credit
-              budget, so there's nothing for Cloud mode to run on. Plans with
-              cloud credits are on lu-labs.ai.
-            </p>
-            <button className={primaryBtn} onClick={() => void openExternal(`${CLOUD_BASE}/account`)}>
-              <ExternalLink size={12} /> Open your account
-            </button>
+            {/* An unpaid account whose pack credits are gone lands here too
+                (status active, tier starter, no budget). "Your plan is
+                active" would be as untrue as "no active plan". */}
+            {pastDue ? (
+              <PastDueNotice tier={pastDueTier} />
+            ) : (
+              <>
+                <p className="text-[0.72rem] text-center text-gray-600 dark:text-gray-400">
+                  Your plan is active, but it doesn't include a hosted compute credit
+                  budget, so there's nothing for Cloud mode to run on. Plans with
+                  cloud credits are on lu-labs.ai.
+                </p>
+                <button className={primaryBtn} onClick={() => void openExternal(`${CLOUD_BASE}/account`)}>
+                  <ExternalLink size={12} /> Open your account
+                </button>
+              </>
+            )}
             <StayLocalButton onLocal={stayLocal} />
             <button className={ghostBtn} onClick={() => void refresh()}>
               <RefreshCw size={12} /> Check again

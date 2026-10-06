@@ -45,14 +45,15 @@ import {
 import { getImageBundles } from '../discover'
 import { localFetch } from '../backend'
 import { nodeOf, nodesOf } from './graph-test-support'
+import { QWEN21_OFFICIAL_MODEL as OFFICIAL_MODEL, NOCT_Q_MODEL, QWEN21_WEIGHTS } from './qwen21-weights'
 
-const MODEL = 'qwen_image_2.1_int8_convrot.safetensors'
 const ENCODER = 'qwen3vl_8b_int8_convrot.safetensors'
 const VAE_FILE = 'qwen_image_2.1_vae_bf16.safetensors'
 
-/** Minimal /object_info for a ComfyUI new enough to run Qwen-Image 2.1. */
-const QWEN_NODES = {
-  UNETLoader: { input: { required: { unet_name: [[MODEL]] } } },
+/** Minimal /object_info for a ComfyUI new enough to run Qwen-Image 2.1, with
+ *  one image model file in the UNETLoader. */
+const qwenNodes = (model: string) => ({
+  UNETLoader: { input: { required: { unet_name: [[model]] } } },
   CLIPLoader: { input: { required: { clip_name: [[ENCODER]] } } },
   VAELoader: { input: { required: { vae_name: [[VAE_FILE]] } } },
   TextEncodeQwenImage21: { input: { required: { clip: ['CLIP'], prompt: ['STRING'], negative_prompt: ['STRING'], resolution: ['INT'] }, optional: { vae: ['VAE'], 'images.image_1': ['IMAGE'] } } },
@@ -62,17 +63,18 @@ const QWEN_NODES = {
   VAEDecode: { input: { required: {} } },
   LoadImage: { input: { required: {} } },
   SaveImage: { input: { required: {} } },
-}
+})
+const OFFICIAL_NODES = qwenNodes(OFFICIAL_MODEL)
 
-const baseParams = {
-  model: MODEL,
+const paramsFor = (model: string) => ({
+  model,
   prompt: 'a red apple on a white plate', negativePrompt: '',
   sampler: 'euler', scheduler: 'simple',
   steps: 25, cfgScale: 1, width: 1024, height: 1024, seed: 42, batchSize: 1,
-}
+})
 
 const emptyModels: AvailableModels = {
-  checkpoints: [], unets: [MODEL], vaes: [VAE_FILE], clips: [ENCODER], motionModels: [],
+  checkpoints: [], unets: [OFFICIAL_MODEL], vaes: [VAE_FILE], clips: [ENCODER], motionModels: [],
 }
 
 function serveEnums(vaes: string[] = [VAE_FILE], clips: string[] = [ENCODER]) {
@@ -89,10 +91,28 @@ function serveEnums(vaes: string[] = [VAE_FILE], clips: string[] = [ENCODER]) {
 
 describe('Qwen-Image 2.1 classification', () => {
   it('names the catalogue file and the spelling variants', () => {
-    expect(classifyModel(MODEL)).toBe('qwenimage')
+    expect(classifyModel(OFFICIAL_MODEL)).toBe('qwenimage')
     expect(classifyModel('qwen_image_2.1_bf16.safetensors')).toBe('qwenimage')
     expect(classifyModel('Qwen-Image-2.1-Q8_0.gguf')).toBe('qwenimage')
     expect(classifyModel('qwenimage_2_1_w4a8.safetensors')).toBe('qwenimage')
+  })
+
+  // Noct Q is a Qwen-Image 2.1 finetune whose file names say neither "qwen"
+  // nor "2.1": the Hugging Face name, a CivitAI style name, a subfolder.
+  it('names the Noct Q finetune under the names it is published with', () => {
+    expect(classifyModel(NOCT_Q_MODEL)).toBe('qwenimage')
+    expect(classifyModel('NoctQ_V3_base_int8_convrot.safetensors')).toBe('qwenimage')
+    expect(classifyModel('noctQ_v4.safetensors')).toBe('qwenimage')
+    expect(classifyModel('noctQQwenImage21_v4Int8.safetensors')).toBe('qwenimage')
+    expect(classifyModel('Noct-Q-V4-fp8.safetensors')).toBe('qwenimage')
+    expect(classifyModel('noct_q_v4_bf16.safetensors')).toBe('qwenimage')
+    expect(classifyModel('qwen\\NoctQ_V4_int8_convrot.safetensors')).toBe('qwenimage')
+  })
+
+  it('COUNTER-CHECK: a name that merely starts like Noct Q is not taken for it', () => {
+    expect(classifyModel('noctquartz_xl.safetensors')).not.toBe('qwenimage')
+    expect(classifyModel('equinoctq.safetensors')).not.toBe('qwenimage')
+    expect(classifyModel('noctaluna_style_sdxl.safetensors')).not.toBe('qwenimage')
   })
 
   // The regression that matters: this classifier also sees VAE and text
@@ -166,7 +186,7 @@ describe('Qwen-Image 2.1 COMPONENT_REGISTRY', () => {
 // ── Strategy gate ───────────────────────────────────────────────────────
 
 describe('determineStrategy, the Qwen-Image 2.1 gate', () => {
-  const full: CategorizedNodes = categorizeNodes(QWEN_NODES as never)
+  const full: CategorizedNodes = categorizeNodes(OFFICIAL_NODES as never)
 
   it('routes to unet_qwenimage when the loaders and the encode node are there', () => {
     const r = determineStrategy('qwenimage', false, full, emptyModels)
@@ -193,7 +213,9 @@ describe('determineStrategy, the Qwen-Image 2.1 gate', () => {
 
 // ── The generate graph ──────────────────────────────────────────────────
 
-describe('buildDynamicWorkflow, Qwen-Image 2.1 generate (no reference image)', () => {
+describe.each(QWEN21_WEIGHTS)('buildDynamicWorkflow, Qwen-Image 2.1 generate (no reference image), %s', (_weights, MODEL) => {
+  const QWEN_NODES = qwenNodes(MODEL)
+  const baseParams = paramsFor(MODEL)
   beforeEach(() => {
     vi.mocked(getAllNodeInfo).mockResolvedValue(QWEN_NODES as never)
     serveEnums()
@@ -275,7 +297,9 @@ describe('buildDynamicWorkflow, Qwen-Image 2.1 generate (no reference image)', (
 
 // ── The edit graph ──────────────────────────────────────────────────────
 
-describe('buildDynamicWorkflow, Qwen-Image 2.1 edit (one reference image)', () => {
+describe.each(QWEN21_WEIGHTS)('buildDynamicWorkflow, Qwen-Image 2.1 edit (one reference image), %s', (_weights, MODEL) => {
+  const QWEN_NODES = qwenNodes(MODEL)
+  const baseParams = paramsFor(MODEL)
   beforeEach(() => {
     vi.mocked(getAllNodeInfo).mockResolvedValue(QWEN_NODES as never)
     serveEnums()
@@ -335,8 +359,8 @@ describe('buildDynamicWorkflow, Qwen-Image 2.1 edit (one reference image)', () =
 
 // ── Companion resolution ────────────────────────────────────────────────
 
-describe('the resolvers pick the 2.1 files, and leave Krea 2 its own', () => {
-  beforeEach(() => { vi.mocked(getAllNodeInfo).mockResolvedValue(QWEN_NODES as never) })
+describe.each(QWEN21_WEIGHTS)('the resolvers pick the 2.1 files, and leave Krea 2 its own, %s', (_weights, MODEL) => {
+  beforeEach(() => { vi.mocked(getAllNodeInfo).mockResolvedValue(qwenNodes(MODEL) as never) })
 
   // A box can hold both families at once now that both are in the Model
   // Manager, and their companion filenames are one tier apart.
@@ -373,15 +397,18 @@ describe('the resolvers pick the 2.1 files, and leave Krea 2 its own', () => {
 describe('Qwen-Image 2.1 bundle', () => {
   const bundle = getImageBundles().find(b => b.workflow === 'qwenimage')
 
-  it('exists exactly once', () => {
-    expect(getImageBundles().filter(b => b.workflow === 'qwenimage')).toHaveLength(1)
+  it('exists exactly once, next to the edition with the other text encoder and the Noct Q finetune', () => {
+    // The two prompt enhancer add-ons share the family and carry no model file.
+    const withModel = getImageBundles().filter(b => b.workflow === 'qwenimage' && b.files.some(f => f.subfolder === 'diffusion_models'))
+    expect(withModel.map(b => b.name)).toEqual(['Qwen-Image 2.1 (Generate and Edit)', 'Qwen-Image 2.1 (No Refusals)', 'Noct Q (Qwen-Image 2.1, Unfiltered)'])
+    expect(withModel[0].name).toBe(bundle!.name)
     expect(bundle).toBeDefined()
   })
 
   it('ships the three files the graph loads, in the three folders it reads', () => {
     const byFolder = Object.fromEntries(bundle!.files.map(f => [f.subfolder, f.filename]))
     expect(bundle!.files).toHaveLength(3)
-    expect(byFolder.diffusion_models).toBe(MODEL)
+    expect(byFolder.diffusion_models).toBe(OFFICIAL_MODEL)
     expect(byFolder.text_encoders).toBe(ENCODER)
     expect(byFolder.vae).toBe(VAE_FILE)
   })
@@ -397,7 +424,7 @@ describe('Qwen-Image 2.1 bundle', () => {
   // byte counts in gibibytes, not the decimal figures on the file listing.
   it('the declared sizes are the measured ones, and the total is their sum', () => {
     const bytes: Record<string, number> = {
-      [MODEL]: 7_256_783_064,
+      [OFFICIAL_MODEL]: 7_256_783_064,
       [ENCODER]: 9_350_798_360,
       [VAE_FILE]: 675_509_688,
     }
@@ -422,5 +449,47 @@ describe('Qwen-Image 2.1 bundle', () => {
 
   it('needs no custom nodes', () => {
     expect(bundle!.customNodes || []).toHaveLength(0)
+  })
+})
+
+// ── Further references (GH #144) ────────────────────────────────────────
+
+describe.each(QWEN21_WEIGHTS)('buildDynamicWorkflow, Qwen-Image 2.1 edit with further references, %s', (_weights, MODEL) => {
+  const QWEN_NODES = qwenNodes(MODEL)
+  const baseParams = paramsFor(MODEL)
+  beforeEach(() => {
+    vi.mocked(getAllNodeInfo).mockResolvedValue(QWEN_NODES as never)
+    serveEnums()
+  })
+
+  it('the source is image_1 and every reference follows as image_2 and up', async () => {
+    const wf = await buildDynamicWorkflow({
+      ...baseParams, inputImage: 'scene.png', denoise: 0.7, referenceImages: ['person.png', 'outfit.png'],
+    } as never)
+    const enc = nodeOf(wf, 'TextEncodeQwenImage21')![1]
+    const loaded = (slot: string) => {
+      const [id] = enc.inputs[slot] as [string, number]
+      return wf[id].inputs!.image
+    }
+    expect(loaded('images.image_1')).toBe('scene.png')
+    expect(loaded('images.image_2')).toBe('person.png')
+    expect(loaded('images.image_3')).toBe('outfit.png')
+    expect(enc.inputs['images.image_4']).toBeUndefined()
+    expect(nodesOf(wf, 'LoadImage')).toHaveLength(3)
+  })
+
+  it('takes no more than three references besides the source', async () => {
+    const wf = await buildDynamicWorkflow({
+      ...baseParams, inputImage: 'scene.png', denoise: 0.7, referenceImages: ['a.png', 'b.png', 'c.png', 'd.png'],
+    } as never)
+    const enc = nodeOf(wf, 'TextEncodeQwenImage21')![1]
+    expect(enc.inputs['images.image_4']).toBeDefined()
+    expect(enc.inputs['images.image_5']).toBeUndefined()
+  })
+
+  // Negative control: references without a source are not an edit at all.
+  it('a generate run ignores references', async () => {
+    const wf = await buildDynamicWorkflow({ ...baseParams, referenceImages: ['person.png'] } as never)
+    expect(nodeOf(wf, 'LoadImage')).toBeUndefined()
   })
 })

@@ -20,7 +20,7 @@ import {
   buildCheckTasksExecutor,
   buildMessageAgentExecutor,
 } from '../agents/agent-task-tools'
-import { applyUniqueEdit } from '../../lib/surgical-edit'
+import { applyEdits, editsFromArgs, type EditSpec } from '../../lib/surgical-edit'
 import { sliceFileReadResult } from '../../lib/file-read-window'
 import { writeTodos, summarizeTodos } from '../../stores/todoStore'
 import { isMlxImageHost, generateMlxImageDataUrl, listMlxImageModels, type MlxImageModel } from '../mlx-image'
@@ -54,6 +54,35 @@ function chatCtx(run?: AgentRunContext): { chatId?: string; workingDirectory?: s
     return { chatId: id, workingDirectory: ws.path }
   }
   return { chatId: id }
+}
+
+/** The file tools whose `path` the workspace guard decides on. */
+const WORKSPACE_PATH_TOOLS = new Set(['file_read', 'file_write', 'file_edit', 'file_list', 'file_search'])
+
+/**
+ * Whether asking the user about this call makes sense at all.
+ *
+ * Two cases where it does not, both from the 3.0.4 box run:
+ * - plain-chat artifact mode: file_write only shows a preview with a Download
+ *   button, nothing touches the disk, so there is nothing to approve;
+ * - a path the workspace guard refuses: the user approved
+ *   `C:\Users\user\Desktop\poem.txt` and got "Path escapes the allowed
+ *   workspace" right after. The guard (resolve_path, via fs_info) answers
+ *   before the card, the call runs straight into the refusal and the model
+ *   retries inside the folder.
+ * Any other answer from the check (missing file, backend error) keeps the card.
+ */
+export async function approvalIsMoot(toolName: string, args: ToolArgs, run?: AgentRunContext): Promise<boolean> {
+  if (toolName === 'file_write' && isChatArtifactMode(run)) return true
+  if (!WORKSPACE_PATH_TOOLS.has(toolName)) return false
+  const path = typeof args.path === 'string' ? args.path : ''
+  if (!path.trim()) return false
+  try {
+    await backendCall('fs_info', { path, ...chatCtx(run) })
+    return false
+  } catch (e) {
+    return /escapes the allowed workspace/i.test(e instanceof Error ? e.message : String(e))
+  }
 }
 
 /**
@@ -162,8 +191,8 @@ const BUILTIN_TOOLS: MCPToolDefinition[] = [
   {
     name: 'todo_write',
     description:
-      'Write and update the plan for a multi-step task. The list is shown to the user live, so it is how they follow a long run. '
-      + 'USE FIRST when a task needs more than about three tool calls, then send it again after each step. '
+      'Write and update the plan the user asked for. The list is shown to the user live. '
+      + 'NEVER send it as a step of its own: send an update together with your next real tool call. '
       + 'Send the COMPLETE list every time: it replaces the previous one, it does not merge.',
     inputSchema: {
       type: 'object',
@@ -268,17 +297,30 @@ const BUILTIN_TOOLS: MCPToolDefinition[] = [
   {
     name: 'file_edit',
     description:
-      'Make a SURGICAL edit to an existing file: replace old_string with new_string. PREFER it over file_write for any change to a file that exists. '
-      + 'old_string must match EXACTLY ONCE: copy the exact text including indentation from a prior file_read and take enough surrounding lines to be unique. '
-      + 'It FAILS with no change when old_string is missing or matches twice; then read the file and retry with more context.',
+      'Edit an existing file, PREFER over file_write: replace old_string, copied from file_read with enough context to match ONE place, with new_string. '
+      + 'Several changes to one file: ONE call with `edits`. No match or several: nothing changes.',
     inputSchema: {
       type: 'object',
       properties: {
-        path: { type: 'string', description: 'Path to the existing file (absolute preferred)' },
-        old_string: { type: 'string', description: 'Exact text to find — must occur exactly once in the file' },
-        new_string: { type: 'string', description: 'Replacement text' },
+        path: { type: 'string', description: 'Existing file' },
+        old_string: { type: 'string', description: 'Text to find' },
+        new_string: { type: 'string', description: 'Replacement' },
+        replace_all: { type: 'boolean', description: 'Replace every match' },
+        edits: {
+          type: 'array',
+          description: 'In order, all or nothing',
+          items: {
+            type: 'object',
+            properties: {
+              old_string: { type: 'string', description: 'Text to find' },
+              new_string: { type: 'string', description: 'Replacement' },
+              replace_all: { type: 'boolean', description: 'Every match' },
+            },
+            required: ['old_string', 'new_string'],
+          },
+        },
       },
-      required: ['path', 'old_string', 'new_string'],
+      required: ['path'],
     },
     category: 'filesystem',
     source: 'builtin',
@@ -416,7 +458,7 @@ const BUILTIN_TOOLS: MCPToolDefinition[] = [
         settings: mediaSettingsSchema({
           denoise: { type: 'number', description: 'Image-to-image strength 0.05 to 1.0 (only with inputImage).' },
           lora: { type: ['string', 'array'], items: { type: 'string' }, description: 'LoRA filename, or an ARRAY of filenames to stack several (chained in order). Matched against the installed LoRAs, extension optional; an unknown name is rejected with the installed list.' },
-          loraStrength: { type: ['number', 'array'], items: { type: 'number' }, description: 'LoRA strength (~0 to 2). One number applies to every LoRA; an array gives one strength per LoRA in the same order.' },
+          loraStrength: { type: ['number', 'array'], items: { type: 'number' }, description: 'LoRA strength, usually 0 to 2, accepted from -10 to 10. One number applies to every LoRA; an array gives one strength per LoRA in the same order.' },
           autoLora: { type: 'boolean', description: 'false = skip the LoRAs\' automatic prompts.' },
           vae: { type: 'string', description: 'Override VAE filename.' },
           clipSkip: { type: 'number', description: 'CLIP skip.' },
@@ -749,7 +791,7 @@ async function executeFileWrite(args: ToolArgs, run?: AgentRunContext): Promise<
   if (isChatArtifactMode(run)) {
     const name = artifactBaseName(path)
     captureChatArtifact(name, content, mimeForName(name), run)
-    return `Created "${name}" (${formatBytes(content.length)}). It is shown to the user right here in the chat with a preview and a Download button — nothing was written to disk. Do not call file_read on it; just tell the user it's ready.`
+    return `Created "${name}" (${formatBytes(content.length)}). It is shown to the user right here in the chat with a preview and a Download button. Nothing was written to disk. Do not call file_read on it; just tell the user it's ready.`
   }
   const data = await backendCall<FsWriteResult>('fs_write', { path, content, ...chatCtx(run) })
   // Rust returns {status: 'saved'|'unchanged', path: <absolute>, bytes}. Surface
@@ -776,16 +818,15 @@ async function executeFileEdit(args: ToolArgs, run?: AgentRunContext): Promise<s
   const bad = missingArgs('file_edit', args, 'path')
   if (bad) return bad
   const path = argString(args, 'path')
-  const oldString = argString(args, 'old_string')
-  if (!oldString) return 'Error: file_edit requires a non-empty old_string. To create a new file use file_write.'
+  const edits = editsFromArgs(args)
+  if (edits.some((e) => !e.old_string)) return 'Error: file_edit requires a non-empty old_string. To create a new file use file_write.'
   // `new_string` wie `content` bei file_write: '' ist ein gültiger Auftrag
   // (Text löschen), ein fehlendes Feld nicht. `argString` zog beides zu ''
   // zusammen — ein vergessenes Argument löschte damit still den Fundtext.
-  if (typeof args.new_string !== 'string') {
+  if (edits.some((e) => e.new_string === undefined)) {
     return 'file_edit: `new_string` is required — the replacement text. '
       + 'Pass "" to delete old_string. Nothing was changed; call file_edit again with it set.'
   }
-  const newString = args.new_string
 
   // Read the CURRENT content (workspace-aware). file_edit only edits an
   // existing text file — for a new file the model must use file_write.
@@ -798,8 +839,9 @@ async function executeFileEdit(args: ToolArgs, run?: AgentRunContext): Promise<s
   if (data.encoding === 'binary' || data.encoding === 'base64') return `Error: file_edit cannot edit a binary file (${path}).`
   const content = typeof data.content === 'string' ? data.content : ''
 
-  const res = applyUniqueEdit(content, oldString, newString)
+  const res = applyEdits(content, edits as EditSpec[])
   if (!res.ok) {
+    const which = res.failedIndex !== undefined ? ` (edit ${res.failedIndex + 1} of ${edits.length}, nothing was applied)` : ''
     switch (res.reason) {
       // Über DIESEN Pfad nicht mehr erreichbar (`old_string` wird oben geprüft,
       // bevor gelesen wird); der Zweig bleibt, weil `EditFailReason` ein
@@ -809,16 +851,18 @@ async function executeFileEdit(args: ToolArgs, run?: AgentRunContext): Promise<s
       case 'noop':
         return 'Error: old_string and new_string are identical, nothing to change.'
       case 'not_found':
-        return `Error: old_string was not found in ${path}. Read the file and copy the exact text (including indentation) you want to replace.`
+        return `Error: old_string was not found in ${path}${which}. Read the file and copy the exact text you want to replace.`
       case 'not_unique':
-        return `Error: old_string matches ${res.matches} places in ${path}. Add surrounding lines so it uniquely identifies ONE location, then retry.`
+        return `Error: old_string matches ${res.matches} places in ${path}${which}. Add surrounding lines so it identifies ONE location, or set replace_all, then retry.`
       default:
         return 'Error: file_edit failed.'
     }
   }
 
   const w = await backendCall<FsWriteResult>('fs_write', { path, content: res.content, ...chatCtx(run) })
-  if (w.status === 'saved' && w.path) return `Edited ${w.path} (1 replacement).`
+  const n = res.replacements ?? 1
+  const note = res.fuzzyCount ? ` ${res.fuzzyCount === 1 ? 'One edit' : `${res.fuzzyCount} edits`} matched with indentation ignored; re-read before editing the same lines again.` : ''
+  if (w.status === 'saved' && w.path) return `Edited ${w.path} (${n} replacement${n === 1 ? '' : 's'}).${note}`
   if (w.status === 'unchanged' && w.path) return `No change written to ${w.path} (content already matched).`
   return JSON.stringify(w)
 }
@@ -840,6 +884,9 @@ async function executeFileList(args: ToolArgs, run?: AgentRunContext): Promise<s
     ...chatCtx(run),
   })
   if (Array.isArray(data.entries)) {
+    // An empty answer read as nothing: the model said "I listed the files"
+    // and named none, the step showed no result (3.0.4 box run).
+    if (!data.entries.length) return 'The folder is empty.'
     return data.entries
       .map((e) => `${e.isDir ? '[DIR]' : ''} ${e.name} (${formatBytes(e.size)})  ${e.path}`)
       .join('\n')
@@ -857,6 +904,7 @@ async function executeFileSearch(args: ToolArgs, run?: AgentRunContext): Promise
     ...chatCtx(run),
   })
   if (Array.isArray(data.results)) {
+    if (!data.results.length) return 'No matches.'
     return data.results
       .map((r) => {
         const matches = r.matches?.map((m) => `  L${m.line}: ${m.text}`).join('\n') || ''

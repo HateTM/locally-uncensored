@@ -1,9 +1,10 @@
+import { itemHasAlpha } from '../../../lib/transparent-image'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Images, Play, PanelRightClose, Trash2, Download, MonitorOff, AudioLines } from 'lucide-react'
-import { downloadMediaUrl } from '../../../lib/download-media'
 import { useCreateStore, type GalleryItem } from '../../../stores/createStore'
 import { galleryLabel } from '../../../lib/render/gallery-label'
-import { GALLERY_DRAG_TYPE, galleryItemUrl } from './galleryUrl'
+import { GALLERY_DRAG_TYPE } from './galleryUrl'
+import { downloadGalleryItem } from './galleryDownload'
 import { useComfyMedia } from './useComfyMedia'
 import { cn } from '../ui/cn'
 
@@ -107,6 +108,7 @@ export function CreatePanel({ open, onOpenChange, activeId, onSelect }: Props) {
                   <div key={g.id} className="relative group">
                     <button
                       onClick={() => onSelect(g.id)}
+                      title={g.sourceName ? `From ${g.sourceName}` : undefined}
                       draggable={g.type === 'image' && !g.unavailable}
                       onDragStart={(e) => {
                         e.dataTransfer.setData(GALLERY_DRAG_TYPE, g.id)
@@ -115,7 +117,7 @@ export function CreatePanel({ open, onOpenChange, activeId, onSelect }: Props) {
                       className={cn(
                         'w-full aspect-square rounded-lg overflow-hidden border-2 transition-colors relative',
                         (activeId ?? gallery[0]?.id) === g.id ? 'border-white/60' : 'border-transparent hover:border-white/20',
-                        g.intent === 'removebg' && 'lu-checker',
+                        itemHasAlpha(g) && 'lu-checker',
                       )}
                     >
                       <GalleryThumb g={g} />
@@ -136,7 +138,7 @@ export function CreatePanel({ open, onOpenChange, activeId, onSelect }: Props) {
                       <Trash2 size={12} />
                     </button>
                     <button
-                      onClick={() => { void downloadMediaUrl(galleryItemUrl(g), g.filename || undefined) }}
+                      onClick={() => { void downloadGalleryItem(g) }}
                       className="absolute bottom-1 right-1 w-6 h-6 rounded-md bg-black/55 hover:bg-black/70 text-gray-100 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center shadow-sm"
                       title="Download"
                     >
